@@ -26,21 +26,32 @@ This is the foundation of the **Skill Resolver Protocol** (see `_shared/skill-re
 
 ### Step 1: Scan User Skills
 
-1. Glob for `*/SKILL.md` files across ALL known skill directories. Check every path below — scan ALL that exist, not just the first match:
+1. Glob for `*/SKILL.md` files across ALL known skill directories. These mirror the
+   per-harness install targets in `skills/manifest.json`. Check every path below — scan
+   ALL that exist, not just the first match:
 
    **User-level (global skills):**
    - `~/.claude/skills/` — Claude Code
    - `~/.config/opencode/skills/` — OpenCode
    - `~/.gemini/skills/` — Gemini CLI
+   - `~/.codex/skills/` — Codex
    - `~/.cursor/skills/` — Cursor
    - `~/.copilot/skills/` — VS Code Copilot
-   - The parent directory of this skill file (catch-all for any tool)
+   - `~/.gemini/antigravity/skills/` — Antigravity
+   - **The parent directory of this skill file** — the catch-all: ATL's own skills are
+     co-located wherever it was installed, so scanning the parent dir picks up the active
+     harness target even if it is not in the explicit list above. The named paths are the
+     known install targets; this catch-all is the mechanism that always covers the current one.
 
    **Project-level (workspace skills):**
    - `{project-root}/.claude/skills/` — Claude Code
+   - `{project-root}/.config/opencode/skills/` — OpenCode
    - `{project-root}/.gemini/skills/` — Gemini CLI
-   - `{project-root}/.agent/skills/` — Antigravity (workspace)
-   - `{project-root}/skills/` — Generic
+   - `{project-root}/.codex/skills/` — Codex
+   - `{project-root}/.cursor/skills/` — Cursor
+   - `{project-root}/.copilot/skills/` — VS Code Copilot
+   - `{project-root}/.gemini/antigravity/skills/` — Antigravity (workspace)
+   - `{project-root}/skills/` — Generic (project-local)
 
 2. **SKIP `sdd-*` and `_shared`** — those are SDD workflow skills, not coding/task skills
 3. Also **SKIP `skill-registry`** — that's this skill

@@ -54,6 +54,10 @@ $MarkerEnd = '<!-- END:agent-teams-lite -->'
 $GaiMarkerBegin = '<!-- gentle-ai:sdd-orchestrator -->'
 $GaiMarkerEnd = '<!-- /gentle-ai:sdd-orchestrator -->'
 
+# Pinned npm dependency for the OpenCode background-agents plugin.
+# Version-locked and installed with --ignore-scripts to limit supply-chain risk.
+$UniqueNamesGeneratorVersion = '4.7.1'
+
 # Content headings that indicate orchestrator is already present
 $OrchestratorHeadings = @(
     '## Agent Teams Orchestrator',
@@ -82,7 +86,7 @@ $PromptPaths = @{
 $ExampleFiles = @{
     'claude-code' = Join-Path $ExamplesDir 'claude-code\CLAUDE.md'
     'gemini-cli'  = Join-Path $ExamplesDir 'gemini-cli\GEMINI.md'
-    'cursor'      = Join-Path $ExamplesDir 'cursor\.cursorrules'
+    'cursor'      = Join-Path $ExamplesDir 'cursor\.cursor\rules\sdd-orchestrator.mdc'
     'vscode'      = Join-Path $ExamplesDir 'vscode\copilot-instructions.md'
     'codex'       = Join-Path $ExamplesDir 'codex\agents.md'
 }
@@ -177,6 +181,62 @@ function Install-Skills {
 }
 
 # ============================================================================
+# Safe File Operations
+# Mirror the bash setup.sh guarantees: never truncate user content, always back
+# up before modifying, and replace files atomically via a temp file + move.
+# ============================================================================
+
+function Assert-BalancedMarkers {
+    param(
+        [string]$Content,
+        [string]$Begin,
+        [string]$End,
+        [string]$Label,
+        [string]$Path
+    )
+    # A marker pair present on only one side (BEGIN without END, or vice versa)
+    # would make the regex replace below either no-op (false success) or, worse,
+    # match too greedily. Refuse to touch the file instead of risking data loss.
+    $hasBegin = $Content -match [regex]::Escape($Begin)
+    $hasEnd = $Content -match [regex]::Escape($End)
+    if ($hasBegin -ne $hasEnd) {
+        $missing = if ($hasBegin) { $End } else { $Begin }
+        throw "Unbalanced $Label markers in $Path (missing '$missing'). Refusing to modify the file to avoid data loss. Fix the markers and re-run."
+    }
+}
+
+function Backup-File {
+    param([string]$Path)
+    if (Test-Path $Path) {
+        $ts = Get-Date -Format 'yyyyMMddHHmmss'
+        $backup = "$Path.bak.$ts"
+        Copy-Item -Path $Path -Destination $backup -Force
+        Write-Info "Backup written: $backup"
+    }
+}
+
+function Write-AtomicFile {
+    param(
+        [string]$Path,
+        [string]$Content,
+        [switch]$NoNewline
+    )
+    # Write to a temp file in the SAME directory, then move over the target so an
+    # interrupted write can never leave the destination half-written.
+    $dir = Split-Path -Parent $Path
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $tmp = Join-Path $dir ("." + [System.IO.Path]::GetRandomFileName() + ".tmp")
+    if ($NoNewline) {
+        Set-Content -Path $tmp -Value $Content -NoNewline
+    } else {
+        Set-Content -Path $tmp -Value $Content
+    }
+    Move-Item -Path $tmp -Destination $Path -Force
+}
+
+# ============================================================================
 # Setup Orchestrator Prompt (idempotent with markers)
 # ============================================================================
 
@@ -188,6 +248,16 @@ function Set-Orchestrator {
     $promptDir = Split-Path -Parent $PromptPath
     New-Item -ItemType Directory -Path $promptDir -Force | Out-Null
 
+    # Cursor's target is a dedicated .mdc file owned by this tool, and .mdc YAML
+    # frontmatter must start at byte 0 — marker wrapping would break it. Copy the
+    # generated rule verbatim (with backup) instead of marker-merging.
+    if ($AgentName -eq 'cursor') {
+        if (Test-Path $PromptPath) { Backup-File -Path $PromptPath }
+        Write-AtomicFile -Path $PromptPath -Content (Get-Content -Path $ExampleFile -Raw)
+        Write-Info "Wrote $PromptPath (verbatim .mdc copy)"
+        return
+    }
+
     # Strip preamble (human-readable header) — only inject from "## Agent Teams" onward
     $rawContent = Get-Content -Path $ExampleFile -Raw
     if ($rawContent -match '(?s)(## Agent Teams.*)') {
@@ -198,19 +268,27 @@ function Set-Orchestrator {
 
     if (Test-Path $PromptPath) {
         $existing = Get-Content -Path $PromptPath -Raw
+
+        # Guard against data loss from an unbalanced marker pair before rewriting.
+        Assert-BalancedMarkers -Content $existing -Begin $MarkerBegin -End $MarkerEnd -Label 'agent-teams-lite' -Path $PromptPath
+        Assert-BalancedMarkers -Content $existing -Begin $GaiMarkerBegin -End $GaiMarkerEnd -Label 'gentle-ai' -Path $PromptPath
+
         if ($existing -match [regex]::Escape($MarkerBegin)) {
-            # Our markers exist — replace content between them
+            # Our markers exist — replace content between them. Markers are
+            # balanced (asserted above), so the replace is guaranteed to match.
+            Backup-File $PromptPath
             $pattern = "(?s)$([regex]::Escape($MarkerBegin)).*?$([regex]::Escape($MarkerEnd))"
             $replacement = "$MarkerBegin`n$content`n$MarkerEnd"
             $updated = [regex]::Replace($existing, $pattern, $replacement)
-            Set-Content -Path $PromptPath -Value $updated -NoNewline
+            Write-AtomicFile -Path $PromptPath -Content $updated -NoNewline
             Write-Ok "Orchestrator updated in $PromptPath"
         } elseif ($existing -match [regex]::Escape($GaiMarkerBegin)) {
             # gentle-ai markers exist — replace with ours
+            Backup-File $PromptPath
             $pattern = "(?s)$([regex]::Escape($GaiMarkerBegin)).*?$([regex]::Escape($GaiMarkerEnd))"
             $replacement = "$MarkerBegin`n$content`n$MarkerEnd"
             $updated = [regex]::Replace($existing, $pattern, $replacement)
-            Set-Content -Path $PromptPath -Value $updated -NoNewline
+            Write-AtomicFile -Path $PromptPath -Content $updated -NoNewline
             Write-Ok "Orchestrator updated in $PromptPath (replaced gentle-ai section)"
         } else {
             # Check if orchestrator content already exists (no markers)
@@ -228,16 +306,17 @@ function Set-Orchestrator {
                 Write-Info "  $MarkerBegin"
                 Write-Info "  $MarkerEnd"
             } else {
-                # No existing content — append with markers
-                $appendContent = "`n`n$MarkerBegin`n$content`n$MarkerEnd"
-                Add-Content -Path $PromptPath -Value $appendContent
+                # No existing content — append our marked section atomically
+                Backup-File $PromptPath
+                $appendContent = "$existing`n`n$MarkerBegin`n$content`n$MarkerEnd"
+                Write-AtomicFile -Path $PromptPath -Content $appendContent -NoNewline
                 Write-Ok "Orchestrator appended to $PromptPath"
             }
         }
     } else {
         # Create new file
         $newContent = "$MarkerBegin`n$content`n$MarkerEnd"
-        Set-Content -Path $PromptPath -Value $newContent
+        Write-AtomicFile -Path $PromptPath -Content $newContent
         Write-Ok "Orchestrator created at $PromptPath"
     }
 }
@@ -348,7 +427,9 @@ function Set-OpenCode {
                     $existing.PSObject.Properties.Remove('agents')
                 }
 
-                $existing | ConvertTo-Json -Depth 10 | Set-Content -Path $configFile
+                Backup-File $configFile
+                $mergedJson = $existing | ConvertTo-Json -Depth 10
+                Write-AtomicFile -Path $configFile -Content $mergedJson
                 Write-Ok "Agent config merged into $configFile ($($script:OpenCodeMode) mode)"
             }
             catch {
@@ -376,15 +457,28 @@ function Set-OpenCode {
     $pluginsDir = Join-Path $env:USERPROFILE '.config\opencode\plugins'
     $pluginSrc = Join-Path $ScriptRoot '..\examples\opencode\plugins\background-agents.ts'
     New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
-    Copy-Item -Path $pluginSrc -Destination (Join-Path $pluginsDir 'background-agents.ts') -Force
-    Write-Ok "background-agents plugin installed -> $pluginsDir"
-    Write-Info "Installing npm dependency: unique-names-generator"
-    Push-Location (Join-Path $env:USERPROFILE '.config\opencode')
-    try {
-        npm install unique-names-generator
-        Write-Ok "unique-names-generator installed"
-    } finally {
-        Pop-Location
+    if (Test-Path $pluginSrc) {
+        Copy-Item -Path $pluginSrc -Destination (Join-Path $pluginsDir 'background-agents.ts') -Force
+        Write-Ok "background-agents plugin installed -> $pluginsDir"
+    } else {
+        Write-Warn "Plugin source not found: $pluginSrc (skipped)"
+    }
+
+    # Install the plugin's npm dependency. Pin the exact version and disable
+    # lifecycle scripts so a compromised release cannot execute code during setup.
+    # Degrade gracefully (warn, don't abort) when npm is unavailable.
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        Write-Info "Installing npm dependency: unique-names-generator@$UniqueNamesGeneratorVersion"
+        Push-Location (Join-Path $env:USERPROFILE '.config\opencode')
+        try {
+            npm install --ignore-scripts "unique-names-generator@$UniqueNamesGeneratorVersion"
+            Write-Ok "unique-names-generator@$UniqueNamesGeneratorVersion installed"
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Warn 'npm not found - skipping unique-names-generator dependency'
+        Write-Info "Install it manually: cd $env:USERPROFILE\.config\opencode && npm install --ignore-scripts unique-names-generator@$UniqueNamesGeneratorVersion"
     }
 }
 

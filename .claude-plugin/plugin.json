@@ -1,0 +1,33 @@
+{
+  "name": "agent-teams-lite",
+  "version": "5.0.0-dev",
+  "description": "Spec-Driven Development for AI coding agents: a delegate-only orchestrator plus a portable SKILL.md pipeline (explore -> propose -> spec || design -> tasks -> apply -> verify -> archive) with optional adversarial review and an opt-in TDD module.",
+  "author": {
+    "name": "Gentleman Programming",
+    "url": "https://github.com/Gentleman-Programming"
+  },
+  "homepage": "https://github.com/Gentleman-Programming/agent-teams-lite",
+  "repository": "https://github.com/Gentleman-Programming/agent-teams-lite",
+  "license": "MIT",
+  "keywords": [
+    "spec-driven-development",
+    "sdd",
+    "agent-skills",
+    "orchestrator",
+    "tdd",
+    "code-review"
+  ],
+  "skills": "./skills",
+  "agents": [
+    "./examples/claude-code/agents/sdd-init.md",
+    "./examples/claude-code/agents/sdd-explore.md",
+    "./examples/claude-code/agents/sdd-propose.md",
+    "./examples/claude-code/agents/sdd-spec.md",
+    "./examples/claude-code/agents/sdd-design.md",
+    "./examples/claude-code/agents/sdd-tasks.md",
+    "./examples/claude-code/agents/sdd-apply.md",
+    "./examples/claude-code/agents/sdd-verify.md",
+    "./examples/claude-code/agents/sdd-archive.md"
+  ],
+  "hooks": "./examples/claude-code/hooks/hooks.json"
+}

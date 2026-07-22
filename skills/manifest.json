@@ -1,0 +1,58 @@
+{
+  "name": "agent-teams-lite",
+  "manifestVersion": 1,
+  "shared": "_shared",
+  "groups": {
+    "sdd-core": {
+      "description": "Core SDD pipeline plus base authoring utilities. Always installed; cannot be excluded.",
+      "default": true,
+      "required": true
+    },
+    "quality": {
+      "description": "Optional adversarial code-review skills. Installed by default; opt out with --without quality.",
+      "default": true,
+      "required": false
+    },
+    "optional": {
+      "description": "Optional language/testing skills. Installed by default; opt out with --without optional.",
+      "default": true,
+      "required": false
+    },
+    "tdd": {
+      "description": "Optional TDD module: the RED-GREEN-REFACTOR protocol skill (skills/tdd). Opt-in only, NOT installed by default; enable with --with tdd.",
+      "default": false,
+      "required": false
+    }
+  },
+  "skills": [
+    { "name": "sdd-explore", "group": "sdd-core" },
+    { "name": "sdd-propose", "group": "sdd-core" },
+    { "name": "sdd-spec", "group": "sdd-core" },
+    { "name": "sdd-design", "group": "sdd-core" },
+    { "name": "sdd-tasks", "group": "sdd-core" },
+    { "name": "sdd-apply", "group": "sdd-core" },
+    { "name": "sdd-verify", "group": "sdd-core" },
+    { "name": "sdd-archive", "group": "sdd-core" },
+    { "name": "sdd-init", "group": "sdd-core" },
+    { "name": "sdd-new", "group": "sdd-core" },
+    { "name": "sdd-continue", "group": "sdd-core" },
+    { "name": "sdd-ff", "group": "sdd-core" },
+    { "name": "skill-registry", "group": "sdd-core" },
+    { "name": "skill-creator", "group": "sdd-core" },
+    { "name": "branch-pr", "group": "sdd-core" },
+    { "name": "issue-creation", "group": "sdd-core" },
+    { "name": "judgment-day", "group": "quality" },
+    { "name": "go-testing", "group": "optional" },
+    { "name": "tdd", "group": "tdd" }
+  ],
+  "targets": {
+    "claude-code": { "skills": ".claude/skills" },
+    "opencode": { "skills": ".config/opencode/skills", "commands": ".config/opencode/commands" },
+    "gemini-cli": { "skills": ".gemini/skills" },
+    "codex": { "skills": ".codex/skills" },
+    "vscode": { "skills": ".copilot/skills" },
+    "antigravity": { "skills": ".gemini/antigravity/skills" },
+    "cursor": { "skills": ".cursor/skills" },
+    "project-local": { "skills": "skills" }
+  }
+}

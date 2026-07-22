@@ -10,6 +10,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 SKILLS_SRC="$REPO_DIR/skills"
+MANIFEST_FILE="$SKILLS_SRC/manifest.json"
+VERSION_FILE="$REPO_DIR/VERSION"
+
+# Name of the per-target install manifest (records version + installed files so
+# upgrades can detect leftovers and uninstall.sh can remove exactly what we wrote).
+INSTALL_MANIFEST_NAME=".atl-install-manifest.json"
+
+# Skill-group selection. Groups come from skills/manifest.json; sdd-core is
+# mandatory, quality + optional are on by default and opt-out via --without,
+# and tdd is opt-in only (off by default, enabled with --with tdd).
+# The surrounding single spaces let membership be tested with a case glob.
+ACTIVE_GROUPS=" sdd-core quality optional "
+REQUIRED_GROUPS=" sdd-core "
+
+# Every group name the flags accept (default-on ones plus opt-in ones). Kept in
+# sync with skills/manifest.json "groups"; drives validation + the rebuild loop.
+KNOWN_GROUPS="sdd-core quality optional tdd"
+
+# Populated from the manifest once flags are parsed (see compute_active_skills).
+ACTIVE_SKILLS=()
 
 # ============================================================================
 # OS Detection
@@ -102,7 +122,10 @@ get_tool_path() {
             esac
             ;;
         vscode)
-            echo ".vscode/skills"
+            case "$OS" in
+                windows)  echo "$USERPROFILE/.copilot/skills" ;;
+                *)        echo "$HOME/.copilot/skills" ;;
+            esac
             ;;
         antigravity)
             case "$OS" in
@@ -172,11 +195,160 @@ show_help() {
     echo "Usage: install.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --agent NAME    Install for a specific agent (non-interactive)"
-    echo "  --path DIR      Custom install path (use with --agent custom)"
-    echo "  -h, --help      Show this help"
+    echo "  --agent NAME     Install for a specific agent (non-interactive)"
+    echo "  --path DIR       Custom install path (use with --agent custom)"
+    echo "  --with GROUP     Include an optional skill group (quality, optional, tdd)"
+    echo "  --without GROUP  Exclude an optional skill group (quality, optional)"
+    echo "  --version        Print the Agent Teams Lite version and exit"
+    echo "  -h, --help       Show this help"
     echo ""
     echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, project-local, all-global"
+    echo ""
+    echo "Skill groups:"
+    echo "  sdd-core   Core SDD pipeline + authoring utilities (always installed)"
+    echo "  quality    Adversarial review skills, e.g. judgment-day (on by default; --without quality to skip)"
+    echo "  optional   Language/testing skills, e.g. go-testing (on by default; --without optional to skip)"
+    echo "  tdd        Optional TDD module (RED-GREEN-REFACTOR), skills/tdd (opt-in; --with tdd to enable)"
+}
+
+# ============================================================================
+# Version + manifest helpers
+# ============================================================================
+
+read_version() {
+    local v="unknown"
+    if [ -f "$VERSION_FILE" ]; then
+        IFS= read -r v < "$VERSION_FILE" || true
+        [ -n "$v" ] || v="unknown"
+    fi
+    printf '%s' "$v"
+}
+
+print_version() {
+    printf 'agent-teams-lite %s\n' "$(read_version)"
+}
+
+# Emit "<name> <group>" for every skill declared in skills/manifest.json.
+# Uses jq when available, otherwise a portable awk fallback (bash 3.2 / BSD awk)
+# that parses only the "skills" array and reads name+group from the same line.
+manifest_skill_lines() {
+    [ -f "$MANIFEST_FILE" ] || return 1
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.skills[] | "\(.name) \(.group)"' "$MANIFEST_FILE"
+        return 0
+    fi
+    awk '
+        /"skills"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
+        inarr && /\]/ { inarr = 0 }
+        inarr {
+            name = ""; group = ""
+            if (match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
+                s = substr($0, RSTART, RLENGTH)
+                sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
+                sub(/".*/, "", s)
+                name = s
+            }
+            if (match($0, /"group"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
+                g = substr($0, RSTART, RLENGTH)
+                sub(/.*"group"[[:space:]]*:[[:space:]]*"/, "", g)
+                sub(/".*/, "", g)
+                group = g
+            }
+            if (name != "" && group != "") print name " " group
+        }
+    ' "$MANIFEST_FILE"
+}
+
+group_is_active() {
+    case "$ACTIVE_GROUPS" in
+        *" $1 "*) return 0 ;;
+        *)        return 1 ;;
+    esac
+}
+
+validate_group_name() {
+    case "$1" in
+        sdd-core|quality|optional|tdd) return 0 ;;
+        *)
+            print_error "Unknown skill group: $1 (valid: quality, optional, tdd)"
+            exit 1
+            ;;
+    esac
+}
+
+enable_group() {
+    local g="$1"
+    case "$ACTIVE_GROUPS" in
+        *" $g "*) return 0 ;;
+    esac
+    ACTIVE_GROUPS="$ACTIVE_GROUPS$g "
+}
+
+disable_group() {
+    local g="$1"
+    case "$REQUIRED_GROUPS" in
+        *" $g "*)
+            print_error "Group '$g' is required and cannot be excluded"
+            exit 1
+            ;;
+    esac
+    local rebuilt=" " tok
+    for tok in $KNOWN_GROUPS; do
+        case "$ACTIVE_GROUPS" in
+            *" $tok "*)
+                [ "$tok" = "$g" ] && continue
+                rebuilt="$rebuilt$tok "
+                ;;
+        esac
+    done
+    ACTIVE_GROUPS="$rebuilt"
+}
+
+# Resolve the active skill set from the manifest + the current group selection.
+compute_active_skills() {
+    ACTIVE_SKILLS=()
+    local name group
+    while IFS=' ' read -r name group; do
+        [ -n "$name" ] || continue
+        if group_is_active "$group"; then
+            ACTIVE_SKILLS+=("$name")
+        fi
+    done < <(manifest_skill_lines)
+
+    if [ "${#ACTIVE_SKILLS[@]}" -eq 0 ]; then
+        print_error "No skills selected — could not read $MANIFEST_FILE"
+        exit 1
+    fi
+}
+
+# Record what we installed under a target so upgrades and uninstall.sh can act on
+# an exact file list. "$files" is a newline-delimited list of target-relative
+# paths; blank lines are ignored.
+write_install_manifest() {
+    local target_dir="$1"
+    local tool_name="$2"
+    local files="$3"
+    local manifest_path="$target_dir/$INSTALL_MANIFEST_NAME"
+    local version
+    version="$(read_version)"
+
+    make_writable "$manifest_path"
+    {
+        printf '{\n'
+        printf '  "name": "agent-teams-lite",\n'
+        printf '  "version": "%s",\n' "$version"
+        printf '  "tool": "%s",\n' "$tool_name"
+        printf '  "files": [\n'
+        printf '%s\n' "$files" | awk 'NF { list[n++] = $0 }
+            END {
+                for (i = 0; i < n; i++) {
+                    sep = (i < n - 1) ? "," : ""
+                    printf "    \"%s\"%s\n", list[i], sep
+                }
+            }'
+        printf '  ]\n'
+        printf '}\n'
+    } > "$manifest_path"
 }
 
 # ============================================================================
@@ -195,6 +367,10 @@ validate_source() {
         print_error "Missing: _shared/ directory"
         missing=$((missing + 1))
     fi
+    if [ ! -f "$MANIFEST_FILE" ]; then
+        print_error "Missing: skills/manifest.json (the skill list source of truth)"
+        missing=$((missing + 1))
+    fi
     if [ "$missing" -gt 0 ]; then
         echo -e "\n${RED}${BOLD}Source validation failed.${NC} Is this a complete clone of the repository?"
         echo -e "  Try: ${CYAN}git clone https://github.com/Gentleman-Programming/agent-teams-lite.git${NC}\n"
@@ -210,6 +386,9 @@ install_skills() {
 
     mkdir -p "$target_dir"
 
+    # Newline-delimited list of target-relative paths we write (for the manifest).
+    local installed_files=""
+
     # Copy shared convention files (_shared/)
     local shared_src="$SKILLS_SRC/_shared"
     local shared_target="$target_dir/_shared"
@@ -221,7 +400,9 @@ install_skills() {
         }
         for shared_file in "$shared_src"/*.md; do
             if [ -f "$shared_file" ]; then
-                cp "$shared_file" "$shared_target/" 
+                cp "$shared_file" "$shared_target/"
+                installed_files="$installed_files
+_shared/$(basename "$shared_file")"
                 shared_count=$((shared_count + 1))
             fi
         done
@@ -233,18 +414,11 @@ install_skills() {
     fi
 
     local count=0
-    # Install all distributable skills
-    for skill_dir in \
-        "$SKILLS_SRC"/sdd-*/ \
-        "$SKILLS_SRC"/skill-registry/ \
-        "$SKILLS_SRC"/judgment-day/ \
-        "$SKILLS_SRC"/go-testing/ \
-        "$SKILLS_SRC"/skill-creator/ \
-        "$SKILLS_SRC"/branch-pr/ \
-        "$SKILLS_SRC"/issue-creation/; do
+    local skill_name skill_dir
+    # Install the active skill set resolved from skills/manifest.json.
+    for skill_name in "${ACTIVE_SKILLS[@]}"; do
+        skill_dir="$SKILLS_SRC/$skill_name"
         [ -d "$skill_dir" ] || continue
-        local skill_name
-        skill_name=$(basename "$skill_dir")
 
         # Verify source SKILL.md exists before creating target directory
         if [ ! -f "$skill_dir/SKILL.md" ]; then
@@ -259,9 +433,13 @@ install_skills() {
             make_writable "$target_dir/$skill_name/SKILL.md"
         fi
         cp "$skill_dir/SKILL.md" "$target_dir/$skill_name/SKILL.md"
+        installed_files="$installed_files
+$skill_name/SKILL.md"
         print_skill "$skill_name"
         count=$((count + 1))
     done
+
+    write_install_manifest "$target_dir" "$tool_name" "$installed_files"
 
     echo -e "\n  ${GREEN}${BOLD}$count skills installed${NC} → $target_dir"
 }
@@ -291,6 +469,9 @@ install_opencode_commands() {
 # Agent install dispatcher
 # ============================================================================
 
+# The "~/..." strings below are human-readable display hints echoed to the user,
+# not paths this script resolves, so tilde expansion is intentionally not wanted.
+# shellcheck disable=SC2088
 install_for_agent() {
     local agent="$1"
 
@@ -306,8 +487,9 @@ install_for_agent() {
             echo -e "${YELLOW}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
             echo -e "${YELLOW}${BOLD}║  ACTION REQUIRED: Add the sdd-orchestrator agent config     ║${NC}"
             echo -e "${YELLOW}${BOLD}║                                                              ║${NC}"
-            echo -e "${YELLOW}${BOLD}║  Copy the agent block from:                                  ║${NC}"
-            echo -e "${YELLOW}${BOLD}║    examples/opencode/opencode.json                           ║${NC}"
+            echo -e "${YELLOW}${BOLD}║  Copy an agent block from one of:                            ║${NC}"
+            echo -e "${YELLOW}${BOLD}║    examples/opencode/opencode.single.json  (default)         ║${NC}"
+            echo -e "${YELLOW}${BOLD}║    examples/opencode/opencode.multi.json   (per-phase)       ║${NC}"
             echo -e "${YELLOW}${BOLD}║  Into your:                                                  ║${NC}"
             echo -e "${YELLOW}${BOLD}║    ~/.config/opencode/opencode.json                          ║${NC}"
             echo -e "${YELLOW}${BOLD}║                                                              ║${NC}"
@@ -333,7 +515,7 @@ install_for_agent() {
             ;;
         cursor)
             install_skills "$(get_tool_path cursor)" "Cursor"
-            print_next_step ".cursorrules" "examples/cursor/.cursorrules"
+            print_next_step ".cursor/rules/sdd-orchestrator.mdc" "examples/cursor/.cursor/rules/sdd-orchestrator.mdc"
             ;;
         project-local)
             install_skills "$(get_tool_path project-local)" "Project-local"
@@ -349,10 +531,10 @@ install_for_agent() {
             echo -e "\n${YELLOW}Next steps:${NC}"
             echo -e "  1. Add orchestrator to ${BOLD}~/.claude/CLAUDE.md${NC}"
             echo -e "  2. ${YELLOW}${BOLD}[REQUIRED]${NC} Add orchestrator agent to ${BOLD}~/.config/opencode/opencode.json${NC}"
-            echo -e "     ${YELLOW}See: examples/opencode/opencode.json — without this, /sdd-* commands won't work${NC}"
+            echo -e "     ${YELLOW}See: examples/opencode/opencode.single.json (or opencode.multi.json) — without this, /sdd-* commands won't work${NC}"
             echo -e "  3. Add orchestrator to ${BOLD}~/.gemini/GEMINI.md${NC}"
             echo -e "  4. Add orchestrator to ${BOLD}Codex instructions file${NC}"
-            echo -e "  5. Add SDD rules to ${BOLD}.cursorrules${NC}"
+            echo -e "  5. Add SDD rules to .cursor/rules/sdd-orchestrator.mdc"
             ;;
         custom)
             if [[ -z "${CUSTOM_PATH:-}" ]]; then
@@ -421,8 +603,11 @@ AGENT=""
 CUSTOM_PATH=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --agent)  AGENT="$2"; shift 2 ;;
-        --path)   CUSTOM_PATH="$2"; shift 2 ;;
+        --agent)   AGENT="$2"; shift 2 ;;
+        --path)    CUSTOM_PATH="$2"; shift 2 ;;
+        --with)    validate_group_name "$2"; enable_group "$2"; shift 2 ;;
+        --without) validate_group_name "$2"; disable_group "$2"; shift 2 ;;
+        --version) print_version; exit 0 ;;
         -h|--help) show_help; exit 0 ;;
         *)  echo "Unknown option: $1"; show_help; exit 1 ;;
     esac
@@ -430,6 +615,7 @@ done
 
 print_header
 validate_source
+compute_active_skills
 
 if [[ -n "$AGENT" ]]; then
     # Non-interactive mode

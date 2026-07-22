@@ -17,6 +17,7 @@ Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI ass
 | **Implementer** | `sdd-apply/SKILL.md` | Writes code following specs and design, marks tasks complete. v2.0: TDD workflow support |
 | **Verifier** | `sdd-verify/SKILL.md` | Validates implementation against specs with real test execution. v2.0: spec compliance matrix |
 | **Archiver** | `sdd-archive/SKILL.md` | Merges delta specs into main specs, moves to archive |
+| **TDD Module** | `tdd/SKILL.md` | Optional RED-GREEN-REFACTOR cycle contract; loaded by `sdd-apply` when TDD resolves active, referenced by `sdd-tasks` and `sdd-verify`. Opt-in `tdd` manifest group, not installed by default |
 | **Skill Registry** | `skill-registry/SKILL.md` | Scans user skills + project conventions, writes `.atl/skill-registry.md` |
 | **Judgment Day** | `judgment-day/SKILL.md` | Runs dual adversarial review with two blind judges and a fix loop |
 | **Go Testing** | `go-testing/SKILL.md` | Shared conventions for Go tests, including Bubbletea and teatest patterns |
@@ -24,35 +25,29 @@ Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI ass
 | **Branch + PR** | `branch-pr/SKILL.md` | Branches changes and opens pull requests with repo conventions |
 | **Issue Creation** | `issue-creation/SKILL.md` | Creates GitHub issues with the repo's structured templates |
 
+### Meta-Skills (Workflow Entry Points)
+
+Three thin skills sit above the phase table and drive it, instead of executing
+a single phase themselves. They are real, user-invocable skills (not
+orchestrator-only prompt text) that ship as `skills/sdd-new/SKILL.md`,
+`skills/sdd-continue/SKILL.md`, and `skills/sdd-ff/SKILL.md`. They are
+registered in the required `sdd-core` group in `skills/manifest.json`, so the
+manifest-driven `setup.sh`/`install.sh` install all three by default — no
+manual copy step is needed:
+
+| Meta-Skill | Skill File | What It Does |
+|------------|-----------|-------------|
+| **Start** | `sdd-new/SKILL.md` | Starts a new SDD change: delegates exploration and proposal for a fresh change name |
+| **Resume** | `sdd-continue/SKILL.md` | Resumes an existing change from persisted state; runs the next dependency-ready phase in the DAG |
+| **Fast-forward** | `sdd-ff/SKILL.md` | Auto-continues through the remaining planning phases without a per-phase approval pause |
+
 ### Sub-Agent Result Contract
 
-Each sub-agent must return a structured envelope with these fields:
-
-| Field | Description |
-|-------|-------------|
-| `status` | `success`, `partial`, or `blocked` |
-| `executive_summary` | 1-3 sentence summary of what was done |
-| `detailed_report` | (optional) Full phase output, or omit if already inline |
-| `artifacts` | List of artifact keys/paths written |
-| `next_recommended` | The next SDD phase to run, or "none" |
-| `risks` | Risks discovered, or "None" |
-| `skill_resolution` | `injected`, `fallback-registry`, `fallback-path`, or `none` |
-
-Example:
-
-```markdown
-**Status**: success
-**Summary**: Proposal created for `{change-name}`. Defined scope, approach, and rollback plan.
-**Artifacts**: Engram `sdd/{change-name}/proposal` | `openspec/changes/{change-name}/proposal.md`
-**Next**: sdd-spec or sdd-design
-**Risks**: None
-```
-
-`executive_summary` is intentionally short. `detailed_report` can be as long as needed for complex architecture work.
+Every sub-agent returns a structured envelope (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`) to the orchestrator. The canonical field list, description, and example live in [`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md), Section D — see it there instead of duplicating it here.
 
 ### Sub-Agent Context Protocol
 
-Sub-agents start with a **fresh context**. The orchestrator is responsible for resolving the skill registry once, matching relevant skills, and injecting compact rules into the sub-agent prompt as `## Project Standards (auto-resolved)`. If that block is missing, sub-agents fall back to registry lookup or explicit `SKILL: Load` paths.
+Sub-agents start with a **fresh context**. The canonical injection and fallback protocol — how the orchestrator resolves the registry, matches skills, injects compact rules as `## Project Standards (auto-resolved)`, and how sub-agents report `skill_resolution` back — lives in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md); this section only summarizes it: if no `## Project Standards` block arrives, sub-agents fall back to registry lookup or explicit `SKILL: Load` paths.
 
 Sub-agents are also instructed to save discoveries, decisions, and bug fixes to engram automatically (non-SDD sub-agents) or via the mandatory persist step (SDD phases).
 
@@ -60,14 +55,16 @@ Sub-agents are also instructed to save discoveries, decisions, and bug fixes to 
 
 ## Shared Conventions
 
-All skills reference three shared convention files in `skills/_shared/`. Critical engram calls (`mem_search`, `mem_save`, `mem_get_observation`) are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
+`skills/_shared/` contains six files. `sdd-phase-common.md` is loaded directly by all 8 SDD phase skills (explore through archive) — it is the most load-bearing shared file in the system. Critical engram calls (`mem_search`, `mem_save`, `mem_get_observation`) are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
 
 | File | Purpose |
 |------|---------|
+| `sdd-phase-common.md` | Sections A-D: skill loading, artifact retrieval, persistence, and the return envelope. Loaded directly by every SDD phase skill. |
 | `persistence-contract.md` | Mode resolution rules, sub-agent context protocol, skill registry loading protocol |
 | `engram-convention.md` | Supplementary reference for deterministic naming (`sdd/{change-name}/{artifact-type}`) and two-step recovery. Critical calls are inlined in skills. |
-| `openspec-convention.md` | Filesystem paths for each artifact, directory structure, config.yaml reference, and archive layout |
-| `skill-resolver.md` | Universal protocol for delegators to inject compact rules from the skill registry |
+| `openspec-convention.md` | Filesystem paths for each artifact, directory structure, config.yaml reference, and archive layout. **Not** the upstream OpenSpec CLI format — see the note at the top of that file. |
+| `skill-resolver.md` | **Canonical** protocol for delegators to inject compact rules from the skill registry |
+| `test-runners.md` | Per-runner detect → full-suite + single-test command table, used by the optional TDD module (`skills/tdd/SKILL.md`) |
 
 **Why inline + shared:**
 - **Sub-agents fail multi-hop chains** — A 3-hop read chain (skill → convention file → actual instructions) breaks non-Claude models. Inlining the critical calls eliminates this.
@@ -80,14 +77,12 @@ All skills reference three shared convention files in `skills/_shared/`. Critica
 
 Sub-agents start with a **fresh context** — they do not know what user skills exist (React, TDD, Playwright, etc.). The skill registry solves this, and the orchestrator uses it to inject compact rules before each delegation.
 
-**How it works:**
+**How the registry gets built:**
 1. `/sdd-init` or `/skill-registry` scans your installed skills and project conventions
 2. Writes `.atl/skill-registry.md` in the project root (mode-independent, always created)
 3. If engram is available, also saves to engram (cross-session bonus)
-4. The orchestrator reads the registry once and caches the **Compact Rules** section plus the trigger table
-5. For each delegation, the orchestrator injects matching rules as `## Project Standards (auto-resolved)`
-6. Fallback order if standards were not injected: `mem_search(query: "skill-registry", project: "{project}")` → `.atl/skill-registry.md` → explicit `SKILL: Load` paths
-7. Delegations report `skill_resolution` so the orchestrator can detect and repair cache loss after compaction
+
+Once the registry exists, resolving it and injecting compact rules into each delegation follows the canonical protocol in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) — see that file for the full resolution order, injection format, fallback chain, and the `skill_resolution` feedback loop.
 
 **Preferred path:** the orchestrator pre-resolves compact rules. Sub-agent self-loading is only a compatibility fallback.
 
@@ -102,7 +97,9 @@ Sub-agents start with a **fresh context** — they do not know what user skills 
 
 ## Per-Agent Model Routing
 
-Each agent can have a `model` field in `opencode.json` that defines which model it should use. When the orchestrator delegates via `delegate(prompt, agent)` or `Task`, the background-agents plugin passes the `model` through to `session.prompt()`, so the sub-agent runs on its configured model.
+`opencode.multi.json` gives each `sdd-<phase>` agent its own entry in `opencode.json`, and any of them can carry a `model` field to select which model it should use. When the orchestrator delegates via `delegate(prompt, agent)` or `Task`, the background-agents plugin passes the `model` through to `session.prompt()`, so the sub-agent runs on its configured model.
+
+Per-agent model routing is a **multi**-mode feature only. `opencode.single.json` defines the orchestrator agent alone — each SDD phase runs as a subtask of the orchestrator and inherits its model, since there is no separate per-phase agent to attach a `model` field to.
 
 **Example** (`opencode.multi.json`):
 
@@ -121,6 +118,61 @@ Each agent can have a `model` field in `opencode.json` that defines which model 
 }
 ```
 
-For single-model setups (`opencode.single.json`), omit the `model` field entirely — all agents inherit OpenCode's global default model.
-
 **Alternative: `@agent-name` text mentions.** OpenCode also supports routing via `@agent-name` mentions in the orchestrator's output, which triggers native agent routing. This is an alternative to `delegate()` but is NOT required — `delegate()` handles model routing correctly.
+
+---
+
+## Native Claude Code Subagents (optional)
+
+Claude Code supports declarative subagents defined as Markdown files with
+frontmatter, as an alternative to the generic
+`Task(subagent_type: 'general', prompt: 'Read skill...')` pattern the
+orchestrator uses by default. This repo ships one such definition per SDD
+phase in [`examples/claude-code/agents/`](../examples/claude-code/agents/):
+`sdd-init.md`, `sdd-explore.md`, `sdd-propose.md`, `sdd-spec.md`,
+`sdd-design.md`, `sdd-tasks.md`, `sdd-apply.md`, `sdd-verify.md`,
+`sdd-archive.md`.
+
+Each file's frontmatter declares `name`, `description`, `tools`, and `model`;
+the body instructs the subagent to load its phase's `SKILL.md` before acting.
+Model routing mirrors the Model Assignments table already used for generic
+delegation, but is declarative instead of a table the orchestrator has to
+read and cache every session:
+
+| Phase | Model |
+|-------|-------|
+| `sdd-design` | `opus` |
+| `sdd-apply` | `opus` |
+| All others (`sdd-init`, `sdd-explore`, `sdd-propose`, `sdd-spec`, `sdd-tasks`, `sdd-verify`, `sdd-archive`) | `sonnet` |
+
+This is an alternative to, not a replacement for, the generic Task-tool
+pattern above — installing `examples/claude-code/agents/` is optional. A
+project that skips it keeps working exactly as before, with the orchestrator
+resolving skills and models itself per the Model Assignments table in
+[`examples/claude-code/CLAUDE.md`](../examples/claude-code/CLAUDE.md).
+
+---
+
+## Agent Teams Mode (experimental, optional, off by default)
+
+For two specific parallel use cases — the two blind judges in
+`judgment-day/SKILL.md`, and the `spec ∥ design` phase pair in the canonical
+DAG — Claude Code's experimental agent-teams mode
+(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) can run the participants as
+teammates with a shared task list instead of the orchestrator sequencing two
+separate delegations. This is entirely optional and OFF by default:
+
+- The default path — the "SDD Phase Sub-Agents" table above — never requires
+  agent teams, and remains the supported path across all 7 harnesses.
+- Agent-teams mode is Claude-Code-specific and experimental; ATL does not
+  depend on it, ship it enabled, or gate any phase behind it.
+- When a user enables it in their own Claude Code configuration, the same
+  `examples/claude-code/agents/sdd-spec.md` / `sdd-design.md` definitions and
+  the two judge roles in `judgment-day/SKILL.md` can be reused as teammate
+  definitions — no separate agent-teams-specific files are shipped.
+
+ATL's "Level 2" position — delegate-only lead, DAG-based phases, parallel
+`spec ∥ design`, no shared task queue or peer-to-peer messaging — described in
+[docs/architecture.md](architecture.md) is unaffected: agent-teams mode is an
+optional accelerator for two already-parallel points in the DAG, not a
+redefinition of the orchestration model.

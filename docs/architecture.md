@@ -137,64 +137,17 @@ graph TB
 
 ## The Dependency Graph
 
-```
-                    proposal
-                   (root node)
-                       │
-         ┌─────────────┴─────────────┐
-         │                           │
-         ▼                           ▼
-      specs                       design
-   (requirements                (technical
-    + scenarios)                 approach)
-         │                           │
-         └─────────────┬─────────────┘
-                       │
-                       ▼
-                    tasks
-                (implementation
-                  checklist)
-                       │
-                       ▼
-                    apply
-                (write code)
-                       │
-                       ▼
-                    verify
-               (quality gate)
-                       │
-                       ▼
-                   archive
-              (merge specs,
-               close change)
-```
+The canonical phase DAG — `explore → propose → (spec ∥ design) → tasks → apply
+→ verify → archive` — is declared once in
+[`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md).
+See it there instead of duplicating the graph here; the "Where Agent Teams Lite
+Fits" diagram above renders the same flow visually.
 
 ---
 
 ## Sub-Agent Result Contract
 
-Each sub-agent must return a structured envelope with these fields:
-
-| Field | Description |
-|-------|-------------|
-| `status` | `success`, `partial`, or `blocked` |
-| `executive_summary` | 1-3 sentence summary of what was done |
-| `detailed_report` | (optional) Full phase output, or omit if already inline |
-| `artifacts` | List of artifact keys/paths written |
-| `next_recommended` | The next SDD phase to run, or "none" |
-| `risks` | Risks discovered, or "None" |
-
-Example:
-
-```markdown
-**Status**: success
-**Summary**: Proposal created for `{change-name}`. Defined scope, approach, and rollback plan.
-**Artifacts**: Engram `sdd/{change-name}/proposal` | `openspec/changes/{change-name}/proposal.md`
-**Next**: sdd-spec or sdd-design
-**Risks**: None
-```
-
-`executive_summary` is intentionally short. `detailed_report` can be as long as needed for complex architecture work.
+Every sub-agent returns a structured envelope (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`) to the orchestrator. The canonical field list, description, and example live in [`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md), Section D — see it there instead of duplicating it here.
 
 ---
 
@@ -204,13 +157,24 @@ Example:
 agent-teams-lite/
 ├── README.md                          ← Project overview and quick start
 ├── LICENSE
-├── skills/                            ← 15 skill files + shared conventions
+├── VERSION                            ← Version source of truth; installers and skills/manifest.json reference it
+├── gemini-extension.json              ← Gemini CLI extension manifest (GEMINI.md + skills/); alternative to manual copy
+├── .claude-plugin/                    ← Claude Code plugin packaging (alternative to manual copy)
+│   ├── plugin.json                    ← name/version (from VERSION)/description/skills path
+│   └── marketplace.json               ← Single-entry marketplace example for `/plugin marketplace add`
+├── skills/                            ← 19 skill files + shared conventions
+│   ├── manifest.json                  ← Declares every skill (group: sdd-core | quality | optional | tdd) + per-harness install targets; installers read this instead of a hardcoded list
 │   ├── _shared/                       ← Shared conventions (referenced by all skills)
+│   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: Sections A-D (skill loading, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
 │   │   ├── persistence-contract.md    ← Mode resolution, sub-agent context protocol, skill loading
 │   │   ├── engram-convention.md       ← Supplementary: deterministic naming & recovery
-│   │   ├── openspec-convention.md     ← File paths, directory structure, config reference
-│   │   └── skill-resolver.md          ← Orchestrator protocol for compact-rule injection
+│   │   ├── openspec-convention.md     ← File paths, directory structure, config reference — ATL's own convention, NOT the upstream OpenSpec CLI format
+│   │   ├── skill-resolver.md          ← Canonical orchestrator protocol for compact-rule injection
+│   │   └── test-runners.md            ← Per-runner detect → full-suite + single-test command table, used by the optional TDD module
 │   ├── sdd-init/SKILL.md             ← Bootstraps project + builds skill registry
+│   ├── sdd-new/SKILL.md              ← Meta-skill: starts a new SDD change (exploration + proposal)
+│   ├── sdd-continue/SKILL.md         ← Meta-skill: resumes a change from persisted state
+│   ├── sdd-ff/SKILL.md               ← Meta-skill: fast-forwards remaining phases with auto-continue
 │   ├── sdd-explore/SKILL.md
 │   ├── sdd-propose/SKILL.md
 │   ├── sdd-spec/SKILL.md
@@ -223,31 +187,48 @@ agent-teams-lite/
 │   ├── judgment-day/SKILL.md         ← Dual blind review + fix loop
 │   ├── go-testing/SKILL.md           ← Shared Go test patterns
 │   ├── skill-creator/SKILL.md        ← Creates new skills from templates
+│   ├── tdd/SKILL.md                  ← Optional RED-GREEN-REFACTOR module (opt-in `tdd` group, not installed by default)
 │   ├── issue-creation/SKILL.md       ← GitHub issue creation workflow
 │   └── branch-pr/SKILL.md            ← Branch + pull request workflow
 ├── docs/                              ← Deep-dive documentation
 │   ├── architecture.md               ← This file: system design and structure
+│   ├── changelog.md                  ← Release history
+│   ├── concepts.md                   ← Delta specs, RFC 2119 keywords, archive cycle
+│   ├── installation.md               ← Per-tool setup (automated + manual + plugin/extension)
+│   ├── migration.md                  ← Breaking-change and upgrade guide across phases
+│   ├── persistence.md                ← Artifact store modes and OpenSpec file structure
+│   ├── sub-agents.md                 ← SDD phase sub-agent reference, native subagents, and agent-teams mode
+│   ├── tdd.md                        ← Optional TDD module: activation, cycle, verify audits
+│   ├── hooks.md                      ← Optional Claude Code hooks: prose-to-mechanism quality gates
 │   └── token-economics.md            ← Token cost analysis and delegation savings
-├── examples/                          ← Config examples per tool
-│   ├── claude-code/CLAUDE.md
+├── examples/                          ← Config examples per tool — generated from _templates/, see below
+│   ├── _templates/                    ← SSOT: core.md (shared orchestrator body) + one {harness}.md overlay per harness; scripts/build-examples.sh assembles both into every file below
+│   ├── claude-code/
+│   │   ├── CLAUDE.md                  ← GENERATED — edit _templates/, then run scripts/build-examples.sh
+│   │   ├── agents/                    ← Native subagents, one per SDD phase (model: opus for sdd-design/sdd-apply, sonnet for the rest)
+│   │   └── hooks/                     ← Optional PreToolUse + archive-gate hooks (hooks.json + scripts + README); opt-in, not installed by default
 │   ├── opencode/
 │   │   ├── AGENTS.md                  ← OpenCode orchestrator prompt referenced by config
-│   │   ├── opencode.single.json       ← Ready-to-use config (all agents, default model)
-│   │   ├── opencode.multi.json        ← Template config (all agents, customize model per phase)
+│   │   ├── opencode.single.json       ← Orchestrator agent only; phases run as subtasks
+│   │   ├── opencode.multi.json        ← Orchestrator + dedicated sdd-<phase> agents, model customizable per phase
 │   │   ├── commands/sdd-*.md          ← Slash commands for OpenCode
 │   │   └── plugins/background-agents.ts ← Async background delegation plugin (both modes)
 │   ├── gemini-cli/GEMINI.md
 │   ├── codex/agents.md
 │   ├── vscode/copilot-instructions.md
 │   ├── antigravity/sdd-orchestrator.md
-│   └── cursor/.cursorrules
+│   └── cursor/.cursor/rules/sdd-orchestrator.mdc
 └── scripts/
     ├── setup.sh                       ← Full setup: detect + install + configure (Unix)
     ├── setup.ps1                      ← Full setup: detect + install + configure (Windows)
-    ├── install.sh                     ← Skills-only installer (Unix)
-    └── install.ps1                    ← Skills-only installer (Windows)
+    ├── install.sh                     ← Skills-only installer (Unix); reads skills/manifest.json
+    ├── install.ps1                    ← Skills-only installer (Windows); reads skills/manifest.json
+    ├── install_test.sh                ← Regression test suite for install.sh
+    ├── uninstall.sh                   ← Removes exactly what an install manifest recorded
+    └── build-examples.sh              ← Assembles examples/_templates/ into every examples/* orchestrator file (portable bash 3.2/BSD)
 
 # Generated in target projects (not in this repo):
 .atl/
-└── skill-registry.md                  ← Auto-generated skill catalog for sub-agents
+├── skill-registry.md                  ← Auto-generated skill catalog for sub-agents
+└── sdd/{change-name}/                 ← Engram fallback store (unavailable-at-start or mid-cycle mem_save failure)
 ```

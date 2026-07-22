@@ -2,7 +2,7 @@
  * background-agents
  * Unified delegation system for OpenCode
  *
- * Replaces native `task` tool with persistent, async-first agent delegation.
+ * Adds persistent, async-first agent delegation alongside the native `task` tool.
  * All agent outputs are persisted to storage, orchestrator receives only key references.
  *
  * Based on oh-my-opencode by @code-yeongyu (MIT License)
@@ -12,7 +12,7 @@
  * https://github.com/kdcokenny/opencode-background-agents
  *
  * Adaptations:
- * - Inlined kdco-primitives (types, getProjectId, logWarn, withTimeout, TimeoutError)
+ * - Inlined kdco-primitives (types, getProjectId, withTimeout, TimeoutError)
  * - Exported as `BackgroundAgents` (matching the Engram plugin convention)
  * - All imports resolved to available node_modules
  */
@@ -63,22 +63,6 @@ async function withTimeout<T>(
       }, ms)
     }),
   ])
-}
-
-// ==========================================
-// INLINED: kdco-primitives/log-warn
-// ==========================================
-
-function logWarn(
-  client: OpencodeClient | undefined,
-  service: string,
-  message: string,
-): void {
-  if (!client) {
-    console.warn(`[${service}] ${message}`)
-    return
-  }
-  client.app.log({ body: { service, level: "warn", message } }).catch(() => {})
 }
 
 // ==========================================
@@ -236,19 +220,19 @@ ${resultContent.slice(0, 2000)}
 Respond with ONLY valid JSON in this exact format:
 {"title": "Your Title Here", "description": "Your description here."}`
 
-    // Await prompt response directly with timeout safety net
+    // Await prompt response with a timeout safety net.
+    // withTimeout clears its own timer on settle (no leaked setTimeout).
     const PROMPT_TIMEOUT_MS = 30000
-    const result = await Promise.race([
+    const result = await withTimeout(
       client.session.prompt({
         path: { id: session.data.id },
         body: {
           parts: [{ type: "text", text: prompt }],
         },
       }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Prompt timeout after 30s")), PROMPT_TIMEOUT_MS),
-      ),
-    ])
+      PROMPT_TIMEOUT_MS,
+      "generateMetadata prompt timed out after 30s",
+    )
 
     // Extract text from the response
     const responseParts = result.data?.parts as TextPart[] | undefined
@@ -364,86 +348,35 @@ function createLogger(client: OpencodeClient) {
 type Logger = ReturnType<typeof createLogger>
 
 // ==========================================
-// AGENT CAPABILITY DETECTION
+// AGENT RESOLUTION
 // ==========================================
 
 /**
- * Parse agent mode at boundary.
- * Returns trusted type indicating if agent is a sub-agent.
+ * List the agents that can be targeted by `delegate` — sub-agents plus any
+ * unrestricted agent. Used to build the delegate tool's guidance dynamically
+ * from the agents actually configured, instead of hardcoding names that may
+ * not exist in this setup. Returns an empty array on failure (the caller then
+ * falls back to generic guidance).
  */
-async function parseAgentMode(
+async function listDelegatableAgents(
   client: OpencodeClient,
-  agentName: string,
   log: Logger,
-): Promise<{ isSubAgent: boolean }> {
+): Promise<{ name: string; description?: string }[]> {
   try {
     const result = await client.app.agents({})
-    const agents = (result.data ?? []) as { name: string; mode?: string }[]
-    const agent = agents.find((a) => a.name === agentName)
-    return { isSubAgent: agent?.mode === "subagent" }
+    const agents = (result.data ?? []) as {
+      name: string
+      description?: string
+      mode?: string
+    }[]
+    return agents
+      .filter((a) => a.mode === "subagent" || a.mode === "all" || !a.mode)
+      .map((a) => ({ name: a.name, description: a.description }))
   } catch (error) {
-    // Fail-safe: Agent list errors shouldn't block task calls
-    // Fail-loud: Log for observability
     log.warn(
-      `Agent list fetch failed for "${agentName}", assuming non-sub-agent: ${error instanceof Error ? error.message : String(error)}`,
+      `listDelegatableAgents: failed to fetch agents: ${error instanceof Error ? error.message : String(error)}`,
     )
-    return { isSubAgent: false }
-  }
-}
-
-/**
- * Permission entry type: simple value or pattern object.
- * Matches CLI schema: z.union([z.enum(["ask", "allow", "deny"]), z.record(z.enum(...))])
- */
-type PermissionEntry = "ask" | "allow" | "deny" | Record<string, "ask" | "allow" | "deny">
-
-/**
- * Check if a permission entry denies access (Law 4: Fail Fast).
- * Handles both simple values ("deny") and pattern objects ({ "*": "deny" }).
- */
-function isPermissionDenied(entry: PermissionEntry | undefined): boolean {
-  if (entry === undefined) return false
-  if (entry === "deny") return true
-  if (typeof entry === "object" && entry["*"] === "deny") return true
-  return false
-}
-
-/**
- * Parse agent write capability at boundary.
- * Returns trusted type indicating if agent is read-only.
- *
- * An agent is read-only when ALL of: edit, write, and bash are denied.
- * Permission schema supports both simple ("deny") and pattern ({ "*": "deny" }) values.
- */
-async function parseAgentWriteCapability(
-  client: OpencodeClient,
-  agentName: string,
-  log: Logger,
-): Promise<{ isReadOnly: boolean }> {
-  try {
-    const config = await client.config.get()
-    const configData = config.data as {
-      agent?: Record<
-        string,
-        {
-          permission?: Record<string, PermissionEntry>
-        }
-      >
-    }
-    const permission = configData?.agent?.[agentName]?.permission ?? {}
-
-    const editDenied = isPermissionDenied(permission.edit)
-    const writeDenied = isPermissionDenied(permission.write)
-    const bashDenied = isPermissionDenied(permission.bash)
-
-    return { isReadOnly: editDenied && writeDenied && bashDenied }
-  } catch (error) {
-    // Fail-safe: Config errors shouldn't block task calls
-    // Fail-loud: Log for observability
-    log.warn(
-      `Config fetch failed for "${agentName}", assuming write-capable: ${error instanceof Error ? error.message : String(error)}`,
-    )
-    return { isReadOnly: false }
+    return []
   }
 }
 
@@ -489,6 +422,11 @@ class DelegationManager {
   private log: Logger
   // Track pending delegations per parent session for batched notifications
   private pendingByParent: Map<string, Set<string>> = new Map()
+  // Cap on terminal (non-running) delegations retained in memory. Completed
+  // results are also persisted to disk, so listing past delegations keeps
+  // working after eviction — this only bounds the process-lifetime footprint
+  // so the Map cannot grow without limit during a long session.
+  private static readonly MAX_COMPLETED_IN_MEMORY = 50
 
   constructor(client: OpencodeClient, baseDir: string, log: Logger) {
     this.client = client
@@ -667,6 +605,7 @@ class DelegationManager {
         delegation.completedAt = new Date()
         this.persistOutput(delegation, `Error: ${error.message}`)
         this.notifyParent(delegation)
+        this.pruneCompleted()
       })
 
     return delegation
@@ -685,21 +624,28 @@ class DelegationManager {
     delegation.completedAt = new Date()
     delegation.error = `Delegation timed out after ${MAX_RUN_TIME_MS / 1000}s`
 
-    // Try to cancel the session
+    // Capture whatever partial result exists BEFORE deleting the session.
+    // getResult reads the child session's messages, which are gone once the
+    // session is deleted — so the previous delete-first order silently lost
+    // the partial output this branch promises to persist.
+    const result = await this.getResult(delegation)
+    delegation.result = result
+    await this.persistOutput(delegation, `${result}\n\n[TIMEOUT REACHED]`)
+
+    // Now cancel/clean up the child session
     try {
       await this.client.session.delete({
         path: { id: delegation.sessionID },
       })
     } catch {
-      // Ignore
+      // Ignore — session may already be gone
     }
-
-    // Get whatever result was produced so far
-    const result = await this.getResult(delegation)
-    await this.persistOutput(delegation, `${result}\n\n[TIMEOUT REACHED]`)
 
     // Notify parent session
     await this.notifyParent(delegation)
+
+    // Bound in-memory history now that this delegation is terminal + persisted
+    this.pruneCompleted()
   }
 
   /**
@@ -751,6 +697,9 @@ class DelegationManager {
 
     // Notify parent session
     await this.notifyParent(delegation)
+
+    // Bound in-memory history now that this delegation is terminal + persisted
+    this.pruneCompleted()
   }
 
   /**
@@ -959,19 +908,32 @@ Use delegation_read(id) to retrieve the full result.`
   async listDelegations(sessionID: string): Promise<DelegationListItem[]> {
     const results: DelegationListItem[] = []
 
-    // Add in-memory delegations that match this session (or parent)
+    // Only include in-memory delegations that belong to THIS session tree.
+    // Delegations are keyed by their own readable ID (not by session), so
+    // without this scope check the Map leaked every concurrent session's
+    // delegations into every listing. Match the caller session or its root,
+    // mirroring how the compaction hook filters running delegations.
+    const rootID = await this.getRootSessionID(sessionID)
     for (const delegation of this.delegations.values()) {
+      if (
+        delegation.parentSessionID !== sessionID &&
+        delegation.parentSessionID !== rootID
+      ) {
+        continue
+      }
       results.push({
         id: delegation.id,
         status: delegation.status,
         title: delegation.title || "(generating...)",
         description: delegation.description || "(generating...)",
+        agent: delegation.agent,
       })
     }
 
-    // Check filesystem for persisted delegations
+    // Check filesystem for persisted delegations (reuse the already-resolved
+    // root ID so we don't walk the parent chain a second time).
     try {
-      const dir = await this.getDelegationsDir(sessionID)
+      const dir = path.join(this.baseDir, rootID)
       const files = await fs.readdir(dir)
 
       for (const file of files) {
@@ -1016,47 +978,6 @@ Use delegation_read(id) to retrieve the full result.`
   }
 
   /**
-   * Delete a delegation by id (cancels if running, removes from storage)
-   * Used internally for cleanup (timeout, etc.)
-   */
-  async deleteDelegation(sessionID: string, id: string): Promise<boolean> {
-    // Find delegation by id
-    let delegationId: string | undefined
-    for (const [dId, d] of this.delegations) {
-      if (d.id === id) {
-        delegationId = dId
-        break
-      }
-    }
-
-    if (delegationId) {
-      const delegation = this.delegations.get(delegationId)
-      if (delegation?.status === "running") {
-        try {
-          await this.client.session.delete({
-            path: { id: delegation.sessionID },
-          })
-        } catch {
-          // Session may already be deleted
-        }
-        delegation.status = "cancelled"
-        delegation.completedAt = new Date()
-      }
-      this.delegations.delete(delegationId)
-    }
-
-    // Remove from filesystem
-    try {
-      const dir = await this.getDelegationsDir(sessionID)
-      const filePath = path.join(dir, `${id}.md`)
-      await fs.unlink(filePath)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  /**
    * Find a delegation by its session ID
    */
   findBySession(sessionID: string): Delegation | undefined {
@@ -1093,22 +1014,35 @@ Use delegation_read(id) to retrieve the full result.`
   }
 
   /**
-   * Get recent completed delegations for compaction injection
+   * Evict the oldest terminal delegations from memory once the in-memory
+   * history exceeds MAX_COMPLETED_IN_MEMORY. Running delegations are never
+   * evicted, and persisted results remain readable from disk, so this only
+   * bounds the process-lifetime memory footprint.
    */
-  async getRecentCompletedDelegations(
-    sessionID: string,
-    limit: number = 10,
-  ): Promise<DelegationListItem[]> {
-    const all = await this.listDelegations(sessionID)
-    return all.filter((d) => d.status !== "running").slice(-limit)
+  private pruneCompleted(): void {
+    const terminal = Array.from(this.delegations.values()).filter(
+      (d) => d.status !== "running",
+    )
+    const excess = terminal.length - DelegationManager.MAX_COMPLETED_IN_MEMORY
+    if (excess <= 0) return
+
+    terminal.sort(
+      (a, b) => (a.completedAt?.getTime() ?? 0) - (b.completedAt?.getTime() ?? 0),
+    )
+    for (let i = 0; i < excess; i++) {
+      this.delegations.delete(terminal[i].id)
+    }
   }
 
   /**
-   * Log debug messages
+   * Log debug messages (opt-in).
    */
   async debugLog(msg: string): Promise<void> {
-    // Only log if debug is enabled (could be env var or static const)
-    // For now, mirroring previous behavior but writing to the new baseDir/debug.log
+    // Debug logging is opt-in: set ATL_BG_DEBUG=1 to write a rotation-free
+    // trace log to baseDir. Disabled by default so the plugin never appends
+    // to disk on every operation.
+    if (!process.env.ATL_BG_DEBUG) return
+
     const timestamp = new Date().toISOString()
     const line = `${timestamp}: ${msg}\n`
     const debugFile = path.join(this.baseDir, "background-agents-debug.log")
@@ -1131,7 +1065,10 @@ interface DelegateArgs {
   agent: string
 }
 
-function createDelegate(manager: DelegationManager): ReturnType<typeof tool> {
+function createDelegate(
+  manager: DelegationManager,
+  agentGuidance: string,
+): ReturnType<typeof tool> {
   return tool({
     description: `Delegate a task to an agent. Returns immediately with a readable ID.
 
@@ -1146,11 +1083,7 @@ Use \`delegation_read(id)\` to retrieve the full result. Results are persisted t
       prompt: tool.schema
         .string()
         .describe("The full detailed prompt for the agent. Must be in English."),
-      agent: tool.schema
-        .string()
-        .describe(
-          'Agent to delegate to: "explore" (codebase search), "researcher" (external research), "scribe" (docs/commits), or "general".',
-        ),
+      agent: tool.schema.string().describe(agentGuidance),
     },
     async execute(args: DelegateArgs, toolCtx: ToolContext): Promise<string> {
       if (!toolCtx?.sessionID) {
@@ -1373,9 +1306,19 @@ export const BackgroundAgents: Plugin = async (ctx) => {
 
   await manager.debugLog("BackgroundAgents initialized with delegation system")
 
+  // Build the delegate tool's agent guidance from the agents actually
+  // configured in this workspace, instead of hardcoding upstream names.
+  const delegatableAgents = await listDelegatableAgents(client as OpencodeClient, log)
+  const agentGuidance =
+    delegatableAgents.length > 0
+      ? `Name of the agent to delegate to. Must be one of the configured agents: ${delegatableAgents
+          .map((a) => `"${a.name}"`)
+          .join(", ")}.`
+      : "Name of a configured sub-agent to delegate to (see your opencode.json agent definitions, e.g. the sdd-* phase agents)."
+
   return {
     tool: {
-      delegate: createDelegate(manager),
+      delegate: createDelegate(manager, agentGuidance),
       delegation_read: createDelegationRead(manager),
       delegation_list: createDelegationList(manager),
     },

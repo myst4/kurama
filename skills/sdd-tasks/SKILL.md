@@ -18,10 +18,15 @@ You are a sub-agent responsible for creating the TASK BREAKDOWN. You take the pr
 From the orchestrator:
 - Change name
 - Artifact store mode (`engram | openspec | hybrid | none`)
+- Pipeline settings propagated per phase, including `tdd.enabled` (and
+  `tdd.single_test_command` when enabled). A propagated value WINS over any value read
+  from `openspec/config.yaml` (same precedence as `compliance_mode`).
 
 ## Execution and Persistence Contract
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
+
+> If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
 - **engram**: Read `sdd/{change-name}/proposal` (required), `sdd/{change-name}/spec` (required), `sdd/{change-name}/design` (required). Save as `sdd/{change-name}/tasks`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
@@ -39,6 +44,27 @@ From the design document, identify:
 - All files that need to be created/modified/deleted
 - The dependency order (what must come first)
 - Testing requirements per component
+
+### Step 2a: Resolve TDD Mode
+
+Resolve `tdd.enabled` with the SAME precedence as `compliance_mode`:
+
+1. the value propagated in your launch prompt (its home is `openspec/config.yaml` `tdd.enabled`
+   for `openspec`/`hybrid`, or the `sdd-init/{project}` context artifact for `engram`/`none`) —
+   a propagated value WINS;
+2. else read `tdd.enabled` from `openspec/config.yaml` (`openspec`/`hybrid`);
+3. else default OFF (standard checklist).
+
+When `tdd.enabled` is **true**, expand behavior tasks per the "TDD Task Expansion" format
+below. When **false**, produce the standard checklist. `sdd-apply` resolves the SAME flag, so
+planning and implementation always agree on one mode — never a silent heuristic.
+
+**Module-not-installed fallback (graceful degrade — never a hard failure):** the `tdd` module
+is opt-in and may be absent even when the flag is true. If `skills/tdd/SKILL.md` cannot be
+resolved/loaded, do NOT fail the phase. Emit a WARNING —
+*"TDD enabled but the tdd module is not installed — run `scripts/install.sh --with tdd`;
+proceeding without TDD"* — surface it in the return envelope's `risks`, then produce the
+**standard checklist** (non-TDD path) instead of the RED/GREEN/REFACTOR expansion.
 
 ### Step 3: Write tasks.md
 
@@ -83,6 +109,29 @@ openspec/changes/{change-name}/
 - [ ] 4.1 {Update docs/comments}
 - [ ] 4.2 {Remove temporary code}
 ```
+
+#### TDD Task Expansion (only when `tdd.enabled` — Step 2a)
+
+When TDD is on, each behavior — one MUST scenario from the spec — expands into a
+RED → GREEN → REFACTOR triplet (`n.x RED` / `n.y GREEN` / `n.z REFACTOR`), and EVERY subtask
+references the scenario's stable ID (`S-{requirement}-{n}`, assigned by `sdd-spec`). This is
+planning only; `skills/tdd/SKILL.md` owns the cycle contract that `sdd-apply` executes. Only
+behavior tasks tied to a MUST scenario expand — infrastructure, wiring, and docs tasks stay
+as normal single tasks.
+
+```markdown
+## Phase 2: Core Implementation (TDD)
+
+- [ ] 2.1 RED (S-auth-1): write a failing test asserting {THEN outcome} for scenario S-auth-1
+- [ ] 2.2 GREEN (S-auth-1): minimal code in `internal/auth/service.go` to make S-auth-1 pass
+- [ ] 2.3 REFACTOR (S-auth-1): clean up `internal/auth/service.go` while S-auth-1 stays green
+- [ ] 2.4 RED (S-auth-2): write a failing test for edge-case scenario S-auth-2
+- [ ] 2.5 GREEN (S-auth-2): minimal code to make S-auth-2 pass
+- [ ] 2.6 REFACTOR (S-auth-2): clean up while S-auth-2 stays green
+```
+
+Every MUST scenario in the spec MUST appear in a RED subtask — that is the traceability
+`sdd-verify` audits (scenario → test). A behavior with no RED subtask is a planning gap.
 
 ### Task Writing Rules
 
@@ -129,28 +178,10 @@ Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 5: Return Summary
 
-Return to the orchestrator:
+Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Populate `detailed_report` with these phase-specific fields:
 
-```markdown
-## Tasks Created
-
-**Change**: {change-name}
-**Location**: `openspec/changes/{change-name}/tasks.md` (openspec/hybrid) | Engram `sdd/{change-name}/tasks` (engram) | inline (none)
-
-### Breakdown
-| Phase | Tasks | Focus |
-|-------|-------|-------|
-| Phase 1 | {N} | {Phase name} |
-| Phase 2 | {N} | {Phase name} |
-| Phase 3 | {N} | {Phase name} |
-| Total | {N} | |
-
-### Implementation Order
-{Brief description of the recommended order and why}
-
-### Next Step
-Ready for implementation (sdd-apply).
-```
+- **Breakdown** — table of Phase | Tasks | Focus, plus a Total row
+- **Implementation Order** — brief description of the recommended order and why
 
 ## Rules
 
@@ -161,6 +192,5 @@ Ready for implementation (sdd-apply).
 - Use hierarchical numbering: 1.1, 1.2, 2.1, 2.2, etc.
 - NEVER include vague tasks like "implement feature" or "add tests"
 - Apply any `rules.tasks` from `openspec/config.yaml`
-- If the project uses TDD, integrate test-first tasks: RED task (write failing test) → GREEN task (make it pass) → REFACTOR task (clean up)
+- When `tdd.enabled` resolves true (Step 2a — propagated > `config.yaml` > default off), expand every behavior task into `n.x RED` / `n.y GREEN` / `n.z REFACTOR` subtasks, each referencing the spec scenario ID (`S-{requirement}-{n}`) per the TDD Task Expansion format; when false, produce the standard checklist. Do NOT infer TDD from existing test files.
 - **Size budget**: Tasks artifact MUST be under 530 words. Each task: 1-2 lines max. Use checklist format, not paragraphs.
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

@@ -23,7 +23,9 @@ From the orchestrator:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-- **engram**: Read `sdd/{change-name}/proposal` (required) and `sdd/{change-name}/spec` (optional — may not exist if running in parallel with sdd-spec). Save as `sdd/{change-name}/design`.
+> If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
+
+- **engram**: Read `sdd/{change-name}/proposal` (required) and `sdd/{change-name}/spec` (optional — see the canonical dependency graph in `skills/_shared/sdd-phase-common.md` for how spec and design may run in parallel). Save as `sdd/{change-name}/design`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write `design.md` to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
 - **none**: Return result only. Never create or modify project files.
@@ -130,26 +132,13 @@ Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 5: Return Summary
 
-Return to the orchestrator:
+Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Populate `detailed_report` with these phase-specific fields:
 
-```markdown
-## Design Created
-
-**Change**: {change-name}
-**Location**: `openspec/changes/{change-name}/design.md` (openspec/hybrid) | Engram `sdd/{change-name}/design` (engram) | inline (none)
-
-### Summary
-- **Approach**: {one-line technical approach}
-- **Key Decisions**: {N decisions documented}
-- **Files Affected**: {N new, M modified, K deleted}
-- **Testing Strategy**: {unit/integration/e2e coverage planned}
-
-### Open Questions
-{List any unresolved questions, or "None"}
-
-### Next Step
-Ready for tasks (sdd-tasks).
-```
+- **Approach** — one-line technical approach
+- **Key Decisions** — N decisions documented
+- **Files Affected** — N new, M modified, K deleted
+- **Testing Strategy** — unit/integration/e2e coverage planned
+- **Open Questions** — list any unresolved questions, or "None"
 
 ## Rules
 
@@ -162,4 +151,3 @@ Ready for tasks (sdd-tasks).
 - Apply any `rules.design` from `openspec/config.yaml`
 - If you have open questions that BLOCK the design, say so clearly — don't guess
 - **Size budget**: Design artifact MUST be under 800 words. Architecture decisions as tables (option | tradeoff | decision). Code snippets only for non-obvious patterns.
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

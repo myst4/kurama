@@ -23,10 +23,14 @@ From the orchestrator:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-- **engram**: Read `sdd/{change-name}/proposal` (required). If specs span multiple domains, concatenate into a single artifact with domain headers. Save as `sdd/{change-name}/spec`.
+- **engram**: Read `sdd/{change-name}/proposal` (required) AND the main spec `sdd-specs/{project}/{domain}` for each affected domain (baseline — may legitimately not exist yet, see Step 3). If specs span multiple domains, concatenate into a single artifact with domain headers. Save as `sdd/{change-name}/spec`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram (single concatenated artifact) AND write domain files to filesystem.
+- **hybrid**: Follow BOTH conventions — read the baseline file-first (filesystem authoritative, Engram mirror), persist to Engram (single concatenated artifact) AND write domain files to filesystem.
 - **none**: Return result only. Never create or modify project files.
+
+### Missing required inputs (failure semantics)
+
+The **proposal** (`sdd/{change-name}/proposal`) is a REQUIRED input. If it cannot be retrieved, do NOT proceed or invent one: return the envelope with `status: blocked`, name the missing artifact in `executive_summary`, and set `next_recommended: sdd-propose`. A missing MAIN SPEC is NOT a blocker — it is an empty baseline (see Step 3).
 
 ## What to Do
 
@@ -37,13 +41,24 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 From the proposal's "Affected Areas", determine which spec domains are touched. Group changes by domain (e.g., `auth/`, `payments/`, `ui/`).
 
-### Step 3: Read Existing Specs
+### Step 3: Read Existing Specs (baseline)
 
-**IF mode is `openspec` or `hybrid`:** If `openspec/specs/{domain}/spec.md` exists, read it to understand CURRENT behavior. Your delta specs describe CHANGES to this behavior.
+For each affected domain, read the CURRENT source-of-truth spec so your delta describes CHANGES to it. On a first cycle a domain may have no baseline yet — that is an EMPTY BASELINE, not an error: when the baseline is empty, write a FULL spec for that domain (see Step 4) and do NOT return `blocked`.
 
-**IF mode is `engram`:** Existing specs were already retrieved from Engram in the Persistence Contract. Skip filesystem reads.
+**IF mode is `openspec`:** If `openspec/specs/{domain}/spec.md` exists, read it to understand CURRENT behavior. If it does not exist, treat the domain as an empty baseline.
 
-**IF mode is `none`:** Skip — no existing specs to read.
+**IF mode is `engram`:** Read the main spec for each affected domain from Engram (per `skills/_shared/engram-convention.md`):
+
+```
+mem_search(query: "sdd-specs/{project}/{domain}", project: "{project}") → get ID (if any)
+mem_get_observation(id) → full main spec (baseline)
+```
+
+If the artifact is absent, that is the empty baseline. Do NOT rely on "specs already retrieved" — retrieve them here yourself.
+
+**IF mode is `hybrid`:** Read file-first (filesystem is authoritative; Engram is a searchable mirror). Use `openspec/specs/{domain}/spec.md` as the baseline if it exists; otherwise fall back to the Engram main spec `sdd-specs/{project}/{domain}`. If the two diverge, the FILE wins — note the reconciliation in your return envelope.
+
+**IF mode is `none`:** Skip — no existing specs to read; treat every domain as an empty baseline.
 
 ### Step 4: Write Delta Specs
 
@@ -61,6 +76,11 @@ openspec/changes/{change-name}/
 
 #### Delta Spec Format
 
+Give every scenario a stable ID so `sdd-tasks` and `sdd-verify` can reference it:
+`S-{requirement-slug}-{n}`, where `{requirement-slug}` is a short kebab-case tag for the
+requirement and `{n}` numbers that requirement's scenarios from 1 (e.g. `S-auth-1`,
+`S-auth-2`). IDs are stable across the whole cycle — never renumber an existing scenario.
+
 ```markdown
 # Delta for {Domain}
 
@@ -72,14 +92,14 @@ openspec/changes/{change-name}/
 
 The system {MUST/SHALL/SHOULD} {do something specific}.
 
-#### Scenario: {Happy path scenario}
+#### Scenario: [S-{req}-1] {Happy path scenario}
 
 - GIVEN {precondition}
 - WHEN {action}
 - THEN {expected outcome}
 - AND {additional outcome, if any}
 
-#### Scenario: {Edge case scenario}
+#### Scenario: [S-{req}-2] {Edge case scenario}
 
 - GIVEN {precondition}
 - WHEN {action}
@@ -92,7 +112,7 @@ The system {MUST/SHALL/SHOULD} {do something specific}.
 {New description — replaces the existing one}
 (Previously: {what it was before})
 
-#### Scenario: {Updated scenario}
+#### Scenario: [S-{req}-1] {Updated scenario}
 
 - GIVEN {updated precondition}
 - WHEN {updated action}
@@ -122,7 +142,7 @@ If this is a completely new domain, create a FULL spec (not a delta):
 
 The system {MUST/SHALL/SHOULD} {behavior}.
 
-#### Scenario: {Name}
+#### Scenario: [S-{req}-1] {Name}
 
 - GIVEN {precondition}
 - WHEN {action}
@@ -168,6 +188,7 @@ Ready for design (sdd-design). If design already exists, ready for tasks (sdd-ta
 - If existing specs exist, write DELTA specs (ADDED/MODIFIED/REMOVED sections)
 - If NO existing specs exist for the domain, write a FULL spec
 - Every requirement MUST have at least ONE scenario
+- Give every scenario a stable `S-{requirement-slug}-{n}` ID (see Delta Spec Format) so `sdd-tasks` and `sdd-verify` can reference it; never renumber an existing scenario
 - Include both happy path AND edge case scenarios
 - Keep scenarios TESTABLE — someone should be able to write an automated test from each one
 - DO NOT include implementation details in specs — specs describe WHAT, not HOW

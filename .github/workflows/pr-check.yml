@@ -132,3 +132,49 @@ jobs:
           else
             echo "No shell scripts found to check"
           fi
+
+  install-test:
+    name: Install tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run install/setup test suite
+        run: bash scripts/install_test.sh
+
+  validate-skills:
+    name: Validate skills (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install PyYAML (enables the YAML block check)
+        run: python -m pip install --upgrade pyyaml
+      - name: Run skills structural linter
+        run: bash scripts/validate_skills.sh
+
+  examples-drift:
+    name: Generated examples are up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild orchestrator examples from templates
+        run: bash scripts/build-examples.sh
+      - name: Fail if examples/ drifted from examples/_templates/
+        run: |
+          if ! git diff --quiet -- examples/; then
+            echo "::error::Generated examples are out of date. Edit examples/_templates/, run scripts/build-examples.sh, and commit the result."
+            git --no-pager diff --stat -- examples/
+            git --no-pager diff -- examples/
+            exit 1
+          fi
+          echo "Generated examples match examples/_templates/."

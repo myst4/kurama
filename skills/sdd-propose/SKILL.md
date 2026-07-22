@@ -24,6 +24,8 @@ From the orchestrator:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
+> If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
+
 - **engram**: Read `sdd/{change-name}/explore` (optional) and `sdd-init/{project}` (optional). Save artifact as `sdd/{change-name}/proposal`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
@@ -117,23 +119,14 @@ Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 6: Return Summary
 
-Return to the orchestrator:
+Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Populate `detailed_report` with these phase-specific fields:
 
-```markdown
-## Proposal Created
+- **Intent** — one-line summary
+- **Scope** — N deliverables in, M items deferred
+- **Approach** — one-line approach
+- **Risk Level** — Low/Medium/High
 
-**Change**: {change-name}
-**Location**: `openspec/changes/{change-name}/proposal.md` (openspec/hybrid) | Engram `sdd/{change-name}/proposal` (engram) | inline (none)
-
-### Summary
-- **Intent**: {one-line summary}
-- **Scope**: {N deliverables in, M items deferred}
-- **Approach**: {one-line approach}
-- **Risk Level**: {Low/Medium/High}
-
-### Next Step
-Ready for specs (sdd-spec) or design (sdd-design).
-```
+Both `sdd-spec` and `sdd-design` are valid next phases per the DAG in `skills/_shared/sdd-phase-common.md` — reflect that in `next_recommended`.
 
 ## Rules
 
@@ -145,4 +138,3 @@ Ready for specs (sdd-spec) or design (sdd-design).
 - Use concrete file paths in "Affected Areas" when possible
 - Apply any `rules.proposal` from `openspec/config.yaml`
 - **Size budget**: Proposal artifact MUST be under 400 words. Use bullet points and tables over prose. Headers organize, not explain.
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

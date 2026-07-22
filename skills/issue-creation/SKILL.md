@@ -70,9 +70,12 @@ Auto-labels: `bug`, `status:needs-review`
 
 #### Example — Bug Report via CLI
 
+`--template` and `--body`/`--body-file` are mutually exclusive in `gh` (the CLI rejects the combination outright), and `--template` matches the form's `name:` field — `"Bug Report"`, not the filename `bug_report.yml`. Bypassing the interactive template form with `--body` also bypasses its auto-labels, so add them explicitly with `--label`:
+
 ```bash
-gh issue create --template "bug_report.yml" \
+gh issue create \
   --title "fix(scripts): setup.sh fails on zsh with glob error" \
+  --label "bug,status:needs-review" \
   --body "
 ### Pre-flight Checks
 - [x] I have searched existing issues and this is not a duplicate
@@ -134,8 +137,9 @@ Auto-labels: `enhancement`, `status:needs-review`
 #### Example — Feature Request via CLI
 
 ```bash
-gh issue create --template "feature_request.yml" \
+gh issue create \
   --title "feat(scripts): add Codex support to setup.sh" \
+  --label "enhancement,status:needs-review" \
   --body "
 ### Pre-flight Checks
 - [x] I have searched existing issues and this is not a duplicate
@@ -211,11 +215,16 @@ Is it a duplicate?              → Link to existing issue, close
 # Search existing issues before creating
 gh issue list --search "keyword"
 
-# Create bug report
-gh issue create --template "bug_report.yml" --title "fix(scope): description"
+# Create bug report (interactive — --template matches the form's name, not the filename;
+# it prompts for the remaining fields since --body/--body-file cannot combine with --template)
+gh issue create --template "Bug Report" --title "fix(scope): description"
 
-# Create feature request
-gh issue create --template "feature_request.yml" --title "feat(scope): description"
+# Create feature request (interactive, same rule)
+gh issue create --template "Feature Request" --title "feat(scope): description"
+
+# Create bug report (non-interactive — see the "Bug Report via CLI" example above for the
+# full --body block; auto-labels must be added explicitly with --label since --template is skipped)
+gh issue create --title "fix(scope): description" --label "bug,status:needs-review" --body "..."
 
 # Maintainer: approve an issue
 gh issue edit <number> --add-label "status:approved"

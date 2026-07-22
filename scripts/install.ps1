@@ -26,6 +26,11 @@ param(
                  'antigravity', 'cursor', 'project-local', 'all-global', 'custom')]
     [string]$Agent,
     [string]$Path,
+    [ValidateSet('quality', 'optional', 'tdd')]
+    [string[]]$Without,
+    [ValidateSet('quality', 'optional', 'tdd')]
+    [string[]]$With,
+    [switch]$Version,
     [switch]$Help
 )
 
@@ -38,6 +43,12 @@ $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $RepoDir = Split-Path -Parent $ScriptRoot
 $SkillsSrc = Join-Path $RepoDir 'skills'
+$ManifestFile = Join-Path $SkillsSrc 'manifest.json'
+$VersionFile = Join-Path $RepoDir 'VERSION'
+
+# Per-target install manifest (records version + installed files so upgrades can
+# detect leftovers and an uninstall can remove exactly what was written).
+$InstallManifestName = '.atl-install-manifest.json'
 
 $ToolPaths = @{
     'claude-code'       = Join-Path $env:USERPROFILE '.claude\skills'
@@ -118,11 +129,79 @@ function Show-Usage {
     Write-Host 'Usage: .\install.ps1 [OPTIONS]'
     Write-Host ''
     Write-Host 'Options:'
-    Write-Host '  -Agent NAME    Install for a specific agent (non-interactive)'
-    Write-Host '  -Path DIR      Custom install path (use with -Agent custom)'
-    Write-Host '  -Help          Show this help'
+    Write-Host '  -Agent NAME      Install for a specific agent (non-interactive)'
+    Write-Host '  -Path DIR        Custom install path (use with -Agent custom)'
+    Write-Host '  -With GROUP      Include an optional skill group (quality, optional, tdd)'
+    Write-Host '  -Without GROUP   Exclude an optional skill group (quality, optional)'
+    Write-Host '  -Version         Print the Agent Teams Lite version and exit'
+    Write-Host '  -Help            Show this help'
     Write-Host ''
     Write-Host 'Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, project-local, all-global'
+    Write-Host ''
+    Write-Host 'Skill groups:'
+    Write-Host '  sdd-core   Core SDD pipeline + authoring utilities (always installed)'
+    Write-Host '  quality    Adversarial review skills, e.g. judgment-day (on by default; -Without quality to skip)'
+    Write-Host '  optional   Language/testing skills, e.g. go-testing (on by default; -Without optional to skip)'
+    Write-Host '  tdd        Optional TDD module (RED-GREEN-REFACTOR), skills/tdd (opt-in; -With tdd to enable)'
+}
+
+# ============================================================================
+# Version + Manifest Helpers
+# ============================================================================
+
+function Get-AtlVersion {
+    if (Test-Path $VersionFile) {
+        $v = Get-Content -Path $VersionFile -TotalCount 1 -ErrorAction SilentlyContinue
+        if ($v) { return $v.Trim() }
+    }
+    return 'unknown'
+}
+
+function Get-ManifestSkills {
+    if (-not (Test-Path $ManifestFile)) {
+        throw "Missing skills/manifest.json (the skill list source of truth)"
+    }
+    $json = Get-Content -Path $ManifestFile -Raw | ConvertFrom-Json
+    return $json.skills
+}
+
+function Resolve-ActiveGroups {
+    # sdd-core is always active; quality/optional are on by default; tdd is opt-in
+    # only (absent here, added by -With tdd). All toggles restricted by ValidateSet.
+    $active = @{ 'sdd-core' = $true; 'quality' = $true; 'optional' = $true }
+    foreach ($g in $Without) { $active.Remove($g) }
+    foreach ($g in $With) { $active[$g] = $true }
+    return $active
+}
+
+function Get-ActiveSkillNames {
+    $active = Resolve-ActiveGroups
+    $names = @()
+    foreach ($s in (Get-ManifestSkills)) {
+        if ($active.ContainsKey($s.group)) { $names += $s.name }
+    }
+    if ($names.Count -eq 0) {
+        Write-Err 'No skills selected from manifest'
+        exit 1
+    }
+    return $names
+}
+
+function Write-InstallManifest {
+    param(
+        [string]$TargetDir,
+        [string]$ToolName,
+        [string[]]$Files
+    )
+    $obj = [ordered]@{
+        name    = 'agent-teams-lite'
+        version = (Get-AtlVersion)
+        tool    = $ToolName
+        files   = @($Files)
+    }
+    $json = $obj | ConvertTo-Json -Depth 4
+    $manifestPath = Join-Path $TargetDir $InstallManifestName
+    Set-Content -Path $manifestPath -Value $json -Encoding UTF8
 }
 
 # ============================================================================
@@ -141,6 +220,10 @@ function Test-SourceTree {
     }
     if (-not (Test-Path (Join-Path $SkillsSrc '_shared'))) {
         Write-Err 'Missing: _shared/ directory'
+        $missing++
+    }
+    if (-not (Test-Path $ManifestFile)) {
+        Write-Err 'Missing: skills/manifest.json (the skill list source of truth)'
         $missing++
     }
     if ($missing -gt 0) {
@@ -165,6 +248,9 @@ function Install-Skills {
 
     New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
 
+    # Target-relative paths we write (recorded in the install manifest).
+    $installedFiles = New-Object System.Collections.Generic.List[string]
+
     # Copy shared convention files (_shared/)
     $sharedSrc = Join-Path $SkillsSrc '_shared'
     $sharedTarget = Join-Path $TargetDir '_shared'
@@ -175,6 +261,7 @@ function Install-Skills {
         $sharedCount = 0
         foreach ($file in $sharedFiles) {
             Copy-Item -Path $file.FullName -Destination $sharedTarget -Force
+            $installedFiles.Add("_shared/$($file.Name)")
             $sharedCount++
         }
         if ($sharedCount -gt 0) {
@@ -185,18 +272,10 @@ function Install-Skills {
     }
 
     $count = 0
-    # Install all distributable skills
-    $skillDirs = @(Get-ChildItem -Path $SkillsSrc -Directory -Filter 'sdd-*')
-    foreach ($extraSkill in @('skill-registry', 'judgment-day', 'go-testing', 'skill-creator', 'branch-pr', 'issue-creation')) {
-        $extraDir = Join-Path $SkillsSrc $extraSkill
-        if (Test-Path $extraDir) {
-            $skillDirs += Get-Item $extraDir
-        }
-    }
-
-    foreach ($skillDir in $skillDirs) {
-        $skillName = $skillDir.Name
-        $skillFile = Join-Path $skillDir.FullName 'SKILL.md'
+    # Install the active skill set resolved from skills/manifest.json.
+    foreach ($skillName in $script:ActiveSkillNames) {
+        $skillDir = Join-Path $SkillsSrc $skillName
+        $skillFile = Join-Path $skillDir 'SKILL.md'
 
         if (-not (Test-Path $skillFile)) {
             Write-Warn "Skipping $skillName (SKILL.md not found in source)"
@@ -208,10 +287,13 @@ function Install-Skills {
 
         $targetFile = Join-Path $targetSkillDir 'SKILL.md'
         Copy-Item -Path $skillFile -Destination $targetFile -Force
+        $installedFiles.Add("$skillName/SKILL.md")
 
         Write-Skill $skillName
         $count++
     }
+
+    Write-InstallManifest -TargetDir $TargetDir -ToolName $ToolName -Files $installedFiles.ToArray()
 
     Write-Host ''
     Write-Host "  $count skills installed" -ForegroundColor Green -NoNewline
@@ -262,8 +344,9 @@ function Install-ForAgent {
             Write-Host ([char]0x2554 + ([string][char]0x2550 * 62) + [char]0x2557) -ForegroundColor Yellow
             Write-Host ([char]0x2551 + '  ACTION REQUIRED: Add the sdd-orchestrator agent config     ' + [char]0x2551) -ForegroundColor Yellow
             Write-Host ([char]0x2551 + '                                                              ' + [char]0x2551) -ForegroundColor Yellow
-            Write-Host ([char]0x2551 + '  Copy the agent block from:                                  ' + [char]0x2551) -ForegroundColor Yellow
-            Write-Host ([char]0x2551 + '    examples\opencode\opencode.json                           ' + [char]0x2551) -ForegroundColor Yellow
+            Write-Host ([char]0x2551 + '  Copy an agent block from one of:                            ' + [char]0x2551) -ForegroundColor Yellow
+            Write-Host ([char]0x2551 + '    examples\opencode\opencode.single.json  (default)         ' + [char]0x2551) -ForegroundColor Yellow
+            Write-Host ([char]0x2551 + '    examples\opencode\opencode.multi.json   (per-phase)       ' + [char]0x2551) -ForegroundColor Yellow
             Write-Host ([char]0x2551 + '  Into your:                                                  ' + [char]0x2551) -ForegroundColor Yellow
             Write-Host ([char]0x2551 + "    $env:USERPROFILE\.config\opencode\opencode.json            " + [char]0x2551) -ForegroundColor Yellow
             Write-Host ([char]0x2551 + '                                                              ' + [char]0x2551) -ForegroundColor Yellow
@@ -288,7 +371,7 @@ function Install-ForAgent {
         }
         'cursor' {
             Install-Skills -TargetDir $ToolPaths['cursor'] -ToolName 'Cursor'
-            Write-NextStep '.cursorrules' 'examples\cursor\.cursorrules'
+            Write-NextStep '.cursor\rules\sdd-orchestrator.mdc' 'examples\cursor\.cursor\rules\sdd-orchestrator.mdc'
         }
         'project-local' {
             Install-Skills -TargetDir $ToolPaths['project-local'] -ToolName 'Project-local'
@@ -310,13 +393,13 @@ function Install-ForAgent {
             Write-Host '[REQUIRED] ' -ForegroundColor Yellow -NoNewline
             Write-Host 'Add orchestrator agent to ' -NoNewline
             Write-Host "$env:USERPROFILE\.config\opencode\opencode.json" -ForegroundColor White
-            Write-Host '     See: examples\opencode\opencode.json — without this, /sdd-* commands will not work' -ForegroundColor Yellow
+            Write-Host '     See: examples\opencode\opencode.single.json (or opencode.multi.json) — without this, /sdd-* commands will not work' -ForegroundColor Yellow
             Write-Host '  3. Add orchestrator to ' -NoNewline
             Write-Host '~\.gemini\GEMINI.md' -ForegroundColor White
             Write-Host '  4. Add orchestrator to ' -NoNewline
             Write-Host 'Codex instructions file' -ForegroundColor White
             Write-Host '  5. Add SDD rules to ' -NoNewline
-            Write-Host '.cursorrules' -ForegroundColor White
+            Write-Host '.cursor\rules\sdd-orchestrator.mdc' -ForegroundColor White
         }
         'custom' {
             $customPath = $Path
@@ -391,8 +474,17 @@ try {
         exit 0
     }
 
+    if ($Version) {
+        Write-Host "agent-teams-lite $(Get-AtlVersion)"
+        exit 0
+    }
+
     Write-Header
     Test-SourceTree
+
+    # Resolve the active skill set once (manifest + -With/-Without) for reuse by
+    # every Install-Skills call (single agent or all-global).
+    $script:ActiveSkillNames = Get-ActiveSkillNames
 
     if ($Agent) {
         Install-ForAgent $Agent

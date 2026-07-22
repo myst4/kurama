@@ -28,7 +28,55 @@ scope:     project
 | `archive-report` | sdd-archive | Archive closure with lineage |
 | `state` | orchestrator | DAG state for recovery after compaction |
 
-Exception: `sdd-init` uses `sdd-init/{project-name}` as both title and topic_key.
+Exception: `sdd-init` uses `sdd-init/{project-name}` as both title and topic_key. In engram mode, this `sdd-init/{project}` artifact is also the home for pipeline settings (artifact store mode, `compliance_mode`, verify commands, and the future TDD flag) — there is no `config.yaml` in engram mode — and the orchestrator propagates those settings in every phase prompt.
+
+## Main Spec Artifacts (source of truth)
+
+The per-change `spec` artifact above holds a change's DELTA specs (all domains concatenated). The cumulative source-of-truth specifications live in SEPARATE, cross-change artifacts — one per spec domain — so they persist after a change is archived and act as the baseline for the next change:
+
+```
+title:     sdd-specs/{project}/{domain}
+topic_key: sdd-specs/{project}/{domain}
+type:      architecture
+project:   {project}
+scope:     project
+```
+
+- **One artifact per spec domain** (e.g. `sdd-specs/my-app/auth`, `sdd-specs/my-app/payments`) — NOT concatenated. This mirrors the filesystem layout `openspec/specs/{domain}/spec.md`.
+- **Upsert semantics**: the stable `topic_key` means `mem_save` updates the domain's spec in place instead of duplicating. `sdd-archive` merges each change's delta into these artifacts; `sdd-spec` reads them as the baseline.
+- **Frontmatter with `last_updated`**: each main-spec artifact begins with YAML frontmatter carrying `last_updated` (ISO date). In hybrid mode the filesystem copy is authoritative and Engram mirrors it; comparing `last_updated` lets a reader detect divergence (the file wins).
+
+```markdown
+---
+domain: {domain}
+last_updated: {ISO date}
+---
+
+# {Domain} Specification
+
+## Purpose
+
+{High-level description of this domain.}
+
+## Requirements
+
+### Requirement: {Name}
+
+The system {MUST/SHALL/SHOULD} {behavior}.
+
+#### Scenario: {Name}
+
+- GIVEN {precondition}
+- WHEN {action}
+- THEN {outcome}
+```
+
+Baseline read (per affected domain):
+```
+mem_search(query: "sdd-specs/{project}/{domain}", project: "{project}") → get ID (if any)
+mem_get_observation(id) → full main spec
+```
+On the FIRST cycle a domain's main spec legitimately may not exist yet — an absent artifact is an EMPTY BASELINE, not an error.
 
 ### State Artifact
 
@@ -38,7 +86,7 @@ mem_save(
   topic_key: "sdd/{change-name}/state",
   type: "architecture",
   project: "{project}",
-  content: "change: {change-name}\nphase: {last-phase}\nartifact_store: engram\nartifacts:\n  proposal: true\n  specs: true\n  design: false\n  tasks: false\ntasks_progress:\n  completed: []\n  pending: []\nlast_updated: {ISO date}"
+  content: "change: {change-name}\nphase: {last-phase}\nartifact_store.mode: engram\nartifacts:\n  proposal: true\n  specs: true\n  design: false\n  tasks: false\ntasks_progress:\n  completed: []\n  pending: []\nlast_updated: {ISO date}"
 )
 ```
 
@@ -114,5 +162,6 @@ mem_search(query: "sdd/{change-name}/", project: "{project}")
 - Deterministic titles → recovery works by exact match
 - `topic_key` → enables upserts without duplicates
 - `sdd/` prefix → namespaces all SDD artifacts
+- Cross-change `sdd-specs/{project}/{domain}` artifacts → the source of truth survives archival in engram mode, so `sdd-archive` can merge deltas and `sdd-spec` has a real baseline (no phantom "existing specs")
 - Two-step recovery → search previews are always truncated; `mem_get_observation` is the only way to get full content
 - Lineage → archive-report includes all observation IDs for complete traceability

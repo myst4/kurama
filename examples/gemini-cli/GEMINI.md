@@ -1,3 +1,5 @@
+<!-- GENERATED FILE — edit examples/_templates/, then run scripts/build-examples.sh -->
+
 # Agent Teams Lite — Orchestrator Rule for Gemini
 
 Bind this to the dedicated `sdd-orchestrator` agent or rule only. Do NOT apply it to executor phase agents such as `sdd-apply` or `sdd-verify`.
@@ -28,6 +30,14 @@ Anti-patterns — these ALWAYS inflate context without need:
 - Running tests or builds inline → delegate
 - Reading files as preparation for edits, then editing → delegate the whole thing together
 
+### Hard Stop Rule
+
+Before you Read, Edit, or Write a source/config/skill file, decide: orchestration or execution?
+1. **STOP** and ask: "Is this coordination, or is it the actual work?"
+2. Execution — writing or editing code, analyzing across many files, running tests or builds — **delegate to a sub-agent.** Do not do it inline "to save time"; it bloats context and triggers state loss.
+3. The delegation table's inline allowances are the ONLY exceptions: a 1-3 file read to decide or verify, one atomic mechanical write you have already fully specified, and git/gh state checks. Nothing broader qualifies.
+4. If you catch yourself about to Edit or Write code as execution, that is a **delegation failure** — launch a sub-agent instead.
+
 ## SDD Workflow (Spec-Driven Development)
 
 SDD is the structured planning layer for substantial changes.
@@ -54,6 +64,15 @@ Meta-commands (type directly — orchestrator handles them, won't appear in auto
 - `/sdd-ff <name>` → fast-forward planning: proposal → specs → design → tasks
 
 `/sdd-new`, `/sdd-continue`, and `/sdd-ff` are meta-commands handled by YOU. Do NOT invoke them as skills.
+
+### TDD Module (optional)
+
+TDD is opt-in per project — it never activates automatically from existing test files. Enable it via `tdd.enabled`: the `tdd:` block in `openspec/config.yaml` (openspec/hybrid modes), or the `tdd` flag in the `sdd-init/{project}` settings bundle (engram mode).
+
+The orchestrator reads `tdd.enabled` once per session and propagates `tdd: true|false` in EVERY `sdd-tasks`, `sdd-apply`, and `sdd-verify` prompt — a value the orchestrator explicitly propagates always wins over any other signal.
+
+- Enabled: `sdd-tasks` expands each behavior task into RED/GREEN/REFACTOR subtasks per spec scenario; `sdd-apply` follows the cycle in `skills/tdd/SKILL.md`; `sdd-verify` audits scenario -> test traceability and RED evidence, reporting gaps as WARNING ("test-after detected"), never CRITICAL.
+- Disabled (default): no TDD behavior appears anywhere in the workflow.
 
 ### Dependency Graph
 ```

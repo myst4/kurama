@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-The orchestrator+sub-agent model in `agent-teams-lite` trades a **fixed overhead per sub-agent** (~11,850 tokens) for **context isolation**: work done by sub-agents disappears from the orchestrator's context when they finish. Three independent analyses measured real file sizes from the codebase. Six optimizations were implemented, reducing overhead ~38% per SDD pipeline. For tasks touching 8+ files, delegation wins by 13,000+ tokens. For large features, the margin exceeds 100,000 tokens.
+The orchestrator+sub-agent model in `agent-teams-lite` trades a **fixed overhead per sub-agent** (11,329–12,545 tokens) for **context isolation**: work done by sub-agents disappears from the orchestrator's context when they finish. Three independent analyses measured real file sizes from the codebase. Six optimizations were implemented, reducing overhead ~38% per SDD pipeline. For tasks touching 8+ files, delegation wins by 13,000+ tokens. For large features, the margin exceeds 100,000 tokens.
 
 ---
 
@@ -14,7 +14,11 @@ Every LLM turn reprocesses the full conversation history:
 cost_turn_N = system_prompt + Σ(all_previous_messages) + current_message
 ```
 
-This makes inline orchestrator work exponentially expensive:
+This makes inline orchestrator work grow **quadratically**, not exponentially,
+with turn count: turn *N* reprocesses roughly *N* prior messages, so cumulative
+reprocessing across a session sums like 1 + 2 + ... + *N* ≈ *N*²/2 tokens — a
+polynomial blowup, not an exponential one. It is still bad enough to dominate
+long sessions:
 
 - **Context pollution**: Every file read, grep, and edit confirmation stays in history permanently
 - **Compaction is lossy**: When the context hits the limit, the model summarizes — losing file contents and tool results. Recovery re-reads those files, growing the context further
@@ -37,9 +41,9 @@ All measurements derived from real file sizes (bytes ÷ 3.5 chars/token for mark
 | Skill file (range across all skills) | 1,796–2,812 |
 | Engram skill registry lookup | 1,028 |
 | Launch prompt + result envelope | 300–500 |
-| **Total per delegation** | **~11,850–12,866** |
+| **Total per delegation** | **11,329–12,545** |
 
-> The system prompt dominates. Prior estimates of ~3,700T used the example CLAUDE.md (2,440T), not the actual installed one (7,554T).
+> The total is the sum of the row above it: `7,554 + 651 + 1,796–2,812 + 1,028 + 300–500 = 11,329–12,545`. The system prompt dominates. Prior estimates of ~3,700T used the example CLAUDE.md (2,440T), not the actual installed one (7,554T).
 
 ### Crossover point
 
@@ -59,10 +63,13 @@ crossover(N_deps) = (system_prompt + skill_file + N_deps × avg_dep_size) / avg_
 
 | Model | Cost per compaction | Events (large feature) | Total |
 |-------|--------------------|-----------------------|-------|
-| Inline | 15,000–55,000T | 2–4 | ~75,000T |
-| Delegation | ~4,500T | 0–1 | ~4,500T |
+| Inline | 15,000–55,000T | 2–4 | 30,000–220,000T |
+| Delegation | ~4,500T | 0–1 | 0–4,500T |
 
-Delegation recovery uses engram references (~300T) instead of re-reading files (~3,000–15,000T per artifact).
+Totals are the per-event cost multiplied by the event-count range, not a
+separate estimate: inline is `2–4 × 15,000–55,000T = 30,000–220,000T`;
+delegation is `0–1 × ~4,500T = 0–4,500T`. Delegation recovery uses engram
+references (~300T) instead of re-reading files (~3,000–15,000T per artifact).
 
 ---
 
@@ -124,7 +131,12 @@ Three independent AI reviewers evaluated the optimizations across three rounds.
 | Large feature / SDD | 15+ | Delegate (mandatory) |
 | Multi-day work | Any | Full SDD pipeline with delegation |
 
-> **Per-file delegation is wasteful** (overhead ~1,209% for a 1-file task). Per-phase delegation is the sweet spot.
+> **Per-file delegation is wasteful.** The crossover point above (~8 files
+> with no SDD dependencies) is the real break-even; delegating for a single
+> file pays the full fixed overhead (11,329–12,545T) against roughly 1/8th of
+> that in file-reading savings — an order of magnitude short of break-even,
+> not a single-decimal percentage. Per-phase delegation, where the overhead
+> amortizes across many files, is the sweet spot.
 
 ---
 

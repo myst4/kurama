@@ -1,3 +1,5 @@
+<!-- GENERATED FILE — edit examples/_templates/, then run scripts/build-examples.sh -->
+
 # Agent Teams Lite — Orchestrator Instructions
 
 Bind this to the dedicated `sdd-orchestrator` agent or rule only. Do NOT apply it to executor phase agents such as `sdd-apply` or `sdd-verify`.
@@ -28,6 +30,23 @@ Anti-patterns — these ALWAYS inflate context without need:
 - Running tests or builds inline → delegate
 - Reading files as preparation for edits, then editing → delegate the whole thing together
 
+### Hard Stop Rule
+
+Before you Read, Edit, or Write a source/config/skill file, decide: orchestration or execution?
+1. **STOP** and ask: "Is this coordination, or is it the actual work?"
+2. Execution — writing or editing code, analyzing across many files, running tests or builds — **delegate to a sub-agent.** Do not do it inline "to save time"; it bloats context and triggers state loss.
+3. The delegation table's inline allowances are the ONLY exceptions: a 1-3 file read to decide or verify, one atomic mechanical write you have already fully specified, and git/gh state checks. Nothing broader qualifies.
+4. If you catch yourself about to Edit or Write code as execution, that is a **delegation failure** — launch a sub-agent instead.
+
+### Single vs multi config
+
+This example ships two OpenCode configs — install exactly one per project:
+
+- `opencode.multi.json` (recommended) — installs this orchestrator plus a dedicated subagent per SDD phase (`sdd-explore`, `sdd-propose`, `sdd-apply`, …). The `/sdd-<phase>` executor commands route straight to those agents, and each phase can run on its own model. Delegate each phase to its matching `sdd-<phase>` agent.
+- `opencode.single.json` — installs this orchestrator only, with no dedicated phase agents. Run each SDD phase as a subtask of the built-in `general` subagent, injecting that phase's skill rules into the subtask prompt. Drive the flow through the `/sdd-new`, `/sdd-continue`, and `/sdd-ff` meta-commands; the direct `/sdd-<phase>` executor commands require the multi config. Lightest setup.
+
+When delegating, target the `sdd-<phase>` agents in multi mode and the `general` subagent in single mode.
+
 ## SDD Workflow (Spec-Driven Development)
 
 SDD is the structured planning layer for substantial changes.
@@ -55,6 +74,15 @@ Meta-commands (type directly — orchestrator handles them, won't appear in auto
 
 `/sdd-new`, `/sdd-continue`, and `/sdd-ff` are meta-commands handled by YOU. Do NOT invoke them as skills.
 
+### TDD Module (optional)
+
+TDD is opt-in per project — it never activates automatically from existing test files. Enable it via `tdd.enabled`: the `tdd:` block in `openspec/config.yaml` (openspec/hybrid modes), or the `tdd` flag in the `sdd-init/{project}` settings bundle (engram mode).
+
+The orchestrator reads `tdd.enabled` once per session and propagates `tdd: true|false` in EVERY `sdd-tasks`, `sdd-apply`, and `sdd-verify` prompt — a value the orchestrator explicitly propagates always wins over any other signal.
+
+- Enabled: `sdd-tasks` expands each behavior task into RED/GREEN/REFACTOR subtasks per spec scenario; `sdd-apply` follows the cycle in `skills/tdd/SKILL.md`; `sdd-verify` audits scenario -> test traceability and RED evidence, reporting gaps as WARNING ("test-after detected"), never CRITICAL.
+- Disabled (default): no TDD behavior appears anywhere in the workflow.
+
 ### Dependency Graph
 ```
 proposal -> specs --> tasks -> apply -> verify -> archive
@@ -75,13 +103,13 @@ Read this table at session start (or before first delegation), cache it for the 
 |-------|---------------|--------|
 | orchestrator | opus | Coordinates, makes decisions |
 | sdd-explore | sonnet | Reads code, structural - not architectural |
-| sdd-propose | opus | Architectural decisions |
+| sdd-propose | sonnet | Structured proposal writing (architecture is decided in design) |
 | sdd-spec | sonnet | Structured writing |
 | sdd-design | opus | Architecture decisions |
 | sdd-tasks | sonnet | Mechanical breakdown |
-| sdd-apply | sonnet | Implementation |
+| sdd-apply | opus | Implementation quality is the product |
 | sdd-verify | sonnet | Validation against spec |
-| sdd-archive | haiku | Copy and close |
+| sdd-archive | sonnet | Merge fidelity over speed |
 | default | sonnet | Non-SDD general delegation |
 
 <!-- /gentle-ai:sdd-model-assignments -->
@@ -90,7 +118,7 @@ Read this table at session start (or before first delegation), cache it for the 
 
 ALL sub-agent launch prompts that involve reading, writing, or reviewing code MUST include pre-resolved **compact rules** from the skill registry. Follow the **Skill Resolver Protocol** (see `_shared/skill-resolver.md` in the skills directory).
 
-The orchestrator resolves skills from the registry ONCE (at session start or first delegation), caches the compact rules, and injects matching rules into each sub-agent's prompt. Also reads the Model Assignments table once per session, caches `phase → alias`, includes that alias in every Agent tool call via `model`.
+The orchestrator resolves skills from the registry ONCE (at session start or first delegation), caches the compact rules, and injects matching rules into each sub-agent's prompt.
 
 Orchestrator skill resolution (do once per session):
 1. `mem_search(query: "skill-registry", project: "{project}")` → `mem_get_observation(id)` for full registry content
@@ -142,6 +170,8 @@ Each phase has explicit read/write rules:
 For phases with required dependencies, sub-agent reads directly from the backend — orchestrator passes artifact references (topic keys or file paths), NOT content itself.
 
 #### Engram Topic Key Format
+
+When launching sub-agents for SDD phases with engram mode, pass these exact topic_keys as artifact references:
 
 | Artifact | Topic Key |
 |----------|-----------|

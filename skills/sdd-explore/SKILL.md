@@ -23,6 +23,8 @@ The orchestrator will give you:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
+> If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
+
 - **engram**: Optionally read `sdd-init/{project}` for project context. Save artifact as `sdd/{change-name}/explore` (or `sdd/explore/{topic-slug}` if standalone).
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem.
@@ -84,39 +86,14 @@ Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 6: Return Structured Analysis
 
-Return EXACTLY this format to the orchestrator (and write the same content to `exploration.md` if saving):
+Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md` (write the same content to `exploration.md` if saving). Populate `detailed_report` with these phase-specific fields:
 
-```markdown
-## Exploration: {topic}
+- **Current State** — how the system works today relevant to this topic
+- **Affected Areas** — `path/to/file.ext` and why it's affected, one per file
+- **Approaches** — for each option considered: name, brief description, pros, cons, effort (Low/Medium/High)
+- **Recommendation** — the recommended approach and why
 
-### Current State
-{How the system works today relevant to this topic}
-
-### Affected Areas
-- `path/to/file.ext` — {why it's affected}
-- `path/to/other.ext` — {why it's affected}
-
-### Approaches
-1. **{Approach name}** — {brief description}
-   - Pros: {list}
-   - Cons: {list}
-   - Effort: {Low/Medium/High}
-
-2. **{Approach name}** — {brief description}
-   - Pros: {list}
-   - Cons: {list}
-   - Effort: {Low/Medium/High}
-
-### Recommendation
-{Your recommended approach and why}
-
-### Risks
-- {Risk 1}
-- {Risk 2}
-
-### Ready for Proposal
-{Yes/No — and what the orchestrator should tell the user}
-```
+Use `risks` for anything risky discovered and `next_recommended` for whether this is ready for `sdd-propose` (or what clarification is still needed).
 
 ## Rules
 
@@ -126,4 +103,3 @@ Return EXACTLY this format to the orchestrator (and write the same content to `e
 - Keep your analysis CONCISE - the orchestrator needs a summary, not a novel
 - If you can't find enough information, say so clearly
 - If the request is too vague to explore, say what clarification is needed
-- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

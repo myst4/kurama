@@ -14,7 +14,7 @@ Adds 3 tools to OpenCode that let agents run sub-agents **in the background**:
 | `delegation_read(id)` | Retrieve the full result of a completed delegation. |
 | `delegation_list()` | List all delegations (running + completed) for the session. |
 
-The agent keeps working while delegations run. When a delegation completes, a `<task-notification>` arrives with the full result. Results are persisted to disk as markdown files — they survive context compaction, session restarts, and process crashes.
+The agent keeps working while delegations run. When a delegation completes, a `<task-notification>` arrives — compact, carrying only the ID and status, not the result inline. The full result is persisted to disk as a markdown file; retrieve it with `delegation_read(id)` when you need it. Persisted results survive context compaction, session restarts, and process crashes.
 
 ## delegate vs task
 
@@ -35,8 +35,8 @@ The real value of `delegate` is **parallelization** — launch 2-3 sub-agents at
 5. On completion   → session.idle event triggers result extraction
 6. Plugin          → persists result as markdown to disk
 7. Plugin          → generates title/description via small_model (with fallback)
-8. Plugin          → sends <task-notification> to parent session
-9. Agent receives  notification with full result inline
+8. Plugin          → sends compact <task-notification> (ID + status) to parent session
+9. Agent calls     delegation_read(id) to retrieve the full result when needed
 ```
 
 Results are stored at: `~/.local/share/opencode/delegations/{projectId}/{sessionId}/{delegationId}.md`
@@ -91,12 +91,17 @@ Add `delegate`, `delegation_list`, and `delegation_read` to every agent that sho
 
 ### Step 4: Restart OpenCode
 
-The plugin logs initialization to the debug log. Verify it loaded:
+OpenCode loads the plugin automatically. Debug logging is **opt-in**: set
+`ATL_BG_DEBUG=1` before launching OpenCode to trace delegation activity to disk.
 
 ```bash
+ATL_BG_DEBUG=1 opencode
+# then verify the trace log was written:
 cat ~/.local/share/opencode/delegations/*/background-agents-debug.log
 # Should show: "BackgroundAgents initialized with delegation system"
 ```
+
+Without `ATL_BG_DEBUG`, the plugin runs normally but writes no debug log.
 
 ## Differences from Original
 
@@ -110,7 +115,6 @@ The original depends on shared utilities from the OCX ecosystem. Since we don't 
 |--------|-----------------|
 | `types.ts` | `OpencodeClient` type alias |
 | `with-timeout.ts` | `TimeoutError` class + `withTimeout<T>()` function |
-| `log-warn.ts` | `logWarn()` — logs via OpenCode API with console fallback |
 | `get-project-id.ts` | Stable project ID from git root commit hash (with worktree support) |
 
 ### 2. Removed read-only agent restriction
@@ -135,14 +139,25 @@ The `DELEGATION_RULES` injected into the system prompt now reflect that any agen
 
 Exported as `BackgroundAgents` (named + default) to match the local plugin naming convention used by `engram.ts` → `Engram`.
 
+### 6. Hardening for Agent Teams Lite
+
+Beyond the upstream port, this copy applies several fixes:
+
+- **Dead code removed.** The read-only enforcement helpers left over from the removed restriction (`parseAgentMode`, `parseAgentWriteCapability`, `isPermissionDenied`, the `PermissionEntry` type, and the inlined `logWarn`) are gone, along with the unused `deleteDelegation` and `getRecentCompletedDelegations` methods.
+- **Timeout preserves partial output.** `handleTimeout` now reads the child session's partial result **before** deleting the session, so the `[TIMEOUT REACHED]` file actually contains whatever the agent produced (the previous order deleted the session first and lost it).
+- **Session-scoped listing.** `delegation_list` returns only delegations belonging to the calling session tree; previously the in-memory map leaked every concurrent session's delegations into every listing.
+- **Bounded memory.** Terminal delegations are evicted from memory once more than 50 accumulate (results remain on disk), so the map can't grow without limit during a long-running process.
+- **Dynamic agent guidance.** The `delegate` tool's `agent` parameter description is generated from the agents actually configured in your `opencode.json`, instead of naming upstream agents (`explore`, `researcher`, `scribe`) that don't exist in this setup.
+- **Opt-in debug logging** via `ATL_BG_DEBUG` (see Step 4), instead of appending to disk on every operation.
+- **Timer safety.** `generateMetadata` uses the shared `withTimeout` helper (which clears its timer) instead of a bare `Promise.race`/`setTimeout`.
+
 ## Plugin Architecture
 
 ```
-background-agents.ts (1447 lines)
+background-agents.ts (~1,400 lines)
 ├── Inlined primitives
 │   ├── OpencodeClient type
 │   ├── TimeoutError + withTimeout()
-│   ├── logWarn()
 │   └── getProjectId() (git root hash + worktree support + caching)
 ├── ID generation
 │   └── generateReadableId() — adjective-color-animal via unique-names-generator

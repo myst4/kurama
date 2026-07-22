@@ -1,13 +1,30 @@
 ---
 name: go-testing
 description: >
-  Go testing patterns for Gentleman.Dots, including Bubbletea TUI testing.
-  Trigger: When writing Go tests, using teatest, or adding test coverage.
+  Go testing patterns, including table-driven tests, golden files, and
+  Bubbletea TUI testing with teatest. Trigger: When writing Go tests, using
+  teatest, or adding Go test coverage.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
-  version: "1.0"
+  author: agent-teams-lite
+  version: "1.1"
 ---
+
+## Reference implementation: a per-language testing plugin
+
+This skill is the **reference implementation of a per-language testing plugin**.
+The core TDD module (`skills/tdd`) is deliberately language-agnostic: it owns the
+RED-GREEN-REFACTOR protocol, anti-patterns, and per-task evidence format, but it
+never hard-codes a language. Concrete, per-language testing patterns live in
+plugins like this one and reach sub-agents as compact rules through the skill
+registry — so a delegated writer picks up idiomatic Go testing guidance without
+inflating its context with the full skill.
+
+Use this file as the template when authoring a new testing plugin for another
+ecosystem (e.g. `vitest-testing`, `pytest-testing`): keep the frontmatter generic
+(no project or vendor names), keep the patterns idiomatic to the language, point
+resource links at the language's own docs, and register it in the manifest's
+optional group so projects can opt in.
 
 ## When to Use
 
@@ -310,8 +327,12 @@ func TestWithMockedSystem(t *testing.T) {
 
 ## Test File Organization
 
+Keep each test file next to the source it exercises, and store golden fixtures in
+a sibling `testdata/` directory (the Go toolchain ignores `testdata/` when
+building):
+
 ```
-installer/internal/tui/
+internal/<package>/
 ├── model.go
 ├── model_test.go           # Model tests
 ├── update.go
@@ -319,16 +340,9 @@ installer/internal/tui/
 ├── view.go
 ├── view_test.go            # View rendering tests
 ├── teatest_test.go         # Teatest integration tests
-├── comprehensive_test.go   # Full flow tests
-├── testdata/
-│   ├── TestOSSelectGolden.golden
-│   └── TestViewGolden.golden
-└── trainer/
-    ├── types.go
-    ├── types_test.go
-    ├── exercises.go
-    ├── exercises_test.go
-    └── simulator_test.go
+└── testdata/
+    ├── TestModelGolden.golden
+    └── TestViewGolden.golden
 ```
 
 ---
@@ -336,20 +350,25 @@ installer/internal/tui/
 ## Commands
 
 ```bash
-go test ./...                           # Run all tests
-go test -v ./internal/tui/...          # Verbose TUI tests
-go test -run TestNavigation             # Run specific test
-go test -cover ./...                    # With coverage
-go test -update ./...                   # Update golden files
-go test -short ./...                    # Skip integration tests
+go test ./...                    # Run all tests
+go test -v ./internal/<pkg>/...  # Verbose tests for one package
+go test -run TestName ./...      # Run a single test (fast RED-GREEN loop)
+go test -cover ./...             # With coverage
+go test -update ./...            # Update golden files (if the flag is defined)
+go test -short ./...             # Skip integration tests
 ```
+
+Note: `-update` is not a built-in flag — it works only when the package defines
+`var update = flag.Bool("update", false, "update golden files")` (see Pattern 4).
 
 ---
 
 ## Resources
 
-- **TUI Tests**: See `installer/internal/tui/*_test.go`
-- **Trainer Tests**: See `installer/internal/tui/trainer/*_test.go`
-- **System Tests**: See `installer/internal/system/*_test.go`
-- **Golden Files**: See `installer/internal/tui/testdata/`
+- **Language-agnostic TDD cycle**: `skills/tdd/SKILL.md` (RED-GREEN-REFACTOR,
+  anti-patterns, per-task evidence format) — this plugin only supplies the Go
+  specifics.
+- **Shared test-runner table**: `skills/_shared/test-runners.md` for the canonical
+  `go test` invocations used across the SDD phases.
 - **Teatest Docs**: https://github.com/charmbracelet/bubbletea/tree/master/teatest
+- **Go testing package**: https://pkg.go.dev/testing
