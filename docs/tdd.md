@@ -1,10 +1,19 @@
 # TDD Module (optional)
 
-Test-Driven Development in Kurama is an **optional, opt-in module**. It
-is OFF by default. When enabled for a project, it hooks into three SDD phases —
-`sdd-tasks` plans the cycle, `sdd-apply` executes it, and `sdd-verify` audits it —
-so RED → GREEN → REFACTOR is planned, run, and checked together, or not at all.
-For quick start, see the [main README](../README.md).
+Test-Driven Development in Kurama is an **optional module**. The module now
+**installs by default** (remove it from disk with `--without tdd`), but activation
+is **opt-in per project** — the cycle stays OFF until you explicitly enable it, and
+nothing infers it from existing test files. When enabled for a project, it hooks
+into three SDD phases — `sdd-tasks` plans the cycle, `sdd-apply` executes it, and
+`sdd-verify` audits it — so RED → GREEN → REFACTOR is planned, run, and checked
+together, or not at all. For quick start, see the [main README](../README.md).
+
+**Installing the module is not activating it.** Shipping `skills/tdd/SKILL.md` on
+disk only makes the cycle *available*; every project still opts in on its own
+terms. The split is deliberate: **a project can start without tests and add them
+later** — the module is there when you want it, inert until you flip the switch.
+See [Enabling TDD later](#enabling-tdd-later) for the mid-stream path and
+[Installation vs activation](#installation-vs-activation) for the on-disk side.
 
 The module core is language-agnostic. The RED → GREEN → REFACTOR protocol,
 anti-patterns, and evidence format live in one place:
@@ -53,6 +62,30 @@ rules:
 `single_test_command` is the TDD-specific one: the fast way to run a single test,
 which is what keeps the RED cycle tight. Leave it empty to auto-detect from
 [test-runners.md](../skills/_shared/test-runners.md).
+
+## Enabling TDD later
+
+TDD is a per-project switch you can flip at any time — a project that started
+without it can adopt the cycle mid-stream. On an already-initialized project:
+
+| Mode | How to enable |
+|------|----------------|
+| `openspec` / `hybrid` | Edit `openspec/config.yaml`: set `tdd.enabled: true` and fill `tdd.single_test_command` (the fast single-test invocation; leave empty to auto-detect). |
+| `engram` / `none` | The flag lives in the `sdd-init/{project}` settings bundle, not a file. Re-run `/sdd-init` (it upserts the bundle and asks the enable question again), or update `tdd.enabled` / `tdd.single_test_command` in that artifact directly. |
+
+The **next cycle** picks up the resolved flag: `sdd-tasks` plans
+RED → GREEN → REFACTOR subtasks, `sdd-apply` runs them, and `sdd-verify` audits
+scenario→test traceability and RED evidence. Because the orchestrator reads the
+flag once and propagates it into every phase, planning and execution always agree.
+
+Make sure the module is on disk first. It installs by default, but if it was
+excluded with `--without tdd`, reinstall before enabling — otherwise `sdd-init`
+declines to record `enabled: true` and `sdd-tasks`/`sdd-apply`/`sdd-verify` degrade
+gracefully with a WARNING (see [Installation vs activation](#installation-vs-activation)).
+
+**Turning it back off** is the same switch in reverse: set `tdd.enabled: false`
+(or answer "no" on a re-run of `/sdd-init`). The next cycle drops to the standard
+checklist with no TDD behavior anywhere — existing tests are left untouched.
 
 ## The cycle
 
@@ -113,23 +146,31 @@ focused, language-scoped patterns skill in the optional install group, discovere
 and compacted by the registry. The `tdd` core provides the cycle; the plugin
 provides the language's idioms.
 
-## Installation
+## Installation vs activation
 
-The `tdd` skill installs via the opt-in `tdd` group in
-[skills/manifest.json](../skills/manifest.json) (the language-pattern plugins like
-`go-testing` live in the `optional` group). Enable it with the `install.sh` /
-`install.ps1` group flag:
+Two independent things, easy to conflate:
+
+- **Installing the module** puts `skills/tdd/SKILL.md` on disk. The `tdd` group in
+  [skills/manifest.json](../skills/manifest.json) is now **installed by default** —
+  `setup.sh`/`setup.ps1` and `install.sh`/`install.ps1` all include it in the
+  default set. Remove it with `--without tdd` if you never want the module on disk.
+  (The language-pattern plugins like `go-testing` live in the separate `optional`
+  group.)
+- **Activating TDD** turns the RED → GREEN → REFACTOR cycle on for a *specific
+  project* via the explicit `tdd.enabled` flag above. Installing the module never
+  activates it; the flag starts `false` everywhere, and existing test files never
+  flip it on.
 
 ```bash
-./scripts/install.sh --with tdd        # bash / macOS / Linux / WSL / Git Bash
+./scripts/install.sh --without tdd     # bash — exclude the module from disk
 ```
 
 ```powershell
-.\scripts\install.ps1 -With tdd        # Windows PowerShell
+.\scripts\install.ps1 -Without tdd     # Windows PowerShell
 ```
 
-The `setup.sh`/`setup.ps1` scripts install the default set (TDD excluded) and have
-no `--with` flag — use `install.sh --with tdd` / `install.ps1 -With tdd` to add the
-module. Leave it out to keep the core SDD pipeline without the TDD module.
-Installing the skill does not activate TDD for any project — activation is always
-the explicit `tdd` flag above.
+If you excluded the module earlier, reinstall **without** the flag (`install.sh` /
+`setup.sh`) to put it back — the default install includes it. Keeping install and
+activation separate is what lets a project **start without tests and add them
+later**: the module is always available on disk, and each project opts into the
+cycle when it is ready (see [Enabling TDD later](#enabling-tdd-later)).

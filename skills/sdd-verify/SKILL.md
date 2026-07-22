@@ -219,12 +219,13 @@ propagated in your launch prompt wins, else `tdd.enabled` in `openspec/config.ya
 default OFF. When it resolves **false**, SKIP this step entirely.
 
 **Module-not-installed fallback (graceful degrade — never a hard failure):** the `tdd` module
-is opt-in and may be absent even when the flag is true. If `skills/tdd/SKILL.md` cannot be
-resolved/loaded, do NOT fail the phase and do NOT run the two audits below. Emit a WARNING —
-*"TDD enabled but the tdd module is not installed — run `scripts/install.sh --with tdd`;
-proceeding without TDD"* — record it in the **TDD Audit** section and the return envelope's
-`risks`, then continue the normal (non-TDD) verification. The compliance matrix (Step 6)
-already covers whether the code works.
+installs by default but may be absent when excluded with `--without tdd`, even when the flag
+is true. If `skills/tdd/SKILL.md` cannot be resolved/loaded, do NOT fail the phase and do NOT
+run the two audits below. Emit a WARNING — *"TDD enabled but the tdd module is missing
+(default installs include it; it was excluded with `--without tdd`) — reinstall with
+`scripts/install.sh`; proceeding without TDD"* — record it in the **TDD Audit** section and
+the return envelope's `risks`, then continue the normal (non-TDD) verification. The compliance
+matrix (Step 6) already covers whether the code works.
 
 When it resolves **true**, add two checks. Both are **WARNING-level and INDEPENDENT of
 `compliance_mode`** — neither is EVER CRITICAL. A genuinely test-after change is still a

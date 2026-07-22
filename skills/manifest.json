@@ -24,8 +24,8 @@
       "required": false
     },
     "tdd": {
-      "description": "Optional TDD module: the RED-GREEN-REFACTOR protocol skill (skills/tdd). Opt-in only, NOT installed by default; enable with --with tdd.",
-      "default": false,
+      "description": "TDD module: the RED-GREEN-REFACTOR protocol skill (skills/tdd). Installed by default; opt out with --without tdd. Installing the module does not activate TDD — activation stays opt-in per project (a project can start without tests and add them later).",
+      "default": true,
       "required": false
     }
   },
@@ -63,6 +63,7 @@
     "vscode": { "skills": ".copilot/skills" },
     "antigravity": { "skills": ".gemini/antigravity/skills" },
     "cursor": { "skills": ".cursor/skills" },
+    "pi": { "skills": ".pi/agent/skills" },
     "project-local": { "skills": "skills" }
   }
 }

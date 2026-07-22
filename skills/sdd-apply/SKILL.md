@@ -76,10 +76,11 @@ passes on the first run, tests coupled to implementation), and the per-task evid
 Do NOT restate the cycle here; follow it from that skill so there is no drift.
 
 **Module-not-installed fallback (graceful degrade — never a hard failure):** the `tdd` module
-is opt-in and may be absent even when the flag is true. If `skills/tdd/SKILL.md` cannot be
-resolved/loaded, do NOT fail the phase. Emit a WARNING —
-*"TDD enabled but the tdd module is not installed — run `scripts/install.sh --with tdd`;
-proceeding without TDD"* — surface it in the return envelope's `risks`, then fall back to
+installs by default but may be absent when excluded with `--without tdd`, even when the flag
+is true. If `skills/tdd/SKILL.md` cannot be resolved/loaded, do NOT fail the phase. Emit a
+WARNING — *"TDD enabled but the tdd module is missing (default installs include it; it was
+excluded with `--without tdd`) — reinstall with `scripts/install.sh`; proceeding without
+TDD"* — surface it in the return envelope's `risks`, then fall back to
 **Step 3b (Standard Workflow)** for this batch. Do not fabricate RED/GREEN/REFACTOR evidence
 you cannot produce without the module.
 

@@ -53,17 +53,19 @@ Read the project to understand:
   - test infra present → `behavioral` (a MUST scenario without a passing test is CRITICAL — the strict gate)
   - no test infra → `static` (compliance may rest on static structural evidence; the cycle can close without test infrastructure)
 - **TDD preference (explicit question — NEVER inferred silently)**: The optional TDD module
-  is opt-in and NOT installed by default (manifest group `tdd`), so activation without the
-  module on disk would leave `sdd-apply`/`sdd-tasks`/`sdd-verify` pointing at a missing file.
+  now installs by default (manifest group `tdd`), but it can still be absent — someone may
+  have excluded it with `--without tdd` — so activation without the module on disk would
+  leave `sdd-apply`/`sdd-tasks`/`sdd-verify` pointing at a missing file.
   **Preflight — is the module installed?** Resolve `tdd/SKILL.md` across the same
   skill-resolution paths Step 4 scans (user-level `~/.claude/skills/`,
   `~/.config/opencode/skills/`, `~/.gemini/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`,
   `~/.copilot/skills/`, `~/.gemini/antigravity/skills/`, the parent directory of this skill
   file, and the project-level equivalents).
   - **If `tdd/SKILL.md` is NOT resolvable**: do NOT ask the enable question and do NOT record
-    `tdd.enabled=true`. Record `tdd.enabled=false` and tell the user: *"The TDD module is not
-    installed — install it with `scripts/install.sh --with tdd` (or `install.ps1 -With tdd`),
-    then re-run `/sdd-init` to enable it."* Surface this in the return envelope's `risks`.
+    `tdd.enabled=true`. Record `tdd.enabled=false` and tell the user: *"The TDD module is
+    missing (default installs include it; it was excluded with `--without tdd`) — reinstall
+    with `scripts/install.sh` (or `install.ps1`), then re-run `/sdd-init` to enable it."*
+    Surface this in the return envelope's `risks`.
   - **If `tdd/SKILL.md` IS resolvable**: ask the user directly:
     **"Enable TDD (RED → GREEN → REFACTOR) for this project?"** This is the ONLY switch that
     activates the optional TDD module. Detected test infrastructure NEVER auto-enables TDD; it

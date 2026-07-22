@@ -7,7 +7,7 @@
     Copies SDD skills to your AI coding assistant's skill directory.
 .PARAMETER Agent
     Install for a specific agent (non-interactive).
-    Valid values: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, project-local, all-global, custom
+    Valid values: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, project-local, all-global, custom
 .PARAMETER Path
     Custom install path (use with -Agent custom)
 .PARAMETER Help
@@ -23,7 +23,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('claude-code', 'opencode', 'gemini-cli', 'codex', 'vscode',
-                 'antigravity', 'cursor', 'project-local', 'all-global', 'custom')]
+                 'antigravity', 'cursor', 'pi', 'project-local', 'all-global', 'custom')]
     [string]$Agent,
     [string]$Path,
     [ValidateSet('quality', 'review', 'optional', 'tdd')]
@@ -59,6 +59,7 @@ $ToolPaths = @{
     'vscode'            = Join-Path $env:USERPROFILE '.copilot\skills'
     'antigravity'       = Join-Path $env:USERPROFILE '.gemini\antigravity\skills'
     'cursor'            = Join-Path $env:USERPROFILE '.cursor\skills'
+    'pi'                = Join-Path $env:USERPROFILE '.pi\agent\skills'
     'project-local'     = Join-Path '.' 'skills'
 }
 
@@ -132,18 +133,18 @@ function Show-Usage {
     Write-Host '  -Agent NAME      Install for a specific agent (non-interactive)'
     Write-Host '  -Path DIR        Custom install path (use with -Agent custom)'
     Write-Host '  -With GROUP      Include an optional skill group (quality, review, optional, tdd)'
-    Write-Host '  -Without GROUP   Exclude an optional skill group (quality, review, optional)'
+    Write-Host '  -Without GROUP   Exclude an optional skill group (quality, review, optional, tdd)'
     Write-Host '  -Version         Print the Kurama version and exit'
     Write-Host '  -Help            Show this help'
     Write-Host ''
-    Write-Host 'Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, project-local, all-global'
+    Write-Host 'Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, project-local, all-global'
     Write-Host ''
     Write-Host 'Skill groups:'
     Write-Host '  sdd-core   Core SDD pipeline + authoring utilities (always installed)'
     Write-Host '  quality    Adversarial review skills, e.g. judgment-day (on by default; -Without quality to skip)'
     Write-Host '  review     4R review lenses + refuter, e.g. review-risk (on by default; -Without review to skip)'
     Write-Host '  optional   Language/testing skills, e.g. go-testing (on by default; -Without optional to skip)'
-    Write-Host '  tdd        Optional TDD module (RED-GREEN-REFACTOR), skills/tdd (opt-in; -With tdd to enable)'
+    Write-Host '  tdd        TDD module (RED-GREEN-REFACTOR), skills/tdd (on by default; -Without tdd to skip)'
 }
 
 # ============================================================================
@@ -167,9 +168,10 @@ function Get-ManifestSkills {
 }
 
 function Resolve-ActiveGroups {
-    # sdd-core is always active; quality/review/optional are on by default; tdd is
-    # opt-in only (absent here, added by -With tdd). Toggles restricted by ValidateSet.
-    $active = @{ 'sdd-core' = $true; 'quality' = $true; 'review' = $true; 'optional' = $true }
+    # sdd-core is always active; quality/review/optional/tdd are all on by default.
+    # Installing the tdd module does NOT activate TDD — activation stays opt-in per
+    # project. Toggles restricted by ValidateSet.
+    $active = @{ 'sdd-core' = $true; 'quality' = $true; 'review' = $true; 'optional' = $true; 'tdd' = $true }
     foreach ($g in $Without) { $active.Remove($g) }
     foreach ($g in $With) { $active[$g] = $true }
     return $active
@@ -374,6 +376,10 @@ function Install-ForAgent {
             Install-Skills -TargetDir $ToolPaths['cursor'] -ToolName 'Cursor'
             Write-NextStep '.cursor\rules\sdd-orchestrator.mdc' 'examples\cursor\.cursor\rules\sdd-orchestrator.mdc'
         }
+        'pi' {
+            Install-Skills -TargetDir $ToolPaths['pi'] -ToolName 'Pi'
+            Write-NextStep '~\.pi\agent\AGENTS.md' 'examples\pi\AGENTS.md'
+        }
         'project-local' {
             Install-Skills -TargetDir $ToolPaths['project-local'] -ToolName 'Project-local'
             Write-Host ''
@@ -436,12 +442,13 @@ function Show-Menu {
     Write-Host "   5) VS Code        ($($ToolPaths['vscode']))"
     Write-Host "   6) Antigravity    ($($ToolPaths['antigravity']))"
     Write-Host "   7) Cursor         ($($ToolPaths['cursor']))"
-    Write-Host "   8) Project-local  ($($ToolPaths['project-local']))"
-    Write-Host '   9) All global     (Claude Code + OpenCode + Gemini CLI + Codex + Cursor)'
-    Write-Host '  10) Custom path'
+    Write-Host "   8) Pi             ($($ToolPaths['pi']))"
+    Write-Host "   9) Project-local  ($($ToolPaths['project-local']))"
+    Write-Host '  10) All global     (Claude Code + OpenCode + Gemini CLI + Codex + Cursor)'
+    Write-Host '  11) Custom path'
     Write-Host ''
 
-    $choice = Read-Host 'Choice [1-10]'
+    $choice = Read-Host 'Choice [1-11]'
 
     $agentMap = @{
         '1'  = 'claude-code'
@@ -451,9 +458,10 @@ function Show-Menu {
         '5'  = 'vscode'
         '6'  = 'antigravity'
         '7'  = 'cursor'
-        '8'  = 'project-local'
-        '9'  = 'all-global'
-        '10' = 'custom'
+        '8'  = 'pi'
+        '9'  = 'project-local'
+        '10' = 'all-global'
+        '11' = 'custom'
     }
 
     if ($agentMap.ContainsKey($choice)) {

@@ -18,10 +18,12 @@ VERSION_FILE="$REPO_DIR/VERSION"
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
 # Skill-group selection. Groups come from skills/manifest.json; sdd-core is
-# mandatory, quality + review + optional are on by default and opt-out via
-# --without, and tdd is opt-in only (off by default, enabled with --with tdd).
+# mandatory, and quality + review + optional + tdd are all on by default and
+# opt-out via --without. The tdd module ships by default but installing it does
+# NOT activate TDD — activation stays opt-in per project (a project can start
+# without tests and add them later).
 # The surrounding single spaces let membership be tested with a case glob.
-ACTIVE_GROUPS=" sdd-core quality review optional "
+ACTIVE_GROUPS=" sdd-core quality review optional tdd "
 REQUIRED_GROUPS=" sdd-core "
 
 # Every group name the flags accept (default-on ones plus opt-in ones). Kept in
@@ -140,6 +142,14 @@ get_tool_path() {
                 *)        echo "$HOME/.cursor/skills" ;;
             esac
             ;;
+        pi)
+            # Pi's global skills live under its agent config dir (~/.pi/agent/skills).
+            case "$OS" in
+                windows)  echo "$USERPROFILE/.pi/agent/skills" ;;
+                wsl)      echo "$HOME/.pi/agent/skills" ;;
+                *)        echo "$HOME/.pi/agent/skills" ;;
+            esac
+            ;;
         project-local) echo "./skills" ;;
     esac
 }
@@ -198,18 +208,18 @@ show_help() {
     echo "  --agent NAME     Install for a specific agent (non-interactive)"
     echo "  --path DIR       Custom install path (use with --agent custom)"
     echo "  --with GROUP     Include an optional skill group (quality, review, optional, tdd)"
-    echo "  --without GROUP  Exclude an optional skill group (quality, review, optional)"
+    echo "  --without GROUP  Exclude an optional skill group (quality, review, optional, tdd)"
     echo "  --version        Print the Kurama version and exit"
     echo "  -h, --help       Show this help"
     echo ""
-    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, project-local, all-global"
+    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, project-local, all-global"
     echo ""
     echo "Skill groups:"
     echo "  sdd-core   Core SDD pipeline + authoring utilities (always installed)"
     echo "  quality    Adversarial review skills, e.g. judgment-day (on by default; --without quality to skip)"
     echo "  review     4R review lenses + refuter, e.g. review-risk (on by default; --without review to skip)"
     echo "  optional   Language/testing skills, e.g. go-testing (on by default; --without optional to skip)"
-    echo "  tdd        Optional TDD module (RED-GREEN-REFACTOR), skills/tdd (opt-in; --with tdd to enable)"
+    echo "  tdd        TDD module (RED-GREEN-REFACTOR), skills/tdd (on by default; --without tdd to skip)"
 }
 
 # ============================================================================
@@ -518,6 +528,10 @@ install_for_agent() {
             install_skills "$(get_tool_path cursor)" "Cursor"
             print_next_step ".cursor/rules/sdd-orchestrator.mdc" "examples/cursor/.cursor/rules/sdd-orchestrator.mdc"
             ;;
+        pi)
+            install_skills "$(get_tool_path pi)" "Pi"
+            print_next_step "~/.pi/agent/AGENTS.md" "examples/pi/AGENTS.md"
+            ;;
         project-local)
             install_skills "$(get_tool_path project-local)" "Project-local"
             echo -e "\n${YELLOW}Note:${NC} Skills installed in ${BOLD}./skills/${NC} — relative to this project"
@@ -565,11 +579,12 @@ interactive_menu() {
     echo "  5) VS Code        ($(get_tool_path vscode))"
     echo "  6) Antigravity    (~/.gemini/antigravity/skills/)"
     echo "  7) Cursor         ($(get_tool_path cursor))"
-    echo "  8) Project-local  ($(get_tool_path project-local))"
-    echo "  9) All global     (Claude Code + OpenCode + Gemini CLI + Codex + Cursor)"
-    echo "  10) Custom path"
+    echo "  8) Pi             ($(get_tool_path pi))"
+    echo "  9) Project-local  ($(get_tool_path project-local))"
+    echo "  10) All global    (Claude Code + OpenCode + Gemini CLI + Codex + Cursor)"
+    echo "  11) Custom path"
     echo ""
-    read -rp "Choice [1-10]: " choice
+    read -rp "Choice [1-11]: " choice
 
     case $choice in
         1)  install_for_agent "claude-code" ;;
@@ -579,9 +594,10 @@ interactive_menu() {
         5)  install_for_agent "vscode" ;;
         6)  install_for_agent "antigravity" ;;
         7)  install_for_agent "cursor" ;;
-        8)  install_for_agent "project-local" ;;
-        9)  install_for_agent "all-global" ;;
-        10) install_for_agent "custom" ;;
+        8)  install_for_agent "pi" ;;
+        9)  install_for_agent "project-local" ;;
+        10) install_for_agent "all-global" ;;
+        11) install_for_agent "custom" ;;
         *)
             print_error "Invalid choice"
             exit 1

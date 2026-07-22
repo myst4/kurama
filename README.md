@@ -14,9 +14,9 @@
 
 Kurama turns any capable AI coding assistant into a disciplined
 **Spec-Driven Development (SDD)** team. It ships as **24 portable Markdown skills**
-(23 installed by default, plus the opt-in `tdd` module)
-(plus a set of shared convention files) and a thin *delegate-only orchestrator*
-prompt. The orchestrator never writes code itself — it coordinates a pipeline of
+(all installed by default — the `tdd` module is included but removable with
+`--without tdd`) plus a set of shared convention files, and a thin
+*delegate-only orchestrator* prompt. The orchestrator never writes code itself — it coordinates a pipeline of
 focused sub-agents, each running in a **fresh context window**, that explore,
 specify, design, implement, and verify a change.
 
@@ -101,8 +101,9 @@ multi mode) live in [docs/installation.md](docs/installation.md).
 ## The skills
 
 All 24 skills, grouped by role. Every one is a single `SKILL.md` that any
-file-reading agent can load. Twenty-three install by default; the `tdd` module is
-opt-in (`--with tdd`).
+file-reading agent can load. All 24 install by default; the `tdd` module ships
+installed too and can be excluded with `--without tdd`. Installing it never
+activates TDD — that stays a separate per-project switch.
 
 ### Orchestration entry points
 
@@ -159,11 +160,11 @@ by the diff can block, and only `BLOCKER`/`CRITICAL` gate. See
 | `review-resilience` | R4 — fallbacks, retry/backoff, graceful degradation, observability, rollback. |
 | `review-refuter` | Adversarial verifier — adjudicates inferential findings `corroborated`/`refuted`/`inconclusive`. |
 
-### Optional TDD module (opt-in)
+### TDD module (installed by default, activation opt-in)
 
 | Skill | Role |
 |-------|------|
-| `tdd` | Language-agnostic RED → GREEN → REFACTOR contract, anti-patterns, and per-task evidence format. Not installed by default — add it with `--with tdd` (see [docs/tdd.md](docs/tdd.md)). |
+| `tdd` | Language-agnostic RED → GREEN → REFACTOR contract, anti-patterns, and per-task evidence format. Installed by default; remove the module with `--without tdd`. Installing it never activates TDD — that is a separate explicit per-project switch (see [docs/tdd.md](docs/tdd.md)). |
 
 Shared behavior the SDD skills rely on lives in
 [`skills/_shared/`](skills/_shared/) — the persistence contract, the Engram and
@@ -200,7 +201,7 @@ exposes. "Full" means true sub-agents with isolated, fresh context windows.
 | Cursor | Inline (skills load as instructions) | `setup.sh --agent cursor` |
 | VS Code Copilot | Inline (agent mode with tool use) | `setup.sh --agent vscode` |
 | Antigravity | Single-agent | Manual (see installation guide) |
-| Pi | Inline (skills load as instructions) | Manual (project-root `AGENTS.md`; see installation guide) |
+| Pi | Inline (skills load as instructions) | `setup.sh --agent pi` (global `~/.pi/agent/AGENTS.md`; see installation guide) |
 
 ## Documentation
 
@@ -223,7 +224,7 @@ automated PR checks.
 
 Kurama is **actively maintained** as the standalone, lightweight
 multi-harness SDD framework — the pure-Markdown, zero-dependency way to install
-these skills into any of the seven supported agents.
+these skills into any of the eight supported agents.
 
 [`gentle-ai`](https://github.com/Gentleman-Programming/gentle-ai) is a separate,
 higher-level distribution: a managed installer (Go binary) that bundles these

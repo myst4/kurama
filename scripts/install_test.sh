@@ -31,7 +31,8 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All 23 expected default skills (sdd-core + quality + review + optional; tdd is opt-in)
+# All 24 expected default skills (sdd-core + quality + review + optional + tdd).
+# The tdd module ships by default now; installing it does NOT activate TDD.
 EXPECTED_SKILLS=(
     sdd-apply
     sdd-archive
@@ -53,6 +54,7 @@ EXPECTED_SKILLS=(
     review-resilience
     review-refuter
     go-testing
+    tdd
     skill-creator
     branch-pr
     issue-creation
@@ -204,7 +206,7 @@ test_claude_code_skill_count() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for Claude Code"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Claude Code"
 }
 
 # ============================================================================
@@ -220,7 +222,7 @@ test_opencode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for OpenCode"
+    assert_eq "24" "$count" "Expected exactly 24 skills for OpenCode"
 }
 
 test_opencode_commands() {
@@ -253,7 +255,7 @@ test_gemini_cli_skill_count() {
     bash "$INSTALL_SCRIPT" --agent gemini-cli > /dev/null 2>&1
     local count
     count=$(find "$HOME/.gemini/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for Gemini CLI"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Gemini CLI"
 }
 
 # ============================================================================
@@ -269,7 +271,7 @@ test_codex_skill_count() {
     bash "$INSTALL_SCRIPT" --agent codex > /dev/null 2>&1
     local count
     count=$(find "$HOME/.codex/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for Codex"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Codex"
 }
 
 # ============================================================================
@@ -285,7 +287,7 @@ test_vscode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent vscode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.copilot/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for VS Code"
+    assert_eq "24" "$count" "Expected exactly 24 skills for VS Code"
 }
 
 # ============================================================================
@@ -301,7 +303,7 @@ test_antigravity_skill_count() {
     bash "$INSTALL_SCRIPT" --agent antigravity > /dev/null 2>&1
     local count
     count=$(find "$HOME/.gemini/antigravity/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for Antigravity"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Antigravity"
 }
 
 # ============================================================================
@@ -317,7 +319,7 @@ test_cursor_skill_count() {
     bash "$INSTALL_SCRIPT" --agent cursor > /dev/null 2>&1
     local count
     count=$(find "$HOME/.cursor/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for Cursor"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Cursor"
 }
 
 # ============================================================================
@@ -337,7 +339,7 @@ test_project_local_skill_count() {
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
     local count
     count=$(find "$project/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for project-local"
+    assert_eq "24" "$count" "Expected exactly 24 skills for project-local"
 }
 
 # ============================================================================
@@ -355,7 +357,7 @@ test_custom_path_skill_count() {
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     local count
     count=$(find "$custom" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills for custom path"
+    assert_eq "24" "$count" "Expected exactly 24 skills for custom path"
 }
 
 # ============================================================================
@@ -378,7 +380,7 @@ test_all_global() {
 
 test_all_global_total_skill_count() {
     bash "$INSTALL_SCRIPT" --agent all-global > /dev/null 2>&1
-    # 5 targets x 23 skills = 115 SKILL.md files
+    # 5 targets x 24 skills = 120 SKILL.md files
     local total=0
     for dir in \
         "$HOME/.claude/skills" \
@@ -388,10 +390,10 @@ test_all_global_total_skill_count() {
         "$HOME/.cursor/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "23" "$count" "Expected 23 skills in $dir" || return 1
+        assert_eq "24" "$count" "Expected 24 skills in $dir" || return 1
         total=$((total + count))
     done
-    assert_eq "115" "$total" "Expected 115 total SKILL.md files across all targets"
+    assert_eq "120" "$total" "Expected 120 total SKILL.md files across all targets"
 }
 
 test_all_global_opencode_commands() {
@@ -413,7 +415,7 @@ test_idempotent_claude_code() {
     assert_all_skills_installed "$HOME/.claude/skills"
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected exactly 23 skills after double install"
+    assert_eq "24" "$count" "Expected exactly 24 skills after double install"
 }
 
 test_idempotent_opencode() {
@@ -422,7 +424,7 @@ test_idempotent_opencode() {
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
     local skill_count
     skill_count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$skill_count" "Expected exactly 23 skills after double install" || return 1
+    assert_eq "24" "$skill_count" "Expected exactly 24 skills after double install" || return 1
     local cmd_count
     cmd_count=$(find "$HOME/.config/opencode/commands" -name "sdd-*.md" | wc -l | tr -d ' ')
     assert_eq "8" "$cmd_count" "Expected exactly 8 commands after double install"
@@ -439,7 +441,7 @@ test_idempotent_all_global() {
         "$HOME/.cursor/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "23" "$count" "Expected 23 skills in $dir after double install" || return 1
+        assert_eq "24" "$count" "Expected 24 skills in $dir after double install" || return 1
     done
 }
 
@@ -506,8 +508,8 @@ test_output_shows_done_message() {
 test_output_shows_install_count() {
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "23 skills installed" || {
-        echo "Output missing '23 skills installed' message"
+    echo "$output" | grep -q "24 skills installed" || {
+        echo "Output missing '24 skills installed' message"
         return 1
     }
 }
@@ -667,16 +669,16 @@ test_setup_installs_default_skill_set() {
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "setup.sh should install the 23 default skills"
+    assert_eq "24" "$count" "setup.sh should install the 24 default skills"
 }
 
-test_setup_excludes_tdd() {
-    # setup.sh installs the default set only; the opt-in tdd module must not ship.
+test_setup_includes_tdd() {
+    # setup.sh installs the default set, which now includes the tdd module.
+    # Installing the module does NOT activate TDD — activation stays opt-in per
+    # project.
     bash "$SETUP_SCRIPT" --agent claude-code > /dev/null 2>&1
-    if [ -d "$HOME/.claude/skills/tdd" ]; then
-        echo "setup.sh must not install the opt-in tdd module"
-        return 1
-    fi
+    assert_dir_exists "$HOME/.claude/skills/tdd" || return 1
+    assert_file_exists "$HOME/.claude/skills/tdd/SKILL.md" || return 1
     return 0
 }
 
@@ -826,7 +828,7 @@ test_without_optional_excludes_go_testing() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "22" "$count" "Expected 22 skills with --without optional"
+    assert_eq "23" "$count" "Expected 23 skills with --without optional"
 }
 
 test_without_quality_excludes_judgment_day() {
@@ -839,7 +841,7 @@ test_without_quality_excludes_judgment_day() {
     assert_dir_exists "$base/go-testing" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "22" "$count" "Expected 22 skills with --without quality"
+    assert_eq "23" "$count" "Expected 23 skills with --without quality"
 }
 
 test_without_both_groups() {
@@ -849,7 +851,7 @@ test_without_both_groups() {
     if [ -d "$base/go-testing" ]; then echo "go-testing should be excluded"; return 1; fi
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "21" "$count" "Expected 21 skills with both optional groups excluded"
+    assert_eq "22" "$count" "Expected 22 skills with both optional groups excluded"
 }
 
 test_reject_without_required_group() {
@@ -861,26 +863,43 @@ test_reject_without_required_group() {
 }
 
 # ============================================================================
-# Tests — TDD module group (opt-in via --with tdd)
+# Tests — TDD module group (default-on; opt out with --without tdd)
 # ============================================================================
 
-test_default_install_excludes_tdd() {
-    # The tdd group is opt-in: a plain install must NOT ship skills/tdd, and the
-    # default skill count is unchanged (still the 23 default-on skills).
+test_default_install_includes_tdd() {
+    # The tdd group is now default-on: a plain install ships skills/tdd as part of
+    # the 24-skill default set. Installing the module does NOT activate TDD —
+    # activation stays opt-in per project.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local base="$HOME/.claude/skills"
-    if [ -d "$base/tdd" ]; then
-        echo "tdd should NOT be installed by default (opt-in via --with tdd)"
-        return 1
-    fi
+    assert_dir_exists "$base/tdd" || return 1
+    assert_file_exists "$base/tdd/SKILL.md" || return 1
+    assert_file_not_empty "$base/tdd/SKILL.md" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Default install must stay at 23 skills (tdd excluded)"
+    assert_eq "24" "$count" "Default install must include tdd (24 skills)"
+}
+
+test_without_tdd_excludes_tdd() {
+    # --without tdd opts the module out: skills/tdd is dropped, landing the
+    # remaining 23 default skills. The other default-on groups stay on.
+    bash "$INSTALL_SCRIPT" --agent claude-code --without tdd > /dev/null 2>&1
+    local base="$HOME/.claude/skills"
+    if [ -d "$base/tdd" ]; then
+        echo "tdd should be excluded by --without tdd"
+        return 1
+    fi
+    assert_dir_exists "$base/judgment-day" || return 1   # quality group still on
+    assert_dir_exists "$base/go-testing" || return 1     # optional group still on
+    assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
+    local count
+    count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
+    assert_eq "23" "$count" "Expected 23 skills with --without tdd"
 }
 
 test_with_tdd_includes_tdd() {
-    # --with tdd opts the module in: skills/tdd is installed alongside the
-    # default set, bringing the count to 24.
+    # tdd is default-on, so --with tdd is idempotent: skills/tdd ships and the
+    # count stays at the 24-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --with tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     assert_dir_exists "$base/tdd" || return 1
@@ -892,7 +911,7 @@ test_with_tdd_includes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected 24 skills with --with tdd (23 default + tdd)"
+    assert_eq "24" "$count" "Expected 24 skills with --with tdd (default set already includes tdd)"
 }
 
 test_with_tdd_uninstall_round_trip() {
@@ -920,6 +939,50 @@ test_with_tdd_uninstall_round_trip() {
 }
 
 # ============================================================================
+# Tests — Pi agent (P5 installer wiring)
+# Pi's global context/skills live under its agent config dir (~/.pi/agent). The
+# installers write skills to ~/.pi/agent/skills and merge the orchestrator rule
+# into ~/.pi/agent/AGENTS.md (Pi's global context file, loaded natively).
+# ============================================================================
+
+test_install_pi() {
+    bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
+    assert_all_skills_installed "$HOME/.pi/agent/skills"
+}
+
+test_pi_skill_count() {
+    bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
+    local count
+    count=$(find "$HOME/.pi/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
+    assert_eq "24" "$count" "Expected exactly 24 skills for Pi"
+}
+
+test_pi_writes_install_manifest() {
+    # install.sh --agent pi leaves the same receipt as every other target so
+    # uninstall.sh works for Pi installs.
+    bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
+    local manifest="$HOME/.pi/agent/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q '"files"' "$manifest" || { echo "Pi install manifest missing files array"; return 1; }
+    grep -q 'tdd/SKILL.md' "$manifest" || { echo "Pi install manifest missing tdd (default set)"; return 1; }
+    return 0
+}
+
+test_setup_pi_writes_orchestrator() {
+    # setup.sh --agent pi installs the default skill set into ~/.pi/agent/skills
+    # and merges the orchestrator rule into the global Pi context file
+    # (~/.pi/agent/AGENTS.md) using the standard kurama markers.
+    bash "$SETUP_SCRIPT" --agent pi > /dev/null 2>&1
+    assert_all_skills_installed "$HOME/.pi/agent/skills" || return 1
+    local prompt="$HOME/.pi/agent/AGENTS.md"
+    assert_file_exists "$prompt" || return 1
+    grep -qF 'BEGIN:kurama' "$prompt" || { echo "Pi orchestrator missing BEGIN:kurama marker"; return 1; }
+    grep -qF 'END:kurama' "$prompt" || { echo "Pi orchestrator missing END:kurama marker"; return 1; }
+    grep -qF 'Kurama Orchestrator' "$prompt" || { echo "Pi orchestrator body missing"; return 1; }
+    return 0
+}
+
+# ============================================================================
 # Tests — Review lens group (4R + refuter, default-on)
 # ============================================================================
 
@@ -941,7 +1004,7 @@ test_review_lenses_installed_by_default() {
 
 test_without_review_excludes_lenses() {
     # The review group opts out like quality/optional: --without review drops all
-    # five lenses and lands the remaining 18 default skills.
+    # five lenses and lands the remaining 19 default skills.
     bash "$INSTALL_SCRIPT" --agent claude-code --without review > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     local lens
@@ -955,7 +1018,7 @@ test_without_review_excludes_lenses() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "18" "$count" "Expected 18 skills with --without review (23 default - 5 lenses)"
+    assert_eq "19" "$count" "Expected 19 skills with --without review (24 default - 5 lenses)"
 }
 
 # ============================================================================
@@ -1164,55 +1227,55 @@ run_test "Unknown option exits non-zero" test_invalid_option
 echo ""
 
 echo -e "${BOLD}Claude Code${NC}"
-run_test "Installs all 23 skills to ~/.claude/skills" test_install_claude_code
-run_test "Exactly 23 SKILL.md files" test_claude_code_skill_count
+run_test "Installs all 24 skills to ~/.claude/skills" test_install_claude_code
+run_test "Exactly 24 SKILL.md files" test_claude_code_skill_count
 echo ""
 
 echo -e "${BOLD}OpenCode${NC}"
-run_test "Installs all 23 skills to ~/.config/opencode/skills" test_install_opencode
-run_test "Exactly 23 SKILL.md files" test_opencode_skill_count
+run_test "Installs all 24 skills to ~/.config/opencode/skills" test_install_opencode
+run_test "Exactly 24 SKILL.md files" test_opencode_skill_count
 run_test "Installs 8 command files" test_opencode_commands
 echo ""
 
 echo -e "${BOLD}Gemini CLI${NC}"
-run_test "Installs all 23 skills to ~/.gemini/skills" test_install_gemini_cli
-run_test "Exactly 23 SKILL.md files" test_gemini_cli_skill_count
+run_test "Installs all 24 skills to ~/.gemini/skills" test_install_gemini_cli
+run_test "Exactly 24 SKILL.md files" test_gemini_cli_skill_count
 echo ""
 
 echo -e "${BOLD}Codex${NC}"
-run_test "Installs all 23 skills to ~/.codex/skills" test_install_codex
-run_test "Exactly 23 SKILL.md files" test_codex_skill_count
+run_test "Installs all 24 skills to ~/.codex/skills" test_install_codex
+run_test "Exactly 24 SKILL.md files" test_codex_skill_count
 echo ""
 
 echo -e "${BOLD}VS Code (Copilot)${NC}"
-run_test "Installs all 23 skills to ~/.copilot/skills" test_install_vscode
-run_test "Exactly 23 SKILL.md files" test_vscode_skill_count
+run_test "Installs all 24 skills to ~/.copilot/skills" test_install_vscode
+run_test "Exactly 24 SKILL.md files" test_vscode_skill_count
 echo ""
 
 echo -e "${BOLD}Antigravity${NC}"
-run_test "Installs all 23 skills to ~/.gemini/antigravity/skills/" test_install_antigravity
-run_test "Exactly 23 SKILL.md files" test_antigravity_skill_count
+run_test "Installs all 24 skills to ~/.gemini/antigravity/skills/" test_install_antigravity
+run_test "Exactly 24 SKILL.md files" test_antigravity_skill_count
 echo ""
 
 echo -e "${BOLD}Cursor${NC}"
-run_test "Installs all 23 skills to ~/.cursor/skills" test_install_cursor
-run_test "Exactly 23 SKILL.md files" test_cursor_skill_count
+run_test "Installs all 24 skills to ~/.cursor/skills" test_install_cursor
+run_test "Exactly 24 SKILL.md files" test_cursor_skill_count
 echo ""
 
 echo -e "${BOLD}Project-local${NC}"
-run_test "Installs all 23 skills to ./skills/" test_install_project_local
-run_test "Exactly 23 SKILL.md files" test_project_local_skill_count
+run_test "Installs all 24 skills to ./skills/" test_install_project_local
+run_test "Exactly 24 SKILL.md files" test_project_local_skill_count
 echo ""
 
 echo -e "${BOLD}Custom path${NC}"
 run_test "Installs to arbitrary custom path" test_custom_path
-run_test "Exactly 23 SKILL.md files" test_custom_path_skill_count
+run_test "Exactly 24 SKILL.md files" test_custom_path_skill_count
 run_test "Handles deeply nested custom path" test_nested_custom_path
 echo ""
 
 echo -e "${BOLD}All-global${NC}"
 run_test "Installs to all 5 global targets" test_all_global
-run_test "115 total SKILL.md files (5x23)" test_all_global_total_skill_count
+run_test "120 total SKILL.md files (5x24)" test_all_global_total_skill_count
 run_test "Also installs OpenCode commands" test_all_global_opencode_commands
 echo ""
 
@@ -1251,8 +1314,8 @@ run_test "Balanced marker updates in place + writes backup" test_setup_balanced_
 echo ""
 
 echo -e "${BOLD}setup.sh manifest-driven install + receipt${NC}"
-run_test "setup.sh installs the 23 default skills" test_setup_installs_default_skill_set
-run_test "setup.sh excludes the opt-in tdd module" test_setup_excludes_tdd
+run_test "setup.sh installs the 24 default skills" test_setup_installs_default_skill_set
+run_test "setup.sh includes the default tdd module" test_setup_includes_tdd
 run_test "setup.sh writes an install manifest (receipt)" test_setup_writes_install_manifest
 run_test "uninstall.sh cleans a setup.sh install" test_setup_uninstall_round_trip
 run_test "setup.sh tree equals install.sh default tree" test_setup_matches_manifest_default_set
@@ -1270,21 +1333,29 @@ run_test "--version prints the version" test_version_flag
 run_test "--version exits with code 0" test_version_exits_zero
 run_test "Install writes an install manifest" test_install_writes_install_manifest
 run_test "Default install includes optional groups" test_default_install_includes_optional_groups
-run_test "--without optional excludes go-testing (22 skills)" test_without_optional_excludes_go_testing
-run_test "--without quality excludes judgment-day (22 skills)" test_without_quality_excludes_judgment_day
-run_test "--without quality --without optional (21 skills)" test_without_both_groups
+run_test "--without optional excludes go-testing (23 skills)" test_without_optional_excludes_go_testing
+run_test "--without quality excludes judgment-day (23 skills)" test_without_quality_excludes_judgment_day
+run_test "--without quality --without optional (22 skills)" test_without_both_groups
 run_test "--without sdd-core is rejected" test_reject_without_required_group
 echo ""
 
-echo -e "${BOLD}TDD module (opt-in group)${NC}"
-run_test "Default install excludes tdd (23 skills)" test_default_install_excludes_tdd
-run_test "--with tdd includes tdd (24 skills)" test_with_tdd_includes_tdd
+echo -e "${BOLD}TDD module (default-on group)${NC}"
+run_test "Default install includes tdd (24 skills)" test_default_install_includes_tdd
+run_test "--without tdd excludes tdd (23 skills)" test_without_tdd_excludes_tdd
+run_test "--with tdd is idempotent (24 skills)" test_with_tdd_includes_tdd
 run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_round_trip
+echo ""
+
+echo -e "${BOLD}Pi agent (P5 installer wiring)${NC}"
+run_test "install.sh --agent pi installs 24 skills" test_install_pi
+run_test "Exactly 24 SKILL.md files for Pi" test_pi_skill_count
+run_test "Pi install writes an install manifest" test_pi_writes_install_manifest
+run_test "setup.sh --agent pi writes orchestrator to ~/.pi/agent/AGENTS.md" test_setup_pi_writes_orchestrator
 echo ""
 
 echo -e "${BOLD}Review lens group (G1, default-on)${NC}"
 run_test "review lenses install by default" test_review_lenses_installed_by_default
-run_test "--without review excludes the 5 lenses (18 skills)" test_without_review_excludes_lenses
+run_test "--without review excludes the 5 lenses (19 skills)" test_without_review_excludes_lenses
 echo ""
 
 echo -e "${BOLD}Phase 6 surface (G9 Pi + sdd-status.sh)${NC}"

@@ -2,7 +2,7 @@
 
 # Kurama — Orchestrator Instructions for Pi
 
-Add this to `AGENTS.md` in your project root (Pi loads it as project context). Alternatively, place it in the global `~/.pi/agent/APPEND_SYSTEM.md`. Bind it to the coordinator role only — do NOT apply it to executor phase agents such as `sdd-apply` or `sdd-verify`.
+Add this to an `AGENTS.md` context file that Pi loads at startup: the project-root `AGENTS.md` for a single project, or the global `~/.pi/agent/AGENTS.md` for every session (this is where `setup.sh --agent pi` / `install.sh --agent pi` place it). Bind it to the coordinator role only — do NOT apply it to executor phase agents such as `sdd-apply` or `sdd-verify`.
 
 ## Kurama Orchestrator
 
@@ -70,7 +70,7 @@ Before you Read, Edit, or Write a source/config/skill file, decide: orchestratio
 
 ### Pi assets & markdown-pure setup
 
-This example is markdown-only — it does not install the `gentle-pi` npm stack, and it does not require Engram (any persistence backend from the Artifact Store Policy works). Install the SDD skills into Pi's skills directory and, optionally, add one Pi agent per SDD phase under `.pi/agents/` so `/sdd-<phase>` routes straight to it; without per-phase agents, drive the flow through the `/sdd-new`, `/sdd-continue`, and `/sdd-ff` meta-commands and run each phase as a subtask.
+This example is markdown-only — it does not install the `gentle-pi` npm stack, and it does not require Engram (any persistence backend from the Artifact Store Policy works). Install the SDD skills into Pi's skills directory (`~/.pi/agent/skills/` globally, or `.pi/skills/` per project) and, optionally, add one Pi agent per SDD phase under `.pi/agents/` so `/sdd-<phase>` routes straight to it; without per-phase agents, drive the flow through the `/sdd-new`, `/sdd-continue`, and `/sdd-ff` meta-commands and run each phase as a subtask.
 
 Model routing lives in each Pi agent's own frontmatter (or, under `gentle-pi`, the `/gentleman:models` modal), not in an orchestrator-passed `model` parameter — which is why there is no Model Assignments block below. Use the reasoning-effort shape recommended for each phase (fast/cheap for explore, propose, archive; stronger reasoning for spec, design, tasks; strong coding for apply; independent fresh context for verify/review) when assigning per-agent models.
 
@@ -260,7 +260,7 @@ Sub-agents retrieve full content via two steps:
 
 ### State and Conventions
 
-Convention files under `~/.pi/skills/_shared/` (global) or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.pi/agent/skills/_shared/` (global) or `.pi/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
 
 ### Recovery Rule
 

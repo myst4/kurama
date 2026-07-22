@@ -8,7 +8,7 @@
     Idempotent: safe to run multiple times (uses markers to avoid duplication).
 .PARAMETER Agent
     Install for a specific agent.
-    Valid values: claude-code, opencode, gemini-cli, cursor, vscode, codex
+    Valid values: claude-code, opencode, gemini-cli, cursor, vscode, codex, pi
 .PARAMETER All
     Auto-detect and install for all found agents.
 .PARAMETER OpenCodeMode
@@ -27,7 +27,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('claude-code', 'opencode', 'gemini-cli', 'cursor', 'vscode', 'codex')]
+    [ValidateSet('claude-code', 'opencode', 'gemini-cli', 'cursor', 'vscode', 'codex', 'pi')]
     [string]$Agent,
     [ValidateSet('single', 'multi')]
     [string]$OpenCodeMode,
@@ -72,6 +72,7 @@ $SkillsPaths = @{
     'cursor'      = Join-Path $env:USERPROFILE '.cursor\skills'
     'vscode'      = Join-Path $env:USERPROFILE '.copilot\skills'
     'codex'       = Join-Path $env:USERPROFILE '.codex\skills'
+    'pi'          = Join-Path $env:USERPROFILE '.pi\agent\skills'
 }
 
 $PromptPaths = @{
@@ -81,6 +82,7 @@ $PromptPaths = @{
     'cursor'      = Join-Path $env:USERPROFILE '.cursor\rules\kurama.mdc'
     'vscode'      = Join-Path $env:APPDATA 'Code\User\prompts\kurama.instructions.md'
     'codex'       = Join-Path $env:USERPROFILE '.codex\agents.md'
+    'pi'          = Join-Path $env:USERPROFILE '.pi\agent\AGENTS.md'
 }
 
 $ExampleFiles = @{
@@ -89,6 +91,7 @@ $ExampleFiles = @{
     'cursor'      = Join-Path $ExamplesDir 'cursor\.cursor\rules\sdd-orchestrator.mdc'
     'vscode'      = Join-Path $ExamplesDir 'vscode\copilot-instructions.md'
     'codex'       = Join-Path $ExamplesDir 'codex\agents.md'
+    'pi'          = Join-Path $ExamplesDir 'pi\AGENTS.md'
 }
 
 $AgentBinaries = @{
@@ -98,6 +101,7 @@ $AgentBinaries = @{
     'cursor'      = 'cursor'
     'vscode'      = 'code'
     'codex'       = 'codex'
+    'pi'          = 'pi'
 }
 
 # ============================================================================
@@ -157,10 +161,12 @@ function Install-Skills {
         Write-Ok '_shared conventions'
     }
 
-    # Copy all distributable skills
+    # Copy all distributable skills. The default set now includes the `tdd`
+    # module; installing the module does NOT activate TDD (activation stays
+    # opt-in per project). Kept in sync with setup.sh's manifest-derived default.
     $count = 0
     $skillDirs = @(Get-ChildItem -Path $SkillsSrc -Directory -Filter 'sdd-*')
-    foreach ($extraSkill in @('skill-registry', 'judgment-day', 'review-risk', 'review-readability', 'review-reliability', 'review-resilience', 'review-refuter', 'go-testing', 'skill-creator', 'branch-pr', 'issue-creation')) {
+    foreach ($extraSkill in @('skill-registry', 'judgment-day', 'review-risk', 'review-readability', 'review-reliability', 'review-resilience', 'review-refuter', 'go-testing', 'tdd', 'skill-creator', 'branch-pr', 'issue-creation')) {
         $extraDir = Join-Path $SkillsSrc $extraSkill
         if (Test-Path $extraDir) {
             $skillDirs += Get-Item $extraDir
@@ -520,7 +526,7 @@ try {
         Write-Host '  -NonInteractive    No prompts (for external installers)'
         Write-Host '  -Help              Show this help'
         Write-Host ''
-        Write-Host 'Agents: claude-code, opencode, gemini-cli, cursor, vscode, codex'
+        Write-Host 'Agents: claude-code, opencode, gemini-cli, cursor, vscode, codex, pi'
         exit 0
     }
 

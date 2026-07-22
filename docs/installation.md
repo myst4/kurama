@@ -15,6 +15,7 @@ For manual installation or specific tools, see below.
 - [VS Code Copilot](#vs-code-copilot)
 - [Antigravity](#antigravity)
 - [Cursor](#cursor)
+- [Pi](#pi)
 - [Other Tools](#other-tools)
 - [Editing the Generated Example Orchestrators](#editing-the-generated-example-orchestrators)
 
@@ -34,11 +35,16 @@ Windows PowerShell:
 ```
 
 The setup script:
-- Detects installed agents via PATH (`claude`, `opencode`, `gemini`, `cursor`, `code`, `codex`)
+- Detects installed agents via PATH (`claude`, `opencode`, `gemini`, `cursor`, `code`, `codex`, `pi`)
 - Copies skills to the correct user-level directory
 - Configures orchestrator prompts with idempotent markers (safe to re-run)
 - Handles OpenCode's special case (commands + JSON config merge)
 - For OpenCode: asks single vs multi-model mode (or use `--opencode-mode`)
+
+The default skill set installs **24 skills**, including the optional TDD module
+(`skills/tdd`). Pass `--without tdd` to exclude the module from disk (23 skills);
+installing it never activates TDD — activation is a separate explicit per-project
+switch (see [docs/tdd.md](tdd.md)).
 
 > **For external installers** (e.g. [gentle-ai](https://github.com/gentleman-programming/gentleman-ai-installer)): use `--non-interactive` flag.
 
@@ -339,6 +345,47 @@ verbatim, as `kurama.mdc`).
 
 ---
 
+## Pi
+
+[Pi](https://pi.dev) reads `AGENTS.md` context files as its instructions,
+concatenating a global `~/.pi/agent/AGENTS.md` and a project-root `AGENTS.md`
+(among parent directories). Kurama ships Pi's orchestrator as a generated file,
+[`examples/pi/AGENTS.md`](../examples/pi/AGENTS.md) — pure Markdown, with no
+`gentle-pi` npm dependency.
+
+> **Automatic:** `./scripts/setup.sh --agent pi` handles Pi setup — it detects the
+> `pi` binary, copies the skills into `~/.pi/agent/skills/`, and merges the
+> orchestrator into the global `~/.pi/agent/AGENTS.md`, using the standard
+> idempotent `<!-- BEGIN:kurama -->` / `<!-- END:kurama -->` markers (`AGENTS.md`
+> is Markdown, so the HTML-comment markers merge cleanly and re-runs stay safe).
+> For a per-project rule instead of the global one, follow the manual step below
+> and append the orchestrator to your project-root `AGENTS.md`.
+
+<details>
+<summary>Manual installation</summary>
+
+**1. Copy skills** into the directory Pi reads them from (`setup.sh --agent pi`
+targets it for you).
+
+**2. Add the orchestrator:**
+
+Append the contents of [`examples/pi/AGENTS.md`](../examples/pi/AGENTS.md) to your
+project-root `AGENTS.md` (create it if it doesn't exist), or to the global
+`~/.pi/agent/AGENTS.md` if you want it available across every project (this is the
+file `setup.sh --agent pi` / `install.sh --agent pi` write). The Kurama block is
+delimited by `<!-- BEGIN:kurama -->` / `<!-- END:kurama -->`, so it stays idempotent
+and re-runnable.
+
+</details>
+
+**Verify:** Start Pi in your project (`pi`) and type `/sdd-init`.
+
+> **Note:** Pi routes models per-agent, so no orchestrator-level model table is
+> injected. Like Gemini CLI and Codex, Pi reads the skills as inline instructions
+> rather than spawning true fresh-context sub-agents.
+
+---
+
 ## Other Tools
 
 The skills are pure Markdown. Any AI assistant that can read files can use them.
@@ -355,10 +402,10 @@ The skills are pure Markdown. Any AI assistant that can read files can use them.
 
 ## Editing the Generated Example Orchestrators
 
-The seven per-harness orchestrator files under `examples/` — `claude-code/CLAUDE.md`,
+The eight per-harness orchestrator files under `examples/` — `claude-code/CLAUDE.md`,
 `codex/agents.md`, `gemini-cli/GEMINI.md`, `opencode/AGENTS.md`,
-`antigravity/sdd-orchestrator.md`, `vscode/copilot-instructions.md`, and
-`cursor/.cursor/rules/sdd-orchestrator.mdc` — are **generated**, not
+`antigravity/sdd-orchestrator.md`, `vscode/copilot-instructions.md`,
+`cursor/.cursor/rules/sdd-orchestrator.mdc`, and `pi/AGENTS.md` — are **generated**, not
 hand-written. `examples/_templates/core.md` holds the shared orchestrator
 body (delegation rules, the TDD section, the canonical Result Contract), and
 one `{harness}.md` overlay per harness holds only that harness's deltas.

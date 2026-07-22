@@ -26,10 +26,12 @@ VERSION_FILE="$REPO_DIR/VERSION"
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
 # setup.sh installs the DEFAULT skill set (no --with/--without flags). These are
-# the default-on groups from skills/manifest.json; the opt-in `tdd` group is only
-# available via install.sh --with tdd. The surrounding spaces let membership be
-# tested with a case glob.
-SETUP_ACTIVE_GROUPS=" sdd-core quality review optional "
+# the default-on groups from skills/manifest.json, which now include the `tdd`
+# module. Installing the tdd module does NOT activate TDD — activation stays
+# opt-in per project (a project can start without tests and add them later). To
+# skip the module, use install.sh --without tdd. The surrounding spaces let
+# membership be tested with a case glob.
+SETUP_ACTIVE_GROUPS=" sdd-core quality review optional tdd "
 
 MARKER_BEGIN="<!-- BEGIN:kurama -->"
 MARKER_END="<!-- END:kurama -->"
@@ -115,6 +117,7 @@ detect_agents() {
     check_agent "cursor"      "cursor"
     check_agent "vscode"      "code"
     check_agent "codex"       "codex"
+    check_agent "pi"          "pi"
 
     echo ""
     if [[ ${#DETECTED_AGENTS[@]} -eq 0 ]]; then
@@ -151,6 +154,7 @@ get_skills_path() {
         cursor)       echo "$home/.cursor/skills" ;;
         vscode)       echo "$home/.copilot/skills" ;;
         codex)        echo "$home/.codex/skills" ;;
+        pi)           echo "$home/.pi/agent/skills" ;;
     esac
 }
 
@@ -174,6 +178,7 @@ get_prompt_path() {
             fi
             ;;
         codex)        echo "$home/.codex/agents.md" ;;
+        pi)           echo "$home/.pi/agent/AGENTS.md" ;;
     esac
 }
 
@@ -186,6 +191,7 @@ get_example_file() {
         cursor)       echo "$EXAMPLES_DIR/cursor/.cursor/rules/sdd-orchestrator.mdc" ;;
         vscode)       echo "$EXAMPLES_DIR/vscode/copilot-instructions.md" ;;
         codex)        echo "$EXAMPLES_DIR/codex/agents.md" ;;
+        pi)           echo "$EXAMPLES_DIR/pi/AGENTS.md" ;;
     esac
 }
 
@@ -796,7 +802,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --non-interactive   No prompts (for external installers)"
             echo "  -h, --help          Show this help"
             echo ""
-            echo "Agents: claude-code, opencode, gemini-cli, cursor, vscode, codex"
+            echo "Agents: claude-code, opencode, gemini-cli, cursor, vscode, codex, pi"
             exit 0
             ;;
         *)  echo "Unknown option: $1"; exit 1 ;;

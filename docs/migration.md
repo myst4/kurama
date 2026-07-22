@@ -1,7 +1,7 @@
 # Migration Guide
 
 Guidance for existing installations and projects moving through the ongoing
-stabilization work (Phases 1-6). For what changed and when, see
+stabilization work (Phases 1-8). For what changed and when, see
 [docs/changelog.md](changelog.md). For the persistence contract itself, see
 [docs/persistence.md](persistence.md).
 
@@ -149,9 +149,15 @@ either. Projects that don't set the flag are unaffected.
 
 ### `tdd` skill group (opt-in, not installed by default)
 
+> **Superseded by Phase 8 (below).** As of Phase 8 the `tdd` module is **installed
+> by default** (`default: true`), so the `--with tdd` opt-in described here is no
+> longer needed — a plain `setup.sh`/`install.sh` already lands it. This section is
+> kept for historical context; pass `--without tdd` to exclude the module now.
+> Activation stays opt-in in both phases (installing the module never turns TDD on).
+
 `skills/manifest.json` gained a `tdd` group (`default: false`) holding
-`skills/tdd`. Install it explicitly with the group flag on the `install.sh` /
-`install.ps1` installers:
+`skills/tdd`. At the time, it was installed explicitly with the group flag on the
+`install.sh` / `install.ps1` installers:
 
 ```bash
 ./scripts/install.sh --with tdd        # bash / macOS / Linux / WSL / Git Bash
@@ -161,14 +167,16 @@ either. Projects that don't set the flag are unaffected.
 .\scripts\install.ps1 -With tdd        # Windows PowerShell
 ```
 
-The module stays excluded from a default install alongside the always-on
-`sdd-core` and the default-on `quality`/`optional` groups. `setup.sh`/`setup.ps1`
-install the **default set** (the 18 default-on skills, TDD excluded); there is no
-`--with` flag on the `setup` scripts — use `install.sh --with tdd` /
-`install.ps1 -With tdd` to add the module.
+At the time, the module stayed excluded from a default install alongside the
+always-on `sdd-core` and the default-on `quality`/`optional` groups; `setup.sh`/`setup.ps1`
+installed the **default set** with TDD excluded, and there was no `--with` flag on the
+`setup` scripts, so `install.sh --with tdd` / `install.ps1 -With tdd` was the only way
+to add the module. (Phase 8 folded `tdd` into the default set, so this exclusion no
+longer applies — see the Phase 8 section below.)
 
-**Action required**: run `install.sh --with tdd` / `install.ps1 -With tdd` if you
-want the module on disk; otherwise no action is needed.
+**Action required**: none under the current (Phase 8) default — `tdd` installs without
+a flag. The historical `--with tdd` command still works but is now redundant; pass
+`--without tdd` to keep the module off disk.
 
 ### RED/GREEN/REFACTOR subtask expansion
 
@@ -305,8 +313,9 @@ TDD module is enabled.
 `skills/manifest.json` gained a `review` group (`default: true`) holding five new
 read-only review lenses: `review-risk` (R1), `review-readability` (R2),
 `review-reliability` (R3), `review-resilience` (R4), and `review-refuter`. They ship
-**installed by default** alongside `sdd-core`, `quality`, and `optional`; a default
-install now lands **23 skills** (was 18), and `--with tdd` lands **24**. Opt out with
+**installed by default** alongside `sdd-core`, `quality`, and `optional`; at the time
+this landed, a default install was **23 skills** (was 18) with `--with tdd` at **24**
+(superseded by Phase 8: `tdd` now installs by default — 24 default, `--without tdd` 23). Opt out with
 `--without review` (bash `install.sh`/`setup.sh`, PowerShell `install.ps1`/`setup.ps1`).
 
 The orchestrator selects lenses by deterministic triage — trivial diff → no lens;
@@ -372,7 +381,7 @@ drop completed-task history across resumed cycles. Documented in
 Kurama adds **Pi** as an eighth harness. Its orchestrator is generated from
 `examples/_templates/core.md` + a new `examples/_templates/pi.md` overlay into
 `examples/pi/AGENTS.md` (project-root `AGENTS.md` convention; global alternative
-`~/.pi/agent/APPEND_SYSTEM.md`). Pure Markdown, no `gentle-pi` npm dependency; Pi routes
+`~/.pi/agent/AGENTS.md`). Pure Markdown, no `gentle-pi` npm dependency; Pi routes
 models per-agent, so no orchestrator-level model table is injected.
 
 **Action required**: none. If you use Pi, copy `examples/pi/AGENTS.md` into your project
@@ -387,6 +396,52 @@ DAG), visible settings, and task progress; `--json` emits a parseable object. Re
 disk are intentionally not queryable offline.
 
 **Action required**: none — it is a read-only diagnostic.
+
+## Phase 8 — Pi installer wiring, TDD installed by default
+
+### `tdd` module is now installed by default (supersedes the Phase 3 default)
+
+Phase 3 shipped the `tdd` group as opt-in-install (`default: false`, added with
+`--with tdd`). Phase 8 flips it to **installed by default** (`default: true` in
+`skills/manifest.json`, `required: false`). `setup.sh`/`setup.ps1` and
+`install.sh`/`install.ps1` now include the module in the default set; a default
+install lands **24 skills** (was 23), and `--without tdd` lands **23**. The old
+`--with tdd` opt-in is no longer needed for a default install.
+
+**Activation is unchanged.** Installing the module has never activated TDD, and
+that still holds: `tdd.enabled` starts `false` everywhere, `sdd-init` asks the
+explicit enable question, and existing test files never flip it on. The rationale
+is that **a project can start without tests and add them later** — the module
+ships available on disk, and each project opts into the RED → GREEN → REFACTOR
+cycle on its own terms (see [docs/tdd.md](tdd.md)).
+
+**Action required**: none functionally. Re-run `setup.sh`/`install.sh` once to land
+the module in the default set (or pass `--without tdd` to keep it off disk). No
+config migration — a project's `tdd.enabled` value is untouched, and projects that
+never opted in stay inactive.
+
+### Remediation-message wording (sdd-init / sdd-tasks / sdd-apply / sdd-verify)
+
+The four skills still guard against the module being absent while TDD is enabled
+(it can happen only when someone installed with `--without tdd`), but their
+"module missing" messages now say to **reinstall with `scripts/install.sh`**
+(the default install includes it) instead of the old `--with tdd`. The guard logic
+and flag precedence are unchanged — only the message text was updated.
+
+**Action required**: none.
+
+### Pi wired into the installers
+
+Pi — added as the eighth harness in Phase 6 (project-root `AGENTS.md` convention;
+global alternative `~/.pi/agent/AGENTS.md`) — is now detected and wired by
+`setup.sh`/`setup.ps1` and `install.sh`/`install.ps1` (`--agent pi`), and Pi is a
+target in `skills/manifest.json`. The orchestrator is the generated
+`examples/pi/AGENTS.md`; the Kurama block uses the standard idempotent
+`<!-- BEGIN:kurama -->` / `<!-- END:kurama -->` markers. See
+[docs/installation.md](installation.md#pi).
+
+**Action required**: none. If you use Pi, run `setup.sh --agent pi` (or follow the
+manual steps in the installation guide) to wire the orchestrator.
 
 ## Detecting an old install/clone
 

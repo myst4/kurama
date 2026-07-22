@@ -60,10 +60,11 @@ below. When **false**, produce the standard checklist. `sdd-apply` resolves the 
 planning and implementation always agree on one mode — never a silent heuristic.
 
 **Module-not-installed fallback (graceful degrade — never a hard failure):** the `tdd` module
-is opt-in and may be absent even when the flag is true. If `skills/tdd/SKILL.md` cannot be
-resolved/loaded, do NOT fail the phase. Emit a WARNING —
-*"TDD enabled but the tdd module is not installed — run `scripts/install.sh --with tdd`;
-proceeding without TDD"* — surface it in the return envelope's `risks`, then produce the
+installs by default but may be absent when excluded with `--without tdd`, even when the flag
+is true. If `skills/tdd/SKILL.md` cannot be resolved/loaded, do NOT fail the phase. Emit a
+WARNING — *"TDD enabled but the tdd module is missing (default installs include it; it was
+excluded with `--without tdd`) — reinstall with `scripts/install.sh`; proceeding without
+TDD"* — surface it in the return envelope's `risks`, then produce the
 **standard checklist** (non-TDD path) instead of the RED/GREEN/REFACTOR expansion.
 
 ### Step 3: Write tasks.md
