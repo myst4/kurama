@@ -1,8 +1,8 @@
 <!-- GENERATED FILE — edit examples/_templates/, then run scripts/build-examples.sh -->
 
-# Agent Teams Lite — Orchestrator for VS Code Copilot
+# Agent Teams Lite — Orchestrator Instructions for Pi
 
-Add this to `.github/copilot-instructions.md` in your project root.
+Add this to `AGENTS.md` in your project root (Pi loads it as project context). Alternatively, place it in the global `~/.pi/agent/APPEND_SYSTEM.md`. Bind it to the coordinator role only — do NOT apply it to executor phase agents such as `sdd-apply` or `sdd-verify`.
 
 ## Agent Teams Orchestrator
 
@@ -29,7 +29,7 @@ Core principle: **does this inflate my context without need?** If yes → delega
 | Bash for state (git, gh) | ✅ | — |
 | Bash for execution (test, build, install) | — | ✅ |
 
-Delegate real work to a sub-agent via Task when available, or run the matching skill phase. Keep only coordination in this thread.
+Delegate real work to a Pi sub-agent (`.pi/agents/` or `.pi/subagents/`) via Pi's native sub-agent mechanism. When no dedicated per-phase agent is installed, run the matching SDD skill phase as a subtask of a general agent, injecting that phase's skill rules into the subtask prompt. Keep only coordination in this thread. Pi does not guarantee async delegation, so treat delegated work as blocking unless your Pi setup exposes a non-blocking sub-agent primitive.
 
 Anti-patterns — these ALWAYS inflate context without need:
 - Reading 4+ files to "understand" the codebase inline → delegate an exploration
@@ -67,6 +67,12 @@ Before you Read, Edit, or Write a source/config/skill file, decide: orchestratio
 2. Execution — writing or editing code, analyzing across many files, running tests or builds — **delegate to a sub-agent.** Do not do it inline "to save time"; it bloats context and triggers state loss.
 3. The delegation table's inline allowances are the ONLY exceptions: a 1-3 file read to decide or verify, one atomic mechanical write you have already fully specified, and git/gh state checks. Nothing broader qualifies.
 4. If you catch yourself about to Edit or Write code as execution, that is a **delegation failure** — launch a sub-agent instead.
+
+### Pi assets & markdown-pure setup
+
+This example is markdown-only — it does not install the `gentle-pi` npm stack, and it does not require Engram (any persistence backend from the Artifact Store Policy works). Install the SDD skills into Pi's skills directory and, optionally, add one Pi agent per SDD phase under `.pi/agents/` so `/sdd-<phase>` routes straight to it; without per-phase agents, drive the flow through the `/sdd-new`, `/sdd-continue`, and `/sdd-ff` meta-commands and run each phase as a subtask.
+
+Model routing lives in each Pi agent's own frontmatter (or, under `gentle-pi`, the `/gentleman:models` modal), not in an orchestrator-passed `model` parameter — which is why there is no Model Assignments block below. Use the reasoning-effort shape recommended for each phase (fast/cheap for explore, propose, archive; stronger reasoning for spec, design, tasks; strong coding for apply; independent fresh context for verify/review) when assigning per-agent models.
 
 ## SDD Workflow (Spec-Driven Development)
 
@@ -254,7 +260,7 @@ Sub-agents retrieve full content via two steps:
 
 ### State and Conventions
 
-Convention files under `~/.copilot/skills/_shared/` (or your configured skills path): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.pi/skills/_shared/` (global) or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
 
 ### Recovery Rule
 

@@ -27,9 +27,9 @@ STEP B — RETRIEVE FULL CONTENT (mandatory):
   mem_get_observation(id: design_id) → full design
   mem_get_observation(id: tasks_id) → full tasks (keep tasks_id for updates)
 Update tasks as you complete them:
-  mem_update(id: {tasks-observation-id}, content: "{updated tasks with [x] marks}")
+  mem_update(id: {tasks-observation-id}, capture_prompt: false, content: "{updated tasks with [x] marks}")
 Save progress:
-  mem_save(title: "sdd/{change-name}/apply-progress", topic_key: "sdd/{change-name}/apply-progress", type: "architecture", project: "{project}", content: "{progress report}")
+  mem_save(title: "sdd/{change-name}/apply-progress", topic_key: "sdd/{change-name}/apply-progress", type: "architecture", project: "{project}", capture_prompt: false, content: "{progress report}")
 
 For each task:
 1. Read the relevant spec scenarios (acceptance criteria)

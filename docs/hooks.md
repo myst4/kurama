@@ -44,10 +44,30 @@ reads the persisted `verify-report.md`, extracts the `### Verdict`, and refuses 
 archive unless the verdict is `PASS` or `PASS WITH WARNINGS`. It fails **closed** —
 a missing report or an unfilled template verdict counts as "not passing".
 
+**Content binding — the "trust the verdict blindly" gap is now closed.** A verdict
+gate on its own has a hole: it trusts the `PASS` without checking whether the code is
+still the code that earned it. Nothing stopped someone from passing verification and
+then editing a file before archiving — the stale `PASS` would sail through. The gap is
+now closed by binding the receipt to the tree. `sdd-verify` (Step 6b) stamps a
+`Tree-Hash` in the report's **Content Binding** section: the hash of the reviewed tree,
+computed over a *throwaway* git index (`GIT_INDEX_FILE` points at a temp file, so the
+real index is never touched) with the `openspec/` artifact store and `.atl/` harness
+state excluded. Step 0 of `sdd-archive` — and the `archive-gate.sh` hook — recompute
+that hash with the **identical** procedure and refuse the archive when it no longer
+matches: the tree changed after verification, so the receipt is **STALE** and
+`sdd-verify` must be re-run. The two exclusions are what make this stable rather than
+noisy: writing the verify report and moving the change folder during archive are
+bookkeeping, not code, so they never trip the check, and committing unchanged content
+leaves the hash identical to HEAD's tree. The recomputation reuses the *same* receipt —
+it never re-runs tests and never launches a reviewer. It applies whenever the report
+carries a `Tree-Hash` on a git checkout; a legacy report without the line, or a non-git
+tree, falls back to the verdict gate alone.
+
 The documented escape hatch is preserved exactly as the skill defines it:
-`ATL_ARCHIVE_OVERRIDE=1` opens the gate, but the override reason must still be
-recorded verbatim in the archive report. The script opens the gate; it never
-records the justification for you.
+`ATL_ARCHIVE_OVERRIDE=1` opens the gate — **both** the verify-PASS check and the
+content-binding (stale-receipt) check — but the override reason must still be recorded
+verbatim in the archive report. The script opens the gate; it never records the
+justification for you.
 
 ## Why mechanism *and* prose
 
@@ -95,9 +115,12 @@ by human/CI review — which is the fallback the whole framework is designed aro
   [`examples/claude-code/hooks/README.md`](../examples/claude-code/hooks/README.md)
   for the `ATL_GUARD_BYPASS` / `ATL_ORCHESTRATOR_GUARD` escape hatches if a build
   propagates the hook into sub-agent contexts.
-- **Verdict parsing, not re-verification.** The archive gate trusts the persisted
-  verdict; it does not re-run tests. If the verify report is wrong, the gate is
-  wrong with it — which is why `sdd-verify` must produce the verdict from real
-  execution.
+- **Verdict parsing plus tree binding, not re-verification.** The archive gate now
+  verifies that the *tree* is unchanged since verification (the content binding above),
+  which closes the "edited after PASS" hole. What it still does not do is re-run the
+  tests: it trusts that the persisted verdict correctly describes *that* tree. If the
+  verify report reached a wrong conclusion about code that has not since changed, the
+  gate is wrong with it — which is why `sdd-verify` must produce the verdict from real
+  execution. Binding proves *what* was reviewed; only `sdd-verify` proves it *works*.
 - **Structural only.** Neither hook inspects code quality. They are guardrails, not
   reviewers.

@@ -1,7 +1,7 @@
 # Migration Guide
 
 Guidance for existing installations and projects moving through the ongoing
-stabilization work (Phases 1-5). For what changed and when, see
+stabilization work (Phases 1-6). For what changed and when, see
 [docs/changelog.md](changelog.md). For the persistence contract itself, see
 [docs/persistence.md](persistence.md).
 
@@ -297,6 +297,96 @@ step is never required, and `sdd-verify` never flags its absence.
 
 **Action required**: none. Triangulation is optional and only relevant when the opt-in
 TDD module is enabled.
+
+## Phase 6 — Review layer, content-bound receipts, resolver inversion, Pi
+
+### New `review` skill group (default-on)
+
+`skills/manifest.json` gained a `review` group (`default: true`) holding five new
+read-only review lenses: `review-risk` (R1), `review-readability` (R2),
+`review-reliability` (R3), `review-resilience` (R4), and `review-refuter`. They ship
+**installed by default** alongside `sdd-core`, `quality`, and `optional`; a default
+install now lands **23 skills** (was 18), and `--with tdd` lands **24**. Opt out with
+`--without review` (bash `install.sh`/`setup.sh`, PowerShell `install.ps1`/`setup.ps1`).
+
+The orchestrator selects lenses by deterministic triage — trivial diff → no lens;
+standard diff → exactly one dominant-risk lens; hot path (auth/update/security/payments)
+or >400 authored lines → the full 4R sweep. Only findings **introduced** by the diff can
+block, and only `BLOCKER`/`CRITICAL` gate. See
+[docs/sub-agents.md](sub-agents.md#review-lenses-4r--refuter) and the shared
+[`skills/_shared/review-ledger-contract.md`](../skills/_shared/review-ledger-contract.md).
+
+**Action required**: none. Re-run `setup.sh`/`install.sh` once to land the new lenses
+(or pass `--without review` to keep the previous 18-skill set).
+
+### Content-bound verify receipt (verify + archive)
+
+`sdd-verify` now records a **Content Binding** section in its report: a reviewed-tree
+hash computed over a throwaway git index (`GIT_INDEX_FILE=$(mktemp)` + `git add -A` +
+`git write-tree`, excluding `openspec/` and `.atl/`) — the real index is never touched —
+plus the changed-file list. `sdd-archive` Step 0 and the optional
+`examples/claude-code/hooks/archive-gate.sh` **re-derive the hash and block on mismatch**
+("verify receipt stale — re-run sdd-verify"). `ATL_ARCHIVE_OVERRIDE=1` still bypasses the
+gate and is recorded in the archive report. This closes the previously declared gap where
+the archive gate trusted the verdict without verifying the tree (see
+[docs/hooks.md](hooks.md)). In a non-git project the binding degrades gracefully to
+verdict-only.
+
+**Action required**: none. If you archive a change after editing code post-verify, re-run
+`sdd-verify` so the receipt matches the tree.
+
+### Skill-resolver default inverted (registry index + read the SKILL.md)
+
+`skills/_shared/skill-resolver.md` inverted its default: the orchestrator now passes the
+**registry index and the exact `SKILL.md` path** so the sub-agent reads the full skill,
+and compact-rules injection became an **opt-in** low-token optimization used only when the
+context budget demands it. The previous prohibition on sub-agents reading `SKILL.md` was
+removed.
+
+**Action required**: none. Existing registries keep working; compact rules still exist and
+are injected when the budget requires.
+
+### `capture_prompt: false` on automated SDD artifact saves
+
+Every `mem_save` template for **automated** SDD artifacts (state, proposal/spec/design/
+tasks/apply/verify/archive reports, skill registry, project context) now carries
+`capture_prompt: false` — the user's prompt is never captured for machine-generated
+artifacts. Genuine human/discovery saves keep the default (`true`). The rationale is
+documented as a canonical note in
+[`skills/_shared/engram-convention.md`](../skills/_shared/engram-convention.md); the rule
+is chosen by **provenance** (automated artifact → `false`), not by `type`.
+
+**Action required**: none — Engram versions without the field simply ignore it.
+
+### `apply-progress` read-merge-write continuity
+
+`sdd-apply` now **reads the existing apply-progress artifact, merges task states, and
+writes back** — the shared `topic_key` upsert is destructive, so a blind overwrite could
+drop completed-task history across resumed cycles. Documented in
+[`skills/_shared/engram-convention.md`](../skills/_shared/engram-convention.md).
+
+**Action required**: none.
+
+### Pi is the 8th supported harness
+
+ATL adds **Pi** as an eighth harness. Its orchestrator is generated from
+`examples/_templates/core.md` + a new `examples/_templates/pi.md` overlay into
+`examples/pi/AGENTS.md` (project-root `AGENTS.md` convention; global alternative
+`~/.pi/agent/APPEND_SYSTEM.md`). Pure Markdown, no `gentle-pi` npm dependency; Pi routes
+models per-agent, so no orchestrator-level model table is injected.
+
+**Action required**: none. If you use Pi, copy `examples/pi/AGENTS.md` into your project
+per [docs/installation.md](installation.md).
+
+### `scripts/sdd-status.sh` (new, offline)
+
+A dependency-light (`bash 3.2` / POSIX, no `jq`) status inspector: `scripts/sdd-status.sh
+[project]` lists active SDD cycles with store, last/next phase (derived from the canonical
+DAG), visible settings, and task progress; `--json` emits a parseable object. Reads
+`openspec/` and the `.atl/sdd/` fallback from disk. Pure-engram cycles with nothing on
+disk are intentionally not queryable offline.
+
+**Action required**: none — it is a read-only diagnostic.
 
 ## Detecting an old install/clone
 

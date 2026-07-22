@@ -86,6 +86,7 @@ mem_save(
   topic_key: "sdd/{change-name}/state",
   type: "architecture",
   project: "{project}",
+  capture_prompt: false,
   content: "change: {change-name}\nphase: {last-phase}\nartifact_store.mode: engram\nartifacts:\n  proposal: true\n  specs: true\n  design: false\n  tasks: false\ntasks_progress:\n  completed: []\n  pending: []\nlast_updated: {ISO date}"
 )
 ```
@@ -128,6 +129,7 @@ mem_save(
   topic_key: "sdd/{change-name}/{artifact-type}",
   type: "architecture",
   project: "{project}",
+  capture_prompt: false,
   content: "{full markdown content}"
 )
 ```
@@ -139,9 +141,23 @@ mem_save(
   topic_key: "sdd/add-dark-mode/proposal",
   type: "architecture",
   project: "my-app",
+  capture_prompt: false,
   content: "## Proposal\n\nAdd dark mode toggle..."
 )
 ```
+
+### Prompt Capture (`capture_prompt: false`)
+
+Every SDD artifact save above carries `capture_prompt: false`. SDD artifacts (explore,
+proposal, spec, design, tasks, apply-progress, verify-report, archive-report, state) and the
+`sdd-init/{project}` context / `skill-registry` bundles are **automated pipeline outputs**, not
+records of a human decision — a phase sub-agent generates them from upstream artifacts, so there
+is no user prompt worth attaching. Setting `capture_prompt: false` keeps Engram's prompt-capture
+channel reserved for genuine human/proactive saves and stops SDD phases from polluting it with the
+orchestrator's internal launch text. Do NOT set it by `type`: these saves use `type: architecture`,
+but a genuine human architecture decision would still capture its prompt. The flag is chosen by
+provenance (automated artifact → `false`), never by type. A sub-agent that saves a real discovery
+during general work leaves `capture_prompt` at its default (`true`).
 
 Update existing artifact (when you have the observation ID):
 ```
@@ -156,6 +172,26 @@ Use `mem_update` when you have the exact ID. Use `mem_save` with same `topic_key
 mem_search(query: "sdd/{change-name}/", project: "{project}")
 → Returns all artifacts for that change
 ```
+
+## Apply-Progress Continuity (read-merge-write)
+
+The `apply-progress` artifact shares its `topic_key` (`sdd/{change-name}/apply-progress`) across
+every batch of `sdd-apply`, and `topic_key` upsert is **destructive** — a plain `mem_save` REPLACES
+the prior observation, it does not append. A blind write from batch 2 would therefore erase batch 1's
+recorded task completions.
+
+`sdd-apply` MUST treat this artifact as **read-merge-write**, never blind overwrite:
+
+1. **Read first** — `mem_search("sdd/{change-name}/apply-progress")` → `mem_get_observation(id)`.
+   An absent artifact means this is the first batch (empty baseline), not an error.
+2. **Merge** — union the prior batch's completed/pending task states with this batch's results;
+   a task marked complete in an earlier batch stays complete.
+3. **Write back** — `mem_save` the merged whole under the same `topic_key` (with
+   `capture_prompt: false`).
+
+The same rule applies to the `tasks` artifact's `[x]` marks (updated via `mem_update`): read the
+current marks, merge this batch's completions, and write the merged set — never regress a mark that
+an earlier batch already set. See `skills/sdd-apply/SKILL.md` Step 5 for the phase-level procedure.
 
 ## Why This Convention
 

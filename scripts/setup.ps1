@@ -160,7 +160,7 @@ function Install-Skills {
     # Copy all distributable skills
     $count = 0
     $skillDirs = @(Get-ChildItem -Path $SkillsSrc -Directory -Filter 'sdd-*')
-    foreach ($extraSkill in @('skill-registry', 'judgment-day', 'go-testing', 'skill-creator', 'branch-pr', 'issue-creation')) {
+    foreach ($extraSkill in @('skill-registry', 'judgment-day', 'review-risk', 'review-readability', 'review-reliability', 'review-resilience', 'review-refuter', 'go-testing', 'skill-creator', 'branch-pr', 'issue-creation')) {
         $extraDir = Join-Path $SkillsSrc $extraSkill
         if (Test-Path $extraDir) {
             $skillDirs += Get-Item $extraDir

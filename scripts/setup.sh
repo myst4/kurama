@@ -29,7 +29,7 @@ INSTALL_MANIFEST_NAME=".atl-install-manifest.json"
 # the default-on groups from skills/manifest.json; the opt-in `tdd` group is only
 # available via install.sh --with tdd. The surrounding spaces let membership be
 # tested with a case glob.
-SETUP_ACTIVE_GROUPS=" sdd-core quality optional "
+SETUP_ACTIVE_GROUPS=" sdd-core quality review optional "
 
 MARKER_BEGIN="<!-- BEGIN:agent-teams-lite -->"
 MARKER_END="<!-- END:agent-teams-lite -->"

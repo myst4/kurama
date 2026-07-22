@@ -18,15 +18,15 @@ VERSION_FILE="$REPO_DIR/VERSION"
 INSTALL_MANIFEST_NAME=".atl-install-manifest.json"
 
 # Skill-group selection. Groups come from skills/manifest.json; sdd-core is
-# mandatory, quality + optional are on by default and opt-out via --without,
-# and tdd is opt-in only (off by default, enabled with --with tdd).
+# mandatory, quality + review + optional are on by default and opt-out via
+# --without, and tdd is opt-in only (off by default, enabled with --with tdd).
 # The surrounding single spaces let membership be tested with a case glob.
-ACTIVE_GROUPS=" sdd-core quality optional "
+ACTIVE_GROUPS=" sdd-core quality review optional "
 REQUIRED_GROUPS=" sdd-core "
 
 # Every group name the flags accept (default-on ones plus opt-in ones). Kept in
 # sync with skills/manifest.json "groups"; drives validation + the rebuild loop.
-KNOWN_GROUPS="sdd-core quality optional tdd"
+KNOWN_GROUPS="sdd-core quality review optional tdd"
 
 # Populated from the manifest once flags are parsed (see compute_active_skills).
 ACTIVE_SKILLS=()
@@ -197,8 +197,8 @@ show_help() {
     echo "Options:"
     echo "  --agent NAME     Install for a specific agent (non-interactive)"
     echo "  --path DIR       Custom install path (use with --agent custom)"
-    echo "  --with GROUP     Include an optional skill group (quality, optional, tdd)"
-    echo "  --without GROUP  Exclude an optional skill group (quality, optional)"
+    echo "  --with GROUP     Include an optional skill group (quality, review, optional, tdd)"
+    echo "  --without GROUP  Exclude an optional skill group (quality, review, optional)"
     echo "  --version        Print the Agent Teams Lite version and exit"
     echo "  -h, --help       Show this help"
     echo ""
@@ -207,6 +207,7 @@ show_help() {
     echo "Skill groups:"
     echo "  sdd-core   Core SDD pipeline + authoring utilities (always installed)"
     echo "  quality    Adversarial review skills, e.g. judgment-day (on by default; --without quality to skip)"
+    echo "  review     4R review lenses + refuter, e.g. review-risk (on by default; --without review to skip)"
     echo "  optional   Language/testing skills, e.g. go-testing (on by default; --without optional to skip)"
     echo "  tdd        Optional TDD module (RED-GREEN-REFACTOR), skills/tdd (opt-in; --with tdd to enable)"
 }
@@ -268,9 +269,9 @@ group_is_active() {
 
 validate_group_name() {
     case "$1" in
-        sdd-core|quality|optional|tdd) return 0 ;;
+        sdd-core|quality|review|optional|tdd) return 0 ;;
         *)
-            print_error "Unknown skill group: $1 (valid: quality, optional, tdd)"
+            print_error "Unknown skill group: $1 (valid: quality, review, optional, tdd)"
             exit 1
             ;;
     esac

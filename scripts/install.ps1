@@ -26,9 +26,9 @@ param(
                  'antigravity', 'cursor', 'project-local', 'all-global', 'custom')]
     [string]$Agent,
     [string]$Path,
-    [ValidateSet('quality', 'optional', 'tdd')]
+    [ValidateSet('quality', 'review', 'optional', 'tdd')]
     [string[]]$Without,
-    [ValidateSet('quality', 'optional', 'tdd')]
+    [ValidateSet('quality', 'review', 'optional', 'tdd')]
     [string[]]$With,
     [switch]$Version,
     [switch]$Help
@@ -131,8 +131,8 @@ function Show-Usage {
     Write-Host 'Options:'
     Write-Host '  -Agent NAME      Install for a specific agent (non-interactive)'
     Write-Host '  -Path DIR        Custom install path (use with -Agent custom)'
-    Write-Host '  -With GROUP      Include an optional skill group (quality, optional, tdd)'
-    Write-Host '  -Without GROUP   Exclude an optional skill group (quality, optional)'
+    Write-Host '  -With GROUP      Include an optional skill group (quality, review, optional, tdd)'
+    Write-Host '  -Without GROUP   Exclude an optional skill group (quality, review, optional)'
     Write-Host '  -Version         Print the Agent Teams Lite version and exit'
     Write-Host '  -Help            Show this help'
     Write-Host ''
@@ -141,6 +141,7 @@ function Show-Usage {
     Write-Host 'Skill groups:'
     Write-Host '  sdd-core   Core SDD pipeline + authoring utilities (always installed)'
     Write-Host '  quality    Adversarial review skills, e.g. judgment-day (on by default; -Without quality to skip)'
+    Write-Host '  review     4R review lenses + refuter, e.g. review-risk (on by default; -Without review to skip)'
     Write-Host '  optional   Language/testing skills, e.g. go-testing (on by default; -Without optional to skip)'
     Write-Host '  tdd        Optional TDD module (RED-GREEN-REFACTOR), skills/tdd (opt-in; -With tdd to enable)'
 }
@@ -166,9 +167,9 @@ function Get-ManifestSkills {
 }
 
 function Resolve-ActiveGroups {
-    # sdd-core is always active; quality/optional are on by default; tdd is opt-in
-    # only (absent here, added by -With tdd). All toggles restricted by ValidateSet.
-    $active = @{ 'sdd-core' = $true; 'quality' = $true; 'optional' = $true }
+    # sdd-core is always active; quality/review/optional are on by default; tdd is
+    # opt-in only (absent here, added by -With tdd). Toggles restricted by ValidateSet.
+    $active = @{ 'sdd-core' = $true; 'quality' = $true; 'review' = $true; 'optional' = $true }
     foreach ($g in $Without) { $active.Remove($g) }
     foreach ($g in $With) { $active[$g] = $true }
     return $active

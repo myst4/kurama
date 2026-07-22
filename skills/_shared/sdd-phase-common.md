@@ -73,9 +73,12 @@ mem_save(
   topic_key: "sdd/{change-name}/{artifact-type}",
   type: "architecture",
   project: "{project}",
+  capture_prompt: false,
   content: "{your full artifact markdown}"
 )
 ```
+
+`capture_prompt: false` is mandatory on every SDD artifact save — automated artifacts must never capture the user's prompt (see `engram-convention.md`).
 
 `topic_key` enables upserts — saving again updates, not duplicates.
 

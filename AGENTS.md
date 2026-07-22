@@ -28,6 +28,11 @@ When working on this project, load the relevant skill(s) BEFORE writing any code
 | `tdd` | When a phase resolves TDD as active (`tdd.enabled`) and needs the RED-GREEN-REFACTOR cycle contract — loaded by sdd-apply, referenced by sdd-tasks and sdd-verify. | [`skills/tdd/SKILL.md`](skills/tdd/SKILL.md) |
 | `skill-registry` | When creating or updating the skill registry for the project. | [`skills/skill-registry/SKILL.md`](skills/skill-registry/SKILL.md) |
 | `judgment-day` | When running a dual adversarial review, or user says "judgment day". | [`skills/judgment-day/SKILL.md`](skills/judgment-day/SKILL.md) |
+| `review-risk` | When the orchestrator selects the risk lens (security/permissions/data/dependencies) for a standard diff, or as one lens of a full-4R sweep. | [`skills/review-risk/SKILL.md`](skills/review-risk/SKILL.md) |
+| `review-readability` | When the orchestrator selects the readability lens (naming/structure/maintainability) for a standard diff, or as one lens of a full-4R sweep. | [`skills/review-readability/SKILL.md`](skills/review-readability/SKILL.md) |
+| `review-reliability` | When the orchestrator selects the reliability lens (behavior/tests/determinism/regressions) for a standard diff, or as one lens of a full-4R sweep. | [`skills/review-reliability/SKILL.md`](skills/review-reliability/SKILL.md) |
+| `review-resilience` | When the orchestrator selects the resilience lens (shell/process integration, partial failures, recovery) for a standard diff, or as one lens of a full-4R sweep. | [`skills/review-resilience/SKILL.md`](skills/review-resilience/SKILL.md) |
+| `review-refuter` | When the orchestrator runs adversarial verification after merging lens ledgers (one general task standard, three parallel lens tasks in 4R). | [`skills/review-refuter/SKILL.md`](skills/review-refuter/SKILL.md) |
 | `go-testing` | When writing or reviewing Go tests, including Bubbletea/teatest patterns. | [`skills/go-testing/SKILL.md`](skills/go-testing/SKILL.md) |
 | `skill-creator` | When creating a new skill or documenting agent instructions for AI. | [`skills/skill-creator/SKILL.md`](skills/skill-creator/SKILL.md) |
 | `branch-pr` | When creating a pull request, opening a PR, or preparing changes for review. | [`skills/branch-pr/SKILL.md`](skills/branch-pr/SKILL.md) |

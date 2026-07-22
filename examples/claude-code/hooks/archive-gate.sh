@@ -3,22 +3,34 @@
 # Agent Teams Lite — Archive Gate (verify-PASS gate for sdd-archive)
 #
 # Mechanical mirror of sdd-archive Step 0: NEVER archive a change whose
-# verification report is missing or whose verdict is FAIL. Only a PASS or
-# PASS WITH WARNINGS verdict lets archiving proceed. This turns the prose gate
-# into a deterministic check.
+# verification report is missing, whose verdict is FAIL, or whose Content Binding
+# receipt is STALE. Only a PASS / PASS WITH WARNINGS verdict WHOSE recorded tree
+# hash still matches the live working tree lets archiving proceed. This turns the
+# prose gate into a deterministic check.
+#
+# Two independent checks (both mechanical mirrors of sdd-archive Step 0):
+#   1. Verdict gate     — the persisted report must record PASS / PASS WITH WARNINGS.
+#   2. Content binding  — the "Tree-Hash:" line sdd-verify stamped in the report's
+#                         Content Binding section must still match the current tree.
+#                         Recomputed the SAME way sdd-verify records it (throwaway
+#                         index; the real index is never touched). A mismatch means
+#                         the tree changed after verification -> STALE -> re-verify.
+#                         Enforced only when the report carries the line AND the live
+#                         hash is computable (a git checkout); a legacy report without
+#                         it, or a non-git tree, falls back to the verdict gate alone.
 #
 # Two modes:
 #   CLI  : archive-gate.sh <change-name>
-#            exit 0 -> PASS / PASS WITH WARNINGS (archiving may proceed)
-#            exit 2 -> report missing, verdict FAIL, or no PASS found
+#            exit 0 -> PASS / PASS WITH WARNINGS and binding fresh (archive may proceed)
+#            exit 2 -> report missing, verdict FAIL, no PASS found, or receipt STALE
 #   Hook : wire as a PreToolUse hook on Task|Skill. It reads the JSON payload on
 #          stdin and only gates launches that reference "sdd-archive"; every
 #          other Task/Skill call is allowed (exit 0).
 #
 # Override (escape hatch, mirrors sdd-archive Step 0's user-authorized override):
-#   ATL_ARCHIVE_OVERRIDE=1  bypasses the gate. The override REASON must still be
-#   recorded verbatim in the archive report by sdd-archive — this script only
-#   opens the gate; it does not record anything.
+#   ATL_ARCHIVE_OVERRIDE=1  bypasses BOTH the verdict gate and the content-binding
+#   check. The override REASON must still be recorded verbatim in the archive report
+#   by sdd-archive — this script only opens the gate; it does not record anything.
 #
 # Bash 3.2 / BSD portable. shellcheck-clean. No jq dependency (used if present).
 # ============================================================================
@@ -43,7 +55,7 @@ fi
 # --- override ---------------------------------------------------------------
 if [ "${ATL_ARCHIVE_OVERRIDE:-0}" = "1" ]; then
   printf '%s\n' \
-    "archive-gate: ATL_ARCHIVE_OVERRIDE=1 — bypassing the verify-PASS gate." \
+    "archive-gate: ATL_ARCHIVE_OVERRIDE=1 — bypassing the verify-PASS gate and the content-binding check." \
     "sdd-archive Step 0 requires the override REASON to be recorded verbatim in the archive report and its return envelope risks." >&2
   exit 0
 fi
@@ -78,6 +90,36 @@ mtime() {
     m="$(stat -c %Y "$1" 2>/dev/null)"
     printf '%s' "${m:-0}"
   fi
+}
+
+# --- content-binding tree hash (mechanical mirror of sdd-verify Content Binding) --
+# Recompute the reviewed-tree hash the SAME way sdd-verify records it: stage every
+# change (tracked, untracked, deletions) into a THROWAWAY index and write the
+# resulting tree object. GIT_INDEX_FILE points at a temp file, so the real index is
+# NEVER touched. Two exclusions keep the hash stable across the verify->archive
+# window: the SDD artifact store (openspec/) and harness state (.atl/) legitimately
+# churn — sdd-verify writes its own report, sdd-archive moves the change folder and
+# writes an archive report — so they are excluded from the pathspec, leaving only the
+# actual code+config bound. `git add -A` also honors .gitignore, so a clean checkout
+# hashes identical to HEAD's tree: committing unchanged content does NOT invalidate
+# the receipt; only an actual code change does. Echoes the hex tree hash, or nothing
+# (non-zero) when it cannot be computed (e.g. not a git checkout).
+#
+# This pathspec MUST stay byte-identical to the one in skills/sdd-verify/SKILL.md
+# (Content Binding) and skills/sdd-archive/SKILL.md (Step 0), or every archive would
+# read as stale.
+compute_tree_hash() {
+  th_root="$1"
+  git -C "$th_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  th_index="$(mktemp 2>/dev/null)" || return 1
+  # git rejects a zero-byte index file ("index file smaller than expected"), so
+  # delete the file mktemp created and let git initialize a fresh empty index here.
+  rm -f "$th_index"
+  GIT_INDEX_FILE="$th_index" git -C "$th_root" add -A -- . ':(exclude)openspec' ':(exclude).atl' >/dev/null 2>&1
+  th_hash="$(GIT_INDEX_FILE="$th_index" git -C "$th_root" write-tree 2>/dev/null)"
+  rm -f "$th_index"
+  [ -n "$th_hash" ] || return 1
+  printf '%s' "$th_hash"
 }
 
 # --- resolve project root ---------------------------------------------------
@@ -149,6 +191,30 @@ if [ -z "$report" ]; then
     "sdd-archive Step 0 refuses to archive without a verification report recording a PASS verdict." \
     "Run sdd-verify first, or set ATL_ARCHIVE_OVERRIDE=1 with a reason recorded in the archive report." >&2
   exit 2
+fi
+
+# --- content binding: reject a stale receipt (mechanical mirror of Step 0) --
+# sdd-verify stamps a "Tree-Hash:" line in the report's Content Binding section,
+# binding the PASS verdict to the exact tree it verified. If the working tree has
+# changed since (any edit after verification), the receipt is STALE and the PASS can
+# no longer be trusted. Enforced only when the report actually carries the line AND
+# the live hash is computable; a legacy report without it, or a non-git checkout,
+# falls back to the verdict gate alone (documented in docs/hooks.md).
+recorded_tree="$(awk 'tolower($0) ~ /tree-hash/ && match($0, /[0-9a-f]{40,64}/) { print substr($0, RSTART, RLENGTH); exit }' "$report")"
+if [ -n "$recorded_tree" ]; then
+  git_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$git_root" ] || git_root="$root"
+  live_tree="$(compute_tree_hash "$git_root")"
+  if [ -n "$live_tree" ] && [ "$live_tree" != "$recorded_tree" ]; then
+    printf '%s\n' \
+      "BLOCKED by agent-teams-lite archive-gate: verify receipt stale — re-run sdd-verify." \
+      "The working tree changed after sdd-verify bound its Content Binding receipt for '$change'." \
+      "  recorded Tree-Hash: $recorded_tree" \
+      "  live Tree-Hash:     $live_tree" \
+      "Report: $report" \
+      "Re-run sdd-verify to re-bind the receipt to the current tree, or set ATL_ARCHIVE_OVERRIDE=1 with a reason recorded in the archive report." >&2
+    exit 2
+  fi
 fi
 
 # --- extract the verdict (mechanical mirror of Step 0) ----------------------

@@ -13,6 +13,11 @@
       "default": true,
       "required": false
     },
+    "review": {
+      "description": "4R adversarial review lenses (risk, readability, reliability, resilience) plus the refuter, selected by the orchestrator's deterministic triage. Installed by default; opt out with --without review.",
+      "default": true,
+      "required": false
+    },
     "optional": {
       "description": "Optional language/testing skills. Installed by default; opt out with --without optional.",
       "default": true,
@@ -42,6 +47,11 @@
     { "name": "branch-pr", "group": "sdd-core" },
     { "name": "issue-creation", "group": "sdd-core" },
     { "name": "judgment-day", "group": "quality" },
+    { "name": "review-risk", "group": "review" },
+    { "name": "review-readability", "group": "review" },
+    { "name": "review-reliability", "group": "review" },
+    { "name": "review-resilience", "group": "review" },
+    { "name": "review-refuter", "group": "review" },
     { "name": "go-testing", "group": "optional" },
     { "name": "tdd", "group": "tdd" }
   ],

@@ -243,12 +243,49 @@ Record the findings in the report's **TDD Audit** section. These checks are abou
 process, not behavioral correctness — the compliance matrix (Step 6) already covered whether
 the code works.
 
+### Step 6b: Content Binding (Receipt)
+
+Bind this verification to the EXACT tree it validated, so a later archive can prove nothing
+changed after the PASS. Without this, the archive gate trusts the verdict blindly — a PASS
+recorded against code that was edited afterward would still archive. Compute a **reviewed-tree
+hash** over a THROWAWAY git index; the real index is NEVER touched:
+
+```bash
+# Run from the repository root. GIT_INDEX_FILE points at a temp file, so the working index is untouched.
+tmp_index="$(mktemp)"; rm -f "$tmp_index"   # git rejects a zero-byte index ("smaller than expected") — let it create a fresh one
+GIT_INDEX_FILE="$tmp_index" git add -A -- . ':(exclude)openspec' ':(exclude).atl'
+tree_hash="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
+rm -f "$tmp_index"
+```
+
+- The two exclusions (`openspec/` artifact store, `.atl/` harness state) keep the hash stable
+  across the verify→archive window: sdd-verify writes this very report and sdd-archive moves
+  the change folder + writes an archive report — that churn is bookkeeping, not code. Only the
+  actual code+config is bound. `git add -A` also honors `.gitignore`, and a clean checkout
+  hashes identical to HEAD's tree, so committing unchanged content does NOT invalidate the
+  receipt — only a real code change does.
+- Also collect the changed-file list for the human-readable receipt:
+  `git status --porcelain -- . ':(exclude)openspec' ':(exclude).atl'` (paths only).
+- If the project is NOT a git checkout (`git rev-parse --is-inside-work-tree` fails), skip
+  binding: record `Tree-Hash: n/a (not a git checkout)` and note it in `risks`. Archiving then
+  falls back to the verdict gate alone.
+
+Record `tree_hash` and the changed-file list in the report's **Content Binding** section
+(Step 8), and SURFACE `tree_hash` in your return envelope (`Reviewed-Tree: {tree_hash}`) so the
+orchestrator can stamp it into the `sdd/{change-name}/state` artifact. In `engram`/`none` mode
+the report is not on disk, so the state artifact is where sdd-archive Step 0 reads the recorded
+hash back.
+
+**This pathspec and procedure MUST stay byte-identical to sdd-archive Step 0 and
+`examples/claude-code/hooks/archive-gate.sh`** — any drift makes every archive read as stale.
+
 ### Step 7: Persist Verification Report
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `verify-report`
 - topic_key: `sdd/{change-name}/verify-report`
 - type: `architecture`
+- capture_prompt: `false` — the verify report is an automated SDD artifact, not a human note; never capture the user prompt (see `skills/_shared/engram-convention.md`)
 
 ### Step 8: Return Summary
 
@@ -348,10 +385,27 @@ _(only when `tdd.enabled`; all findings are WARNING — never CRITICAL — and i
 
 ---
 
+### Content Binding
+
+_Receipt bound to the reviewed tree (Step 6b). sdd-archive Step 0 and the archive-gate hook recompute this hash with the identical procedure; a mismatch means the receipt is STALE and sdd-verify must be re-run. Do not hand-edit._
+
+- **Tree-Hash**: `{tree_hash}`  (or `n/a (not a git checkout)`)
+- **Changed files** ({N}):
+  - `{path}`
+  - `{path}`
+
+---
+
 ### Verdict
 {PASS / PASS WITH WARNINGS / FAIL}
 
 {One-line summary of overall status}
+```
+
+Also surface the same hash to the orchestrator in the return envelope so it is stamped into the state artifact:
+
+```markdown
+**Reviewed-Tree**: {tree_hash}   (or `n/a (not a git checkout)`)
 ```
 
 ## Rules
@@ -363,6 +417,7 @@ _(only when `tdd.enabled`; all findings are WARNING — never CRITICAL — and i
 - In `static` mode, a scenario with structural evidence is COMPLIANT (static) and a missing test is a WARNING, not a blocker; a test that exists but FAILS stays CRITICAL in both modes
 - When `tdd.enabled` resolves true (Step 6a — same precedence as `compliance_mode`), run the two TDD-audit checks (scenario → test traceability for MUST scenarios; RED evidence in the apply report). Missing either is a WARNING labeled "test-after detected" — NEVER CRITICAL, and independent of `compliance_mode`. When `tdd.enabled` is false, skip Step 6a entirely
 - Detect the test runner via `skills/_shared/test-runners.md` (Step 5b) — the single runner table shared with `sdd-apply` and `skills/tdd`
+- Stamp a **Content Binding** receipt (Step 6b): a `Tree-Hash` computed over a THROWAWAY git index (`GIT_INDEX_FILE` temp file — never the real index), excluding `openspec/` and `.atl/`. Record it in the report's Content Binding section AND surface it in the return envelope (`Reviewed-Tree: {tree_hash}`) so the orchestrator stamps it into the state artifact. sdd-archive Step 0 and the archive-gate hook recompute it and block on a mismatch (STALE — re-run sdd-verify). Keep the pathspec byte-identical across all three
 - If a REQUIRED artifact (`spec`, `tasks`) cannot be retrieved, return `status: blocked` naming it (E2) — never verify against a missing baseline
 - Compare against SPECS first (behavioral correctness), DESIGN second (structural correctness)
 - Be objective — report what IS, not what should be

@@ -144,6 +144,10 @@ Do NOT return without saving what you learned. This is how the team builds persi
 
 If Engram is unavailable, omit this block (the sub-agent returns discoveries inline in its envelope instead).
 
+This general-task save records a genuine discovery/decision, so it does NOT set `capture_prompt: false` —
+it keeps the default (`true`). The `capture_prompt: false` flag is reserved for automated SDD artifact
+saves (see the SDD persistence variants below and `engram-convention.md` → *Prompt Capture*).
+
 ### SDD retrieval preamble (phases with upstream dependencies)
 
 Inject the variant matching the mode. In every variant: if a REQUIRED upstream artifact cannot be retrieved, the sub-agent returns `status: blocked` naming it (see `sdd-phase-common.md` Section B); an OPTIONAL one that is missing is noted in `risks`.
@@ -184,6 +188,7 @@ PERSISTENCE (engram): after completing your work, call:
     topic_key: "sdd/{change-name}/{artifact-type}",
     type: "architecture",
     project: "{project}",
+    capture_prompt: false,
     content: "{your full artifact markdown}"
   )
 If mem_save fails, retry once; if it still fails, write the artifact to .atl/sdd/{change-name}/{artifact-type}.md
@@ -191,11 +196,16 @@ and report the fallback path in your envelope risks. Do not return without persi
 next phase can read it.
 ```
 
+`capture_prompt: false` is REQUIRED on every SDD artifact save — these are automated pipeline
+outputs, not human decisions, so they must not capture the orchestrator's launch prompt (see
+`engram-convention.md` → *Prompt Capture*).
+
 **`hybrid`:**
 ```
 PERSISTENCE (hybrid): write the artifact file per openspec-convention.md (AUTHORITATIVE) AND call mem_save
-(mirror), stamping last_updated (ISO 8601) in the frontmatter of both. If the mem_save mirror write fails,
-retry once, then leave it and note the reconciliation gap in risks — the file remains the source of truth.
+(mirror) with capture_prompt: false, stamping last_updated (ISO 8601) in the frontmatter of both. If the
+mem_save mirror write fails, retry once, then leave it and note the reconciliation gap in risks — the file
+remains the source of truth.
 ```
 
 **`openspec`:**
@@ -218,7 +228,7 @@ PERSISTENCE (engram fallback): Engram is unavailable this cycle. Write the artif
 
 ## Skill Registry
 
-The orchestrator pre-resolves compact rules from the skill registry and injects them as `## Project Standards (auto-resolved)` in your launch prompt. Sub-agents do NOT read the registry or individual SKILL.md files — rules arrive pre-digested.
+The orchestrator resolves skills from the registry and injects a `## Project Standards` block in your launch prompt — by default the exact SKILL.md path(s) for you to read, or the pre-digested compact rules in the opt-in low-token mode. Sub-agents do NOT read the *registry* itself; the delegator resolves it for you. `skill-resolver.md` is authoritative for exactly what arrives and how (paths-by-default, compact-rules opt-in).
 
 To generate/update: run the `skill-registry` skill, or run `sdd-init`.
 

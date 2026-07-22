@@ -29,7 +29,7 @@ MARKER="<!-- GENERATED FILE — edit examples/_templates/, then run scripts/buil
 TOKENS="HEADER DELEGATION_MECHANISM NATIVE_NOTES MODEL_ASSIGNMENTS_SECTION STATE_CONVENTIONS"
 
 # Every harness the build emits.
-HARNESSES="claude-code codex gemini-cli opencode antigravity vscode cursor"
+HARNESSES="claude-code codex gemini-cli opencode antigravity vscode cursor pi"
 
 # Map a harness id to its committed output path (repo-relative).
 out_path() {
@@ -41,6 +41,7 @@ out_path() {
     antigravity) echo "examples/antigravity/sdd-orchestrator.md" ;;
     vscode)      echo "examples/vscode/copilot-instructions.md" ;;
     cursor)      echo "examples/cursor/.cursor/rules/sdd-orchestrator.mdc" ;;
+    pi)          echo "examples/pi/AGENTS.md" ;;
     *)           echo "" ;;
   esac
 }

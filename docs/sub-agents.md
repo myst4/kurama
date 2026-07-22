@@ -55,7 +55,7 @@ Sub-agents are also instructed to save discoveries, decisions, and bug fixes to 
 
 ## Shared Conventions
 
-`skills/_shared/` contains six files. `sdd-phase-common.md` is loaded directly by all 8 SDD phase skills (explore through archive) — it is the most load-bearing shared file in the system. Critical engram calls (`mem_search`, `mem_save`, `mem_get_observation`) are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
+`skills/_shared/` contains seven files. `sdd-phase-common.md` is loaded directly by all 8 SDD phase skills (explore through archive) — it is the most load-bearing shared file in the system. Critical engram calls (`mem_search`, `mem_save`, `mem_get_observation`) are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
 
 | File | Purpose |
 |------|---------|
@@ -64,12 +64,50 @@ Sub-agents are also instructed to save discoveries, decisions, and bug fixes to 
 | `engram-convention.md` | Supplementary reference for deterministic naming (`sdd/{change-name}/{artifact-type}`) and two-step recovery. Critical calls are inlined in skills. |
 | `openspec-convention.md` | Filesystem paths for each artifact, directory structure, config.yaml reference, and archive layout. **Not** the upstream OpenSpec CLI format — see the note at the top of that file. |
 | `skill-resolver.md` | **Canonical** protocol for delegators to inject compact rules from the skill registry |
+| `review-ledger-contract.md` | **Canonical** shared contract for the 4R review lenses + refuter: sweep budget, precision gate, candidate-causal admission, findings-ledger schema, adversarial verification, severity floor, and artifact-store-aware persistence. |
 | `test-runners.md` | Per-runner detect → full-suite + single-test command table, used by the optional TDD module (`skills/tdd/SKILL.md`) |
 
 **Why inline + shared:**
 - **Sub-agents fail multi-hop chains** — A 3-hop read chain (skill → convention file → actual instructions) breaks non-Claude models. Inlining the critical calls eliminates this.
 - **Deterministic recovery** — Engram artifact naming follows a strict `sdd/{change}/{type}` convention with `topic_key`, so any skill can reliably find artifacts created by other skills.
 - **Consistent mode behavior** — All skills resolve `engram | openspec | hybrid | none` the same way. `openspec` and `hybrid` are never chosen automatically.
+
+---
+
+## Review Lenses (4R + refuter)
+
+The post-implementation review layer is a set of **read-only** sub-agent lenses the
+orchestrator runs after `sdd-apply`. Each lens is a `SKILL.md` declaring `tools: Read,
+Grep, Glob` — it finds defects and never edits, runs, or delegates.
+
+| Lens | Skill File | Domain |
+|------|-----------|--------|
+| **R1 Risk** | `review-risk/SKILL.md` | Security, privilege boundaries, data exposure, dependency risk |
+| **R2 Readability** | `review-readability/SKILL.md` | Naming, complexity, intent, maintainability, review size |
+| **R3 Reliability** | `review-reliability/SKILL.md` | Behavior-first tests, coverage value, edge cases, determinism, regressions |
+| **R4 Resilience** | `review-resilience/SKILL.md` | Fallbacks, retry/backoff, graceful degradation, observability, rollback |
+| **Refuter** | `review-refuter/SKILL.md` | Adversarial verifier — adjudicates inferential findings `corroborated`/`refuted`/`inconclusive` |
+
+**Which lenses run is decided by the orchestrator's deterministic triage, not by the
+lenses themselves** (they never self-select). See the "Review Lens Selection" section in
+the generated orchestrator (`examples/_templates/core.md` → each `examples/<harness>/`
+file):
+
+- **Trivial diff** (only docs/comments/formatting) → no lens.
+- **Standard diff** → exactly ONE lens, chosen by dominant risk (naming/structure →
+  readability; behavior/tests/determinism → reliability; shell/partial-failure/recovery →
+  resilience; security/permissions/data/deps → risk).
+- **Hot path** (auth/update/security/payments) **or >400 authored lines** → the full 4R
+  sweep. `judgment-day` stays reserved for explicit invocation or escalation.
+
+All lenses share one contract, [`skills/_shared/review-ledger-contract.md`](../skills/_shared/review-ledger-contract.md):
+**candidate-causal admission** (only findings introduced by the diff can block;
+pre-existing findings become follow-ups), a **severity floor** (only `BLOCKER`/`CRITICAL`
+gate; `WARNING`/`SUGGESTION` are recorded once as `info`), sweep budget 1 (standard) / 2
+(4R), refuter verdicts with 2-of-3 voting in 4R, and max 2 fix rounds. The merged
+findings ledger persists per the artifact store (engram `topic_key
+sdd/{change-name}/review-ledger`, openspec `openspec/changes/{change}/review-ledger.md`,
+or inline in `none` mode).
 
 ---
 

@@ -14,7 +14,7 @@ Before EVERY sub-agent launch that involves **reading, writing, or reviewing cod
 
 ### Step 1: Obtain the Skill Registry (once per session)
 
-The registry contains a **Compact Rules** section with pre-digested rules per skill (5-15 lines each). This is what you inject — NOT full SKILL.md paths.
+The registry carries TWO surfaces per skill: an **index** (`Trigger | Skill | Path` table) mapping each skill to its SKILL.md path, and a **Compact Rules** section with pre-digested rules (5-15 lines each). **By default you resolve via the index and pass the exact SKILL.md path** so the sub-agent reads the full skill. Compact Rules is an **opt-in, low-token optimization** (see *Why Not Compact Rules?*) — reach for it only when the context budget is tight.
 
 Resolution order:
 1. Already cached from earlier in this session? → use cache
@@ -52,7 +52,17 @@ Use the `Trigger` field in the registry's User Skills table to match. Skills who
 
 ### Step 3: Inject into Sub-Agent Prompt
 
-From the registry's **Compact Rules** section, copy the matching skill blocks directly into the sub-agent's prompt:
+**Default (index + path).** From the registry's index, copy each matching skill's name and exact SKILL.md path into the sub-agent's prompt, and instruct it to READ each one before starting:
+
+```
+## Project Standards (skills to load)
+
+Read each SKILL.md below in full before starting work; follow its rules strictly:
+- {skill-name} — {path/to/SKILL.md}
+- {skill-name} — {path/to/SKILL.md}
+```
+
+**Opt-in (compact rules, low-token mode).** Only when the context budget is tight, inject the pre-digested Compact Rules blocks instead of paths — trading fidelity for tokens:
 
 ```
 ## Project Standards (auto-resolved)
@@ -60,9 +70,9 @@ From the registry's **Compact Rules** section, copy the matching skill blocks di
 {paste compact rules blocks for each matching skill}
 ```
 
-This goes BEFORE the sub-agent's task-specific instructions, so standards are loaded before work begins.
+Either block goes BEFORE the sub-agent's task-specific instructions, so standards are loaded before work begins.
 
-**Key rule**: inject the COMPACT RULES text, not paths. The sub-agent should NOT read any SKILL.md files — the rules arrive pre-digested in its prompt.
+**Key rule**: by default pass PATHS and let the sub-agent read the full SKILL.md — a full read is authoritative and complete. Compact rules are a lossy summary; use them only as the budget optimization described in *Why Not Compact Rules?*.
 
 ### Step 4: Include Project Conventions
 
@@ -77,26 +87,38 @@ Read these files for project-specific patterns:
 
 Project conventions are short references (paths + notes), so passing them is cheap. The sub-agent reads them only if relevant to its task.
 
+## Why Not Compact Rules? (default is the full SKILL.md)
+
+Passing paths and reading the full SKILL.md is the default because compact rules are **lossy by construction**:
+
+- A 5-15 line digest cannot carry every critical pattern, edge case, or breaking-change gotcha the full SKILL.md documents — the exact details a sub-agent needs to avoid bugs are the first thing a summary drops.
+- Compact rules go stale silently: they are regenerated only when someone re-runs `skill-registry`, so a digest can lag behind the SKILL.md it summarizes. Reading the file gives the sub-agent the current source of truth.
+- A path costs a handful of tokens; the sub-agent reads the full skill only when its task actually touches that skill's domain. The apparent token savings of compact rules is small relative to the code the sub-agent reads anyway.
+
+Reach for the opt-in compact-rules mode ONLY when the context budget is genuinely tight — many skills match at once, the sub-agent prompt is already large, or the harness caps prompt size. In that case the registry still carries both surfaces, so the switch is free.
+
 ## Token Budget
 
-The compact rules section should add **50-150 tokens per skill** to a sub-agent's prompt. For a typical delegation matching 3-4 skills, that's ~400-600 tokens — negligible compared to the code the sub-agent will read.
+**Default (paths)**: a path line costs only a handful of tokens per skill; the full SKILL.md is read on demand by the sub-agent, and only for skills its task actually touches. This is the cheapest resolution for the delegator's own prompt.
 
-If more than **5 skill blocks** match, keep only the 5 most relevant (prioritize code context matches over task context matches).
+**Opt-in (compact rules)**: the compact rules blocks add **50-150 tokens per skill** to the sub-agent's prompt. For a delegation matching 3-4 skills that's ~400-600 tokens — worth it only when you deliberately want the rules pre-digested to avoid on-demand reads.
+
+If more than **5 skills** match, keep only the 5 most relevant (prioritize code context matches over task context matches).
 
 ## Compaction Safety
 
 This protocol is compaction-safe because:
 - The registry lives in engram/filesystem, not in the orchestrator's memory
 - Each delegation re-reads the registry if needed (Step 1 handles cache miss)
-- Compact rules are copied into each sub-agent's prompt at launch time — even if the orchestrator forgets, the sub-agents already have the rules
+- The resolved skills (paths by default, or compact rules in opt-in mode) are copied into each sub-agent's prompt at launch time — even if the orchestrator forgets, the sub-agents already have what they need to load standards
 
 ## Feedback Loop
 
 Sub-agents MUST report their skill resolution status in their return envelope:
 
-- `injected` — received `## Project Standards (auto-resolved)` from the orchestrator (ideal path)
-- `fallback-registry` — no standards received, self-loaded from skill registry
-- `fallback-path` — no standards received, loaded via `SKILL: Load` path
+- `injected` — received a `## Project Standards` block from the orchestrator (paths to load by default, or pre-digested compact rules in opt-in mode) and loaded it (ideal path)
+- `fallback-registry` — no standards received, self-loaded from the skill registry
+- `fallback-path` — no standards received, resolved the SKILL.md via its registry path directly
 - `none` — no skills loaded at all
 
 **Orchestrator self-correction rule**: if a sub-agent reports anything other than `injected`, the orchestrator MUST:

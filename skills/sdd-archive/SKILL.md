@@ -52,11 +52,39 @@ BEFORE any merge or move, retrieve the verification report and gate on it. Archi
 **Gate:**
 - If the verify report is MISSING (not found in any store / not provided) → return `status: blocked`, name the missing `verify-report`, set `next_recommended: sdd-verify`. Do NOT archive.
 - If the verdict is `FAIL`, or the report lists any unresolved CRITICAL issue → return `status: blocked`, summarize the failing items, set `next_recommended: sdd-verify`. Do NOT archive.
-- If the verdict is `PASS` or `PASS WITH WARNINGS` → proceed to Step 1.
+- If the verdict is `PASS` or `PASS WITH WARNINGS` → run the **content binding revalidation** below, then proceed to Step 1.
 
 (Compliance strictness is set by `rules.verify.compliance_mode`: under `behavioral` a MUST scenario without a passing test is CRITICAL; under `static` an UNTESTED scenario is only a WARNING. Read the verdict the report already computed — do NOT re-run verification here.)
 
-**Explicit override (escape hatch):** the orchestrator MAY pass an explicit, user-authorized override to archive despite a missing report or a `FAIL` verdict (e.g. `override_verify: <reason>`). ONLY when such an override is present, proceed with archiving and RECORD the override verbatim (reason + that it was user-authorized) in the archive report and in your return envelope under `risks`. Never self-authorize an override.
+**Content binding revalidation (mechanical — closes the "trust the verdict blindly" gap):**
+The verify report stamps a **Content Binding** receipt (`Tree-Hash`, sdd-verify Step 6b) that
+binds the PASS to the EXACT tree it verified. A PASS is only trustworthy if the code has not
+changed since. Recompute the live hash with the IDENTICAL procedure (throwaway index — the real
+index is never touched) and compare:
+
+```bash
+# From the repository root. GIT_INDEX_FILE is a temp file, so the working index is untouched.
+tmp_index="$(mktemp)"; rm -f "$tmp_index"   # git rejects a zero-byte index — let it create a fresh one
+GIT_INDEX_FILE="$tmp_index" git add -A -- . ':(exclude)openspec' ':(exclude).atl'
+live_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
+rm -f "$tmp_index"
+```
+
+- Read the RECORDED hash from the report's `Tree-Hash` line (openspec/hybrid). In `engram`/`none`
+  mode the report is not on disk — read it from the `sdd/{change-name}/state` artifact (the
+  orchestrator stamped `Reviewed-Tree` there) or from the value the orchestrator passed inline.
+- If `live_tree` ≠ the recorded hash → the code changed after verification → return
+  `status: blocked`, `executive_summary: "verify receipt stale — re-run sdd-verify"`,
+  `next_recommended: sdd-verify`. Do NOT archive. (The `openspec/` and `.atl/` exclusions mean
+  writing this report or moving the change folder does NOT trip the check — only a real code
+  change does.)
+- If the recorded hash is `n/a (not a git checkout)` or absent (legacy report) → skip this
+  check; the verdict gate above still applies.
+
+**This pathspec MUST stay byte-identical to sdd-verify Step 6b and
+`examples/claude-code/hooks/archive-gate.sh`** — any drift makes every archive read as stale.
+
+**Explicit override (escape hatch):** the orchestrator MAY pass an explicit, user-authorized override to archive despite a missing report, a `FAIL` verdict, or a STALE content-binding receipt (e.g. `override_verify: <reason>`). ONLY when such an override is present, proceed with archiving and RECORD the override verbatim (reason + that it was user-authorized) in the archive report and in your return envelope under `risks`. Never self-authorize an override.
 
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
@@ -75,7 +103,7 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
    - PRESERVE every requirement the delta does NOT mention
    - If NO main spec exists yet for the domain, the delta IS the full spec — use it directly as the new main spec (first-cycle baseline).
 3. Refresh the frontmatter `last_updated` to today (ISO), then upsert:
-   `mem_save(title/topic_key: "sdd-specs/{project}/{domain}", type: "architecture", project: "{project}", content: {merged spec})`. The stable `topic_key` upserts in place (see `skills/_shared/engram-convention.md`).
+   `mem_save(title/topic_key: "sdd-specs/{project}/{domain}", type: "architecture", project: "{project}", capture_prompt: false, content: {merged spec})`. The stable `topic_key` upserts in place, and `capture_prompt: false` keeps this automated main-spec upsert from capturing the user prompt (see `skills/_shared/engram-convention.md`).
 
 Then continue to Step 3 (the archive report records the observation IDs for traceability).
 
@@ -146,6 +174,7 @@ Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `archive-report`
 - topic_key: `sdd/{change-name}/archive-report`
 - type: `architecture`
+- capture_prompt: `false` — the archive report is an automated SDD artifact; never capture the user prompt (see `skills/_shared/engram-convention.md`)
 
 Per E2, if `mem_save` of the archive report or a merged main spec fails, retry once; if it still fails, write a filesystem fallback copy under `.atl/sdd/{change-name}/` and report it as a concern in `risks`. Do NOT silently drop the merge or the report.
 
@@ -185,6 +214,7 @@ Ready for the next change.
 ## Rules
 
 - ALWAYS run Step 0 first: NEVER archive when the verify report is missing or its verdict is `FAIL` / has unresolved CRITICAL issues, UNLESS an explicit user-authorized override is passed — and when it is, record the override verbatim in the archive report
+- ALWAYS revalidate the **content binding** in Step 0 when the report carries a `Tree-Hash`: recompute the live reviewed-tree hash (throwaway index, excluding `openspec/` and `.atl/` — byte-identical to sdd-verify Step 6b and archive-gate.sh) and BLOCK on a mismatch with `"verify receipt stale — re-run sdd-verify"`. Only the same explicit override bypasses it; a legacy report with no `Tree-Hash` falls back to the verdict gate alone
 - ALWAYS sync delta specs BEFORE moving to archive
 - In engram mode, main specs ARE the `sdd-specs/{project}/{domain}` artifacts — merge deltas there exactly as openspec merges into `openspec/specs/{domain}/spec.md`; never skip the merge
 - When merging into existing specs, PRESERVE requirements not mentioned in the delta

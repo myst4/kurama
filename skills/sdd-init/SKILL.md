@@ -27,10 +27,13 @@ You are an EXECUTOR for this phase, not the orchestrator. Do the initialization 
     topic_key: "sdd-init/{project-name}",
     type: "architecture",
     project: "{project-name}",
+    capture_prompt: false,
     content: "{detected project context markdown}"
   )
   ```
   `topic_key` enables upserts — re-running init updates the existing context, not duplicates.
+  `capture_prompt: false` because this is an automated init artifact, not a human decision
+  (see `skills/_shared/engram-convention.md` → *Prompt Capture*).
 
   (See `skills/_shared/engram-convention.md` for full naming conventions.)
 - If mode is `openspec`: Read and follow `skills/_shared/openspec-convention.md`. Run full bootstrap.
@@ -160,7 +163,7 @@ Follow the same logic as the `skill-registry` skill (`skills/skill-registry/SKIL
 1. Scan user skills: glob `*/SKILL.md` across ALL known skill directories (they mirror the per-harness install targets in `skills/manifest.json`). **User-level**: `~/.claude/skills/`, `~/.config/opencode/skills/`, `~/.gemini/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`, `~/.copilot/skills/`, `~/.gemini/antigravity/skills/`, and the parent directory of this skill file (the catch-all — ATL's own skills are co-located wherever it was installed, so this always covers the active harness target even if it is not in the explicit list). **Project-level**: `.claude/skills/`, `.config/opencode/skills/`, `.gemini/skills/`, `.codex/skills/`, `.cursor/skills/`, `.copilot/skills/`, `.gemini/antigravity/skills/`, `skills/`. Skip `sdd-*`, `_shared`, `skill-registry`. Deduplicate by name (project-level wins). Read frontmatter triggers.
 2. Scan project conventions: check for `agents.md`, `AGENTS.md`, `CLAUDE.md` (project-level), `.cursorrules`, `GEMINI.md`, `copilot-instructions.md` in the project root. If an index file is found (e.g., `agents.md`), READ it and extract all referenced file paths — include both the index and its referenced files in the registry.
 3. **ALWAYS write `.atl/skill-registry.md`** in the project root (create `.atl/` if needed). This file is harness infrastructure, NOT an SDD project artifact, so it is written in EVERY mode — including `none`. The persistence-mode gates that suppress project files (e.g. `openspec/`) never apply to `.atl/`.
-4. If engram is available, **ALSO save to engram**: `mem_save(title: "skill-registry", topic_key: "skill-registry", type: "config", project: "{project}", content: "{registry markdown}")`
+4. If engram is available, **ALSO save to engram**: `mem_save(title: "skill-registry", topic_key: "skill-registry", type: "config", project: "{project}", capture_prompt: false, content: "{registry markdown}")` (`capture_prompt: false` — automated build output, not a human decision)
 
 See `skills/skill-registry/SKILL.md` for the full registry format and scanning details.
 
@@ -197,6 +200,7 @@ mem_save(
   topic_key: "sdd-init/{project-name}",
   type: "architecture",
   project: "{project-name}",
+  capture_prompt: false,
   content: "{your detected project context from Steps 1-4, including the pipeline settings block}"
 )
 ```

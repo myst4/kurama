@@ -11,7 +11,7 @@ metadata:
 
 ## Purpose
 
-You generate or update the **skill registry** — a catalog of all available skills with **compact rules** (pre-digested, 5-15 line summaries) that any delegator injects directly into sub-agent prompts. Sub-agents do NOT read the registry or individual SKILL.md files — they receive compact rules pre-resolved in their launch prompt.
+You generate or update the **skill registry** — a catalog of all available skills with TWO surfaces per skill: an **index** (`Trigger | Skill | Path`) mapping each skill to its SKILL.md path, and **compact rules** (pre-digested, 5-15 line summaries). By default a delegator resolves via the index and passes the exact SKILL.md path so the sub-agent reads the full skill; compact rules are an opt-in low-token surface it injects instead only when the context budget is tight. The registry carries both so either path works.
 
 This is the foundation of the **Skill Resolver Protocol** (see `_shared/skill-resolver.md`). The registry is built ONCE (expensive), then read cheaply at every delegation.
 
@@ -90,7 +90,7 @@ Format per skill:
 - Metadata: export metadata object from page/layout, no <Head> component
 ```
 
-**The compact rules are the MOST IMPORTANT output of this skill.** They are what sub-agents actually receive. Invest time making them accurate and concise.
+**The registry's index (skill → SKILL.md path) is the default resolution surface** — delegators pass those paths so sub-agents read the full skill. The compact rules are the opt-in low-token surface: still worth generating accurately, because when a delegator is budget-constrained they are what the sub-agent receives instead of the full file. Invest time making them accurate and concise.
 
 ### Step 2: Scan Project Conventions
 
@@ -111,7 +111,7 @@ Build the registry markdown:
 ```markdown
 # Skill Registry
 
-**Delegator use only.** Any agent that launches sub-agents reads this registry to resolve compact rules, then injects them directly into sub-agent prompts. Sub-agents do NOT read this registry or individual SKILL.md files.
+**Delegator use only.** Any agent that launches sub-agents reads this registry to resolve skills: by default it passes each matching skill's SKILL.md path (the sub-agent reads the full file), and only when the context budget is tight it injects the pre-digested compact rules instead. Sub-agents do not read this registry themselves.
 
 See `_shared/skill-resolver.md` for the full resolution protocol.
 
@@ -124,7 +124,7 @@ See `_shared/skill-resolver.md` for the full resolution protocol.
 
 ## Compact Rules
 
-Pre-digested rules per skill. Delegators copy matching blocks into sub-agent prompts as `## Project Standards (auto-resolved)`.
+Pre-digested rules per skill — the opt-in low-token surface. Delegators copy matching blocks into sub-agent prompts as `## Project Standards (auto-resolved)` ONLY when the context budget is tight; the default is to pass the SKILL.md path from the index above.
 
 ### {skill-name-1}
 - Rule 1
@@ -169,11 +169,14 @@ mem_save(
   topic_key: "skill-registry",
   type: "config",
   project: "{project}",
+  capture_prompt: false,
   content: "{registry markdown from Step 3}"
 )
 ```
 
-`topic_key` ensures upserts — running again updates the same observation.
+`topic_key` ensures upserts — running again updates the same observation. `capture_prompt: false`
+because the registry is an automated build output, not a human decision (see
+`_shared/engram-convention.md` → *Prompt Capture*).
 
 ### Step 5: Return Summary
 

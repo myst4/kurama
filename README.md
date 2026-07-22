@@ -4,7 +4,7 @@
 
 **A lightweight, multi-harness Spec-Driven Development framework for AI coding agents.**
 
-19 pure-Markdown skills · 7 supported harnesses · zero runtime, zero dependencies
+24 pure-Markdown skills · 8 supported harnesses · zero runtime, zero dependencies
 
 </div>
 
@@ -13,8 +13,8 @@
 ## What it is
 
 Agent Teams Lite (ATL) turns any capable AI coding assistant into a disciplined
-**Spec-Driven Development (SDD)** team. It ships as **19 portable Markdown skills**
-(18 installed by default, plus the opt-in `tdd` module)
+**Spec-Driven Development (SDD)** team. It ships as **24 portable Markdown skills**
+(23 installed by default, plus the opt-in `tdd` module)
 (plus a set of shared convention files) and a thin *delegate-only orchestrator*
 prompt. The orchestrator never writes code itself — it coordinates a pipeline of
 focused sub-agents, each running in a **fresh context window**, that explore,
@@ -22,8 +22,8 @@ specify, design, implement, and verify a change.
 
 Everything is plain Markdown following the open
 [Agent Skills](https://agentskills.io) format, so the same skill set installs
-across **7 harnesses**: Claude Code, OpenCode, Gemini CLI, Codex, Cursor,
-VS Code Copilot, and Antigravity. There is no binary to install and nothing to
+across **8 harnesses**: Claude Code, OpenCode, Gemini CLI, Codex, Cursor,
+VS Code Copilot, Antigravity, and Pi. There is no binary to install and nothing to
 compile — copy the skills, wire the orchestrator prompt, and run `/sdd-init`.
 
 ## Why
@@ -100,8 +100,8 @@ multi mode) live in [docs/installation.md](docs/installation.md).
 
 ## The skills
 
-All 19 skills, grouped by role. Every one is a single `SKILL.md` that any
-file-reading agent can load. Eighteen install by default; the `tdd` module is
+All 24 skills, grouped by role. Every one is a single `SKILL.md` that any
+file-reading agent can load. Twenty-three install by default; the `tdd` module is
 opt-in (`--with tdd`).
 
 ### Orchestration entry points
@@ -141,6 +141,23 @@ opt-in (`--with tdd`).
 | `go-testing` | Go testing patterns, including Bubbletea TUI testing with `teatest`. |
 | `branch-pr` | PR creation workflow following the issue-first enforcement system. |
 | `issue-creation` | GitHub issue workflow for bugs and feature requests. |
+
+### Review lenses (4R + refuter)
+
+Bounded, read-only code-review lenses the orchestrator selects by deterministic
+triage: a trivial diff runs no lens, a standard diff runs exactly one dominant-risk
+lens, and a hot-path or large diff runs the full 4R sweep. Only findings **introduced**
+by the diff can block, and only `BLOCKER`/`CRITICAL` gate. See
+[docs/sub-agents.md](docs/sub-agents.md#review-lenses-4r--refuter) and the shared
+[`skills/_shared/review-ledger-contract.md`](skills/_shared/review-ledger-contract.md).
+
+| Skill | Role |
+|-------|------|
+| `review-risk` | R1 — security, privilege boundaries, data exposure, dependency risk. |
+| `review-readability` | R2 — naming, complexity, intent, maintainability, review size. |
+| `review-reliability` | R3 — behavior-first tests, coverage value, edge cases, determinism, regressions. |
+| `review-resilience` | R4 — fallbacks, retry/backoff, graceful degradation, observability, rollback. |
+| `review-refuter` | Adversarial verifier — adjudicates inferential findings `corroborated`/`refuted`/`inconclusive`. |
 
 ### Optional TDD module (opt-in)
 
@@ -183,6 +200,7 @@ exposes. "Full" means true sub-agents with isolated, fresh context windows.
 | Cursor | Inline (skills load as instructions) | `setup.sh --agent cursor` |
 | VS Code Copilot | Inline (agent mode with tool use) | `setup.sh --agent vscode` |
 | Antigravity | Single-agent | Manual (see installation guide) |
+| Pi | Inline (skills load as instructions) | Manual (project-root `AGENTS.md`; see installation guide) |
 
 ## Documentation
 

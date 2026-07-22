@@ -31,7 +31,7 @@ From the orchestrator:
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
-- **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks` (all required — keep tasks ID for updates). Mark tasks complete via `mem_update(id: {tasks-observation-id}, content: "...")`. Save progress as `sdd/{change-name}/apply-progress`.
+- **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks` (all required — keep tasks ID for updates), AND read the existing `sdd/{change-name}/apply-progress` FIRST when present (optional — an absent artifact means this is the first batch). Mark tasks complete via `mem_update(id: {tasks-observation-id}, content: "...")`. Save progress as `sdd/{change-name}/apply-progress` using **read-merge-write**, never a blind overwrite (see Step 5).
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Update `tasks.md` with `[x]` marks.
 - **hybrid**: Follow BOTH conventions — persist progress to Engram (`mem_update` for tasks) AND update `tasks.md` with `[x]` marks on filesystem.
 - **none**: Return progress inline only — do not write SDD artifact files (proposal/spec/design/tasks/apply-progress). The implementation code itself is still written to the project as normal; `none` governs SDD artifacts, never the code you produce.
@@ -120,11 +120,24 @@ Update `tasks.md` — change `- [ ]` to `- [x]` for completed tasks:
 
 **This step is MANDATORY — do NOT skip it.**
 
+`apply-progress` shares one `topic_key` across every batch, and a `topic_key` upsert is
+**destructive** — it REPLACES the observation, it does not append. Treat this artifact as
+**read-merge-write**, never a blind overwrite:
+
+1. **Read first** — retrieve the existing `sdd/{change-name}/apply-progress` (engram:
+   `mem_search` → `mem_get_observation`; openspec/hybrid: read the progress file). An absent
+   artifact means this is the first batch — an empty baseline, not an error.
+2. **Merge** — union the prior batch's completed/pending task states with this batch's results.
+   A task an earlier batch marked complete STAYS complete.
+3. **Write back** — persist the merged whole under the same `topic_key`.
+
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `apply-progress`
 - topic_key: `sdd/{change-name}/apply-progress`
 - type: `architecture`
-- Also update the tasks artifact with `[x]` marks via `mem_update` (engram) or file edit (openspec/hybrid).
+- Also update the tasks artifact with `[x]` marks via `mem_update` (engram) or file edit (openspec/hybrid) — merge this batch's completions into the current marks; never regress a `[x]` an earlier batch already set.
+
+See `skills/_shared/engram-convention.md` → *Apply-Progress Continuity* for the backing rationale.
 
 ### Step 6: Return Summary
 
@@ -150,6 +163,7 @@ Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Pop
 - If you discover the design is wrong or incomplete, NOTE IT in your return summary — don't silently deviate
 - If a task is blocked by something unexpected, STOP and return a `blocked` envelope per **Section D** naming the blocker, instead of guessing
 - NEVER implement tasks that weren't assigned to you
+- NEVER blind-overwrite `apply-progress` — read the existing artifact FIRST, merge this batch's task states into it, and write the merged whole (read-merge-write); a `topic_key` upsert replaces, it does not append, so a blind save erases earlier batches' completions
 - Skill loading is handled in Step 1 — follow any loaded skills strictly when writing code
 - Apply any `rules.apply` from `openspec/config.yaml`
 - Resolve `tdd.enabled` first (Step 3): propagated value wins, else `tdd.enabled` in `openspec/config.yaml`, else default off. NEVER infer TDD from existing test files or from a `tdd/SKILL.md` being installed
