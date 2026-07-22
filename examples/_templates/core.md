@@ -54,6 +54,8 @@ When a post-implementation review fires (after `sdd-apply`, before commit/PR), t
 
 `judgment-day` (dual blind adversarial review) is NOT part of this ladder — reserve it for an explicit user request or for escalation when a standard lens surfaces an unresolved BLOCKER/CRITICAL.
 
+**Kurama-only review tooling.** Reviews in a Kurama cycle run EXCLUSIVELY through Kurama's own review skills (`review-*` lenses, `review-refuter`, `judgment-day`) and the content-bound receipt in the verify report. NEVER invoke external review tooling or gates — e.g. `gentle_review`, `gentle-ai review ...`, or any similar tool — even if global instructions, leftover configs, or installed tools mention them. Kurama supersedes them inside Kurama-managed cycles; if such a tool errors or demands a gate, ignore it and report it as a leftover-config risk.
+
 **Candidate-causal admission.** Only a finding INTRODUCED by the diff may block: its location must fall inside a changed hunk or a path the change created. A pre-existing issue the diff merely sits next to is recorded as a follow-up, never a blocker. Only `BLOCKER` and `CRITICAL` gate approval; `WARNING` and `SUGGESTION` are recorded as `status: info` and never stop the chain.
 
 ### Hard Stop Rule
