@@ -37,7 +37,7 @@ TARGET_PATH=""      # repo root when SCOPE=project (validated; never the Kurama 
 # contains the substring "hooks/kurama/" so uninstall.sh can filter the block
 # out surgically. The two hook scripts ship in examples/claude-code/hooks/.
 HOOKS_SRC="$EXAMPLES_DIR/claude-code/hooks"
-HOOK_SCRIPTS="orchestrator-write-guard.sh archive-gate.sh"
+HOOK_SCRIPTS="orchestrator-write-guard.sh archive-gate.sh README.md"
 
 # Receipt accumulators — filled across install_skills / install_hooks / Pi steps
 # and flushed ONCE by finalize_receipt() at the end of setup_agent, so a single

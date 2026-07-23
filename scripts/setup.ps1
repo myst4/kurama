@@ -141,7 +141,7 @@ $AgentBinaries = @{
 
 # O2: Claude Code hooks source (always installed for claude-code, both scopes).
 $HooksSrc = Join-Path $ExamplesDir 'claude-code\hooks'
-$HookScripts = @('orchestrator-write-guard.sh', 'archive-gate.sh')
+$HookScripts = @('orchestrator-write-guard.sh', 'archive-gate.sh', 'README.md')
 
 # O1: resolved once by Confirm-ProjectTarget when Scope=project (absolute repo root).
 $script:TargetPath = ''

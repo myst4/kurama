@@ -68,7 +68,30 @@ json_str() {
 # the main thread. Delegated workers (sdd-apply, fix agents, review fixers)
 # are the INTENDED writers, so any subagent call passes; this guard exists to
 # stop the MAIN-thread orchestrator from writing code inline.
-if [ -n "$(json_str agent_id)" ]; then
+#
+# HARDENED extraction: agent_id is read at the JSON ROOT only — never from
+# anywhere in the payload — so file CONTENT containing "agent_id" (e.g. a Write
+# of this very script) can never spoof the check. jq anchors to the root key;
+# the no-jq fallback searches only the payload prefix BEFORE "tool_input"
+# (agent metadata lives at the root; user-controlled content lives inside
+# tool_input).
+#
+# ASSUMPTION (fail-open by design): if a future Claude Code build adds
+# agent_id to MAIN-thread payloads, this guard neutralizes silently.
+# Re-verify the hooks contract on Claude Code upgrades.
+agent_id=""
+if [ -n "$payload" ]; then
+  if command -v jq >/dev/null 2>&1; then
+    agent_id="$(printf '%s' "$payload" | jq -r '.agent_id // empty' 2>/dev/null)"
+  else
+    agent_id="$(printf '%s' "$payload" \
+      | tr -d '\n' \
+      | sed 's/"tool_input".*//' \
+      | grep -o '"agent_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+      | head -n 1)"
+  fi
+fi
+if [ -n "$agent_id" ]; then
   exit 0
 fi
 
