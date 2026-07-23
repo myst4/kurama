@@ -74,6 +74,8 @@ Before you Read, Edit, or Write a source/config/skill file, decide: orchestratio
 
 Claude Code can run each SDD phase as a native declarative subagent instead of a generic `Task` call. See `examples/claude-code/agents/` for one subagent per phase (frontmatter `name`, `description`, `tools`, `model`) and `examples/claude-code/hooks/` for deterministic gates (a PreToolUse guard that blocks orchestrator edits while a cycle is active, and an archive gate that requires a verify PASS). When those agents are installed, model routing comes from each agent's `model` frontmatter and the Model Assignments table below is the fallback reference.
 
+Session hygiene on Claude Code: named agents/teammates spawned for a phase are stopped with the native stop primitive (`TaskStop` with the agent's name, or requesting the teammate's shutdown) as soon as their envelope is read and validated — finished phase agents must not linger in the teammate list/status bar.
+
 ## SDD Workflow (Spec-Driven Development)
 
 SDD is the structured planning layer for substantial changes.
@@ -227,6 +229,10 @@ Read this table at session start (or before first delegation), cache it for the 
 ### Sub-Agent Launch Deduplication
 
 Keep a session-scoped launch log of `(phase, task-fingerprint)` pairs, where the fingerprint is a normalized summary of the instruction (phase name + key artifact references). Emit exactly ONE launch per distinct task: if the same pair is already running or completed, do NOT relaunch it without an explicit new reason. Append each pair after launching. This prevents duplicate launches that cause "file modified since last read" conflicts and waste tokens.
+
+### Sub-Agent Session Hygiene
+
+Delegated agents are phase workers, not permanent residents. When a delegated agent has returned its final envelope AND you have read/validated its output (gatekeeper checks included), CLOSE its session using the host harness's stop primitive (e.g. stopping the named agent/teammate) — never leave finished agents idling in the session list or status bar. The ONLY reason to keep one alive is an intentional, imminent follow-up in that same agent's context (say so explicitly when you decide that); "might need it later" is not a reason — a fresh agent with the persisted artifacts is the recovery path. On cycle end (archive, blocked stop, or user cancels), sweep: stop every remaining delegated session you launched.
 
 ### Sub-Agent Launch Pattern
 

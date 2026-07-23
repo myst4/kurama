@@ -209,6 +209,10 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 
 Keep a session-scoped launch log of `(phase, task-fingerprint)` pairs, where the fingerprint is a normalized summary of the instruction (phase name + key artifact references). Emit exactly ONE launch per distinct task: if the same pair is already running or completed, do NOT relaunch it without an explicit new reason. Append each pair after launching. This prevents duplicate launches that cause "file modified since last read" conflicts and waste tokens.
 
+### Sub-Agent Session Hygiene
+
+Delegated agents are phase workers, not permanent residents. When a delegated agent has returned its final envelope AND you have read/validated its output (gatekeeper checks included), CLOSE its session using the host harness's stop primitive (e.g. stopping the named agent/teammate) — never leave finished agents idling in the session list or status bar. The ONLY reason to keep one alive is an intentional, imminent follow-up in that same agent's context (say so explicitly when you decide that); "might need it later" is not a reason — a fresh agent with the persisted artifacts is the recovery path. On cycle end (archive, blocked stop, or user cancels), sweep: stop every remaining delegated session you launched.
+
 ### Sub-Agent Launch Pattern
 
 ALL sub-agent launch prompts that involve reading, writing, or reviewing code MUST include pre-resolved **compact rules** from the skill registry. Follow the **Skill Resolver Protocol** (see `_shared/skill-resolver.md` in the skills directory).

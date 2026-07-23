@@ -18,6 +18,8 @@ delegate (async) is the default for delegated work. Use task (sync) only when yo
 
 Claude Code can run each SDD phase as a native declarative subagent instead of a generic `Task` call. See `examples/claude-code/agents/` for one subagent per phase (frontmatter `name`, `description`, `tools`, `model`) and `examples/claude-code/hooks/` for deterministic gates (a PreToolUse guard that blocks orchestrator edits while a cycle is active, and an archive gate that requires a verify PASS). When those agents are installed, model routing comes from each agent's `model` frontmatter and the Model Assignments table below is the fallback reference.
 
+Session hygiene on Claude Code: named agents/teammates spawned for a phase are stopped with the native stop primitive (`TaskStop` with the agent's name, or requesting the teammate's shutdown) as soon as their envelope is read and validated — finished phase agents must not linger in the teammate list/status bar.
+
 <!-- @@MODEL_ASSIGNMENTS_SECTION@@ -->
 <!-- gentle-ai:sdd-model-assignments -->
 ## Model Assignments
