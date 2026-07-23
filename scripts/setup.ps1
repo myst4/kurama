@@ -1112,7 +1112,7 @@ try {
     foreach ($dir in $skillDirs) {
         if (-not (Test-Path (Join-Path $dir.FullName 'SKILL.md'))) {
             Write-Fail "Missing: $($dir.Name)/SKILL.md"
-            Write-Fail 'Is this a complete clone? git clone https://github.com/Gentleman-Programming/agent-teams-lite.git'
+            Write-Fail 'Is this a complete clone? git clone https://github.com/myst4/kurama.git'
             exit 1
         }
     }

@@ -203,7 +203,7 @@ and a single-entry [`.claude-plugin/marketplace.json`](../.claude-plugin/marketp
 example:
 
 ```
-/plugin marketplace add Gentleman-Programming/agent-teams-lite
+/plugin marketplace add myst4/kurama
 /plugin install kurama
 ```
 
@@ -364,7 +364,7 @@ native extension installer can set both up in one step instead of the manual
 copy above:
 
 ```
-gemini extensions install https://github.com/Gentleman-Programming/agent-teams-lite
+gemini extensions install https://github.com/myst4/kurama
 ```
 
 ---

@@ -1604,13 +1604,13 @@ validate_project_target
 for skill_dir in "$SKILLS_SRC"/sdd-*/; do
     if [ ! -f "$skill_dir/SKILL.md" ]; then
         fail "Missing: $(basename "$skill_dir")/SKILL.md"
-        fail "Is this a complete clone? git clone https://github.com/Gentleman-Programming/agent-teams-lite.git"
+        fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
         exit 1
     fi
 done
 if [ ! -f "$MANIFEST_FILE" ]; then
     fail "Missing: skills/manifest.json (the skill list source of truth)"
-    fail "Is this a complete clone? git clone https://github.com/Gentleman-Programming/agent-teams-lite.git"
+    fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
     exit 1
 fi
 

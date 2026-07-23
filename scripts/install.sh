@@ -384,7 +384,7 @@ validate_source() {
     fi
     if [ "$missing" -gt 0 ]; then
         echo -e "\n${RED}${BOLD}Source validation failed.${NC} Is this a complete clone of the repository?"
-        echo -e "  Try: ${CYAN}git clone https://github.com/Gentleman-Programming/agent-teams-lite.git${NC}\n"
+        echo -e "  Try: ${CYAN}git clone https://github.com/myst4/kurama.git${NC}\n"
         exit 1
     fi
 }

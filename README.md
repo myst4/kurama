@@ -56,7 +56,7 @@ queue or peer-to-peer messaging you have to operate.
 ## Quick start
 
 ```bash
-git clone https://github.com/Gentleman-Programming/agent-teams-lite.git
+git clone https://github.com/myst4/kurama.git
 cd kurama
 ```
 
