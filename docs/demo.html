@@ -97,6 +97,14 @@ body{
 @keyframes fillbar{to{width:62%}}
 .gauge .lbl{display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);margin-top:.35rem}
 
+.term{background:#0c0906;border:1px solid var(--line);border-radius:10px;padding:.85rem 1.1rem;text-align:left;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.82rem;display:flex;flex-direction:column;gap:.4rem;max-width:600px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.term .tu{color:var(--ink)}
+.term .tu::before{content:"❯ ";color:var(--accent);font-weight:700}
+.term .tk{color:var(--muted)}
+.term .tk::before{content:"🦊 "}
+.term .tq{color:var(--gold)}
+.term .tq::before{content:"? ";color:var(--gold);font-weight:700}
+.term b{color:var(--green);font-weight:600}
 .gatewrap{display:flex;align-items:center;gap:1.1rem}
 .gate{font-size:2.6rem}
 .scene.active .gate{animation:gateglow 2s ease-in-out infinite}
@@ -155,10 +163,11 @@ body{
       <div class="eyebrow up">01 · Nace la idea</div>
       <div class="hbadge up">issue-creation · kanban-github</div>
       <h2 class="up d1">Todo empieza con una issue</h2>
-      <div class="visual">
+      <div class="visual" style="flex-direction:column">
+        <div class="term up d1"><span class="tu">"un cliente compra 3 tickets — quiero verlos en una URL, uno por página, swipe mobile"</span></div>
         <div class="issuecard pop d2">
           <div class="num">#42</div>
-          <div class="t">Dark mode en el dashboard</div>
+          <div class="t">Multi-ticket viewer (mobile)</div>
           <div class="a">asignada a vos · Backlog</div>
         </div>
       </div>
@@ -166,30 +175,40 @@ body{
     </section>
 
     <section class="scene" data-dag="-1" data-col="0">
-      <div class="eyebrow up">02 · Preflight</div>
-      <div class="hbadge up">Session Preflight</div>
-      <h2 class="up d1">Cuatro preguntas. Una sola vez.</h2>
+      <div class="eyebrow up">02 · El cuestionario</div>
+      <div class="hbadge up">sdd-init · onboarding</div>
+      <h2 class="up d1">Las preguntas fijas viven acá. Una vez.</h2>
       <div class="visual">
-        <span class="chip pop d1"><span class="k">ritmo</span> supervisado</span>
-        <span class="chip pop d2"><span class="k">memoria</span> Engram</span>
-        <span class="chip pop d3"><span class="k">entrega</span> PRs encadenados</span>
-        <span class="chip pop d4"><span class="k">límite</span> 400 líneas</span>
+        <div class="term up d1">
+          <span class="tu">/sdd-init</span>
+          <span class="tk">stack detectado: Next.js 16 · React 19 · Drizzle <b>✓</b></span>
+          <span class="tq">¿TDD para este proyecto? → <b>sí</b></span>
+          <span class="tq">¿Kanban (GitHub Projects)? → <b>sí — board mapeado ✓</b></span>
+          <span class="tq">¿Dónde persisto los artefactos? → <b>openspec/</b></span>
+          <span class="tq">¿Ritmo? → <b>supervisado</b> · ¿Límite de PR? → <b>400</b></span>
+        </div>
       </div>
-      <p class="say up d5">Después de esto, <b>no te interrumpe más</b>.</p>
+      <p class="say up d3"><b>Config una vez, herencia para siempre.</b> Después de esto, no te vuelve a preguntar nada fijo.</p>
     </section>
 
     <section class="scene" data-dag="1" data-col="1">
       <div class="eyebrow up">03 · El orquestador</div>
-      <div class="hbadge up">Orchestrator · subagents nativos</div>
+      <div class="hbadge up">Orchestrator · Session Preflight · subagents nativos</div>
       <h2 class="up d1">Coordina. No escribe código.</h2>
-      <div class="visual">
+      <div class="visual" style="flex-direction:column;gap:1.2rem">
+        <div class="term up d1">
+          <span class="tu">"dale, arranquemos el feature de los tickets"</span>
+          <span class="tk">Preflight: supervisado · openspec · chained · 400 <b>✓</b> — lanzo /sdd-new multi-ticket-viewer</span>
+        </div>
+        <div style="display:flex;gap:1rem;align-items:center;justify-content:center;flex-wrap:wrap">
         <div class="minion pop d2"><div class="mface">🔍</div><span class="mchip m-sonnet">sonnet</span></div>
         <div class="wire pop d2"></div>
         <div class="orch pop d1"><div class="orchcore">🦊</div><span class="mchip" style="color:var(--accent);border-color:var(--accent-dim)">orquestador</span></div>
         <div class="wire pop d3"></div>
         <div class="minion pop d3"><div class="mface">📝</div><span class="mchip m-sonnet">sonnet</span></div>
+        </div>
       </div>
-      <p class="say up d4">Cada fase corre en un <b>subagente con contexto limpio</b>. La card ya está en Ready.</p>
+      <p class="say up d4">Preflight <b>en silencio</b> (ya está todo configurado) y cada fase corre en un <b>subagente con contexto limpio</b>. La card ya está en Ready.</p>
     </section>
 
     <section class="scene" data-dag="3" data-col="1">
@@ -209,12 +228,12 @@ body{
       <h2 class="up d1">Sin tu OK, ni una línea de código</h2>
       <div class="visual gatewrap">
         <span class="gate pop d1">🚦</span>
-        <div style="text-align:left" class="up d2">
-          <div class="checkline">tasks: 1.1 → 3.4 listas</div>
-          <div class="checkline">plan aprobado por… <b>vos</b></div>
+        <div class="term up d2">
+          <span class="tk">Plan listo: <b>8 tareas</b> chicas y verificables (1.1 → 3.4). ¿Arranco a programar?</span>
+          <span class="tu">dale</span>
         </div>
       </div>
-      <p class="say up d3">El plan completo, en tareas chicas y verificables. <b>Vos decidís cuándo arranca.</b></p>
+      <p class="say up d3">Cero código antes de este momento. <b>Vos decidís cuándo arranca.</b></p>
     </section>
 
     <section class="scene" data-dag="5" data-col="2">
@@ -274,12 +293,15 @@ body{
       <div class="eyebrow up">10 · El merge es tuyo</div>
       <div class="hbadge up">Post-approval flow · archive-gate hook</div>
       <h2 class="up d1">Siempre. Incluso en modo auto.</h2>
-      <div class="visual">
-        <span class="chip pop d1">checks <b style="color:var(--green)">&nbsp;verdes ✓</b></span>
-        <span class="chip pop d2">tu OK <b style="color:var(--gold)">&nbsp;explícito ✓</b></span>
-        <span class="chip pop d3 mono">merge → Done → main</span>
+      <div class="visual" style="flex-direction:column">
+        <div class="term up d1">
+          <span class="tk">PR #43 listo · gh pr checks: <b>todos verdes ✓</b> (recién corridos, no recordados)</span>
+          <span class="tk">¿Mergeo? El OK es por PR — nunca implícito, nunca heredado.</span>
+          <span class="tu">dale, mergealo</span>
+        </div>
+        <span class="chip pop d3 mono">merge ✓ → card a Done → checkout main && pull</span>
       </div>
-      <p class="say up d4">Verde fresco + OK por PR — <b>nunca implícito, nunca heredado</b>. Y de vuelta al branch principal.</p>
+      <p class="say up d4">Verde fresco + tu OK explícito. <b>Y de vuelta al branch principal.</b></p>
     </section>
 
     <section class="scene" data-dag="8" data-col="4">
