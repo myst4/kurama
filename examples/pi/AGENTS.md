@@ -105,9 +105,14 @@ Meta-commands (type directly — orchestrator handles them, won't appear in auto
 
 ### SDD Session Preflight
 
-Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, the executor skills, or a natural-language equivalent ("use SDD to add X", "do it with SDD") — collect a one-time **SDD Session Preflight** decision block. Ask ONE grouped round up front; do not run it as a sequential wizard and do not start any phase until it is answered.
+Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, the executor skills, or a natural-language equivalent ("use SDD to add X", "do it with SDD") — RESOLVE the **SDD Session Preflight** block of four values. Resolving does NOT mean asking:
 
-Collect four choices in a single grouped prompt:
+- **Silent path (the normal case):** read the persisted settings (`openspec/config.yaml` or the `sdd-init/{project}` settings bundle). If ALL FOUR values resolve from there, DO NOT ask anything — print a one-line status in the user's language (e.g. "Preflight: supervisado · openspec · chained · 400 — decime si querés cambiar algo esta sesión") and start working. `sdd-init` already asked these once; re-asking answered questions is friction, not safety.
+- **Ask ONLY the missing pieces:** if some values have no persisted answer (project never initialized, or a setting absent), ask ONLY those, in one grouped prompt.
+- **Explicit override:** if the user asks to change the setup ("preflight", "cambiá el ritmo", "usá auto"), ask or apply just that change for the session.
+- **Artifact store is PROJECT-level, not session-level:** once `sdd-init` set it, never re-offer it in a preflight. Switching stores mid-project fragments artifacts — only change it on an explicit user request, with that warning.
+
+The four values (when something does need asking):
 
 1. **Pace** — Interactive or Automatic. This IS `execution_mode`: Interactive → `supervised`, Automatic → `auto`. It is the same value the **Execution Mode (optional)** section governs, not a parallel concept.
 2. **Artifact store** — OpenSpec, Engram, or Both (`hybrid`), per **Artifact Store Policy**. Offer only file/inline-safe choices when Engram is not callable.
@@ -120,7 +125,7 @@ Rendering:
 - On harnesses without that primitive, ask ONE grouped text question covering the same four groups.
 - Match the user's conversation language and active persona for the labels — this UI is orchestrator conversation, not a technical artifact. Never show internal codes or canonical values in the UI; map the chosen labels to canonical values internally after the prompt returns.
 
-Precedence: the preflight choices OVERRIDE config for this session. Persisted values — `openspec/config.yaml` or the `sdd-init/{project}` settings bundle — only PRE-FILL the defaults; they never satisfy the preflight on their own. Cache the resulting block for the session and forward the four values in every phase prompt.
+Precedence: a value the user chose THIS session (via the grouped prompt or an explicit override) wins over the persisted one, for this session only. Persisted settings SATISFY the preflight on their own — that is the point of `sdd-init`. Cache the resolved block for the session and forward the four values in every phase prompt.
 
 ### SDD Entry Routing
 
