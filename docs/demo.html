@@ -28,7 +28,9 @@ body{
 #scenes{flex:1 1 auto;position:relative;min-height:0}
 .scene{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:1rem 2rem;opacity:0;visibility:hidden;transform:translateY(14px);transition:opacity .55s ease,transform .55s ease,visibility .55s}
 .scene.active{opacity:1;visibility:visible;transform:none}
-.eyebrow{font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:.7rem}
+.eyebrow{font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:.55rem}
+.hbadge{display:inline-flex;align-items:center;gap:.5rem;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.74rem;color:var(--gold);border:1px dashed #6b5a24;background:rgba(37,31,14,.55);border-radius:8px;padding:.32rem .75rem;margin-bottom:1.1rem;letter-spacing:.02em}
+.hbadge::before{content:"⚙ harness";font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
 .scene h1{font-size:clamp(2.4rem,6vw,4.2rem);font-weight:700;letter-spacing:-.02em;margin:0;line-height:1.08;text-wrap:balance}
 .scene h2{font-size:clamp(1.7rem,4.2vw,2.7rem);font-weight:700;letter-spacing:-.01em;margin:0 0 1.6rem;line-height:1.15;text-wrap:balance}
 .scene .say{font-size:clamp(1rem,1.9vw,1.25rem);color:var(--muted);max-width:34em;margin:.2rem 0 0;line-height:1.5}
@@ -151,6 +153,7 @@ body{
 
     <section class="scene" data-dag="-1" data-col="0">
       <div class="eyebrow up">01 · Nace la idea</div>
+      <div class="hbadge up">issue-creation · kanban-github</div>
       <h2 class="up d1">Todo empieza con una issue</h2>
       <div class="visual">
         <div class="issuecard pop d2">
@@ -164,6 +167,7 @@ body{
 
     <section class="scene" data-dag="-1" data-col="0">
       <div class="eyebrow up">02 · Preflight</div>
+      <div class="hbadge up">Session Preflight</div>
       <h2 class="up d1">Cuatro preguntas. Una sola vez.</h2>
       <div class="visual">
         <span class="chip pop d1"><span class="k">ritmo</span> supervisado</span>
@@ -176,6 +180,7 @@ body{
 
     <section class="scene" data-dag="1" data-col="1">
       <div class="eyebrow up">03 · El orquestador</div>
+      <div class="hbadge up">Orchestrator · subagents nativos</div>
       <h2 class="up d1">Coordina. No escribe código.</h2>
       <div class="visual">
         <div class="minion pop d2"><div class="mface">🔍</div><span class="mchip m-sonnet">sonnet</span></div>
@@ -189,6 +194,7 @@ body{
 
     <section class="scene" data-dag="3" data-col="1">
       <div class="eyebrow up">04 · Planning en paralelo</div>
+      <div class="hbadge up">Phase DAG · Artifact Store</div>
       <h2 class="up d1">Spec ‖ Design, al mismo tiempo</h2>
       <div class="visual">
         <div class="minion pop d1"><div class="mface">📋</div><span class="tddlabel">spec</span><span class="mchip m-sonnet">sonnet</span></div>
@@ -199,6 +205,7 @@ body{
 
     <section class="scene" data-dag="4" data-col="1">
       <div class="eyebrow up">05 · El gate humano</div>
+      <div class="hbadge up">sdd-tasks · Execution Mode</div>
       <h2 class="up d1">Sin tu OK, ni una línea de código</h2>
       <div class="visual gatewrap">
         <span class="gate pop d1">🚦</span>
@@ -212,6 +219,7 @@ body{
 
     <section class="scene" data-dag="5" data-col="2">
       <div class="eyebrow up">06 · Apply — TDD</div>
+      <div class="hbadge up">Módulo TDD · sdd-apply</div>
       <h2 class="up d1">Primero el test que falla</h2>
       <div class="visual tdd">
         <div class="tddstep pop d1"><div class="lamp red">🔴</div><span class="tddlabel">red</span></div>
@@ -223,6 +231,7 @@ body{
 
     <section class="scene" data-dag="6" data-col="2">
       <div class="eyebrow up">07 · Verify</div>
+      <div class="hbadge up">sdd-verify · content-bound receipt</div>
       <h2 class="up d1">Evidencia, no promesas</h2>
       <div class="visual">
         <div class="seal up d1">
@@ -237,6 +246,7 @@ body{
 
     <section class="scene" data-dag="6" data-col="2">
       <div class="eyebrow up">08 · Review con triage</div>
+      <div class="hbadge up">Review 4R · refuter · triage</div>
       <h2 class="up d1">Review proporcional al riesgo</h2>
       <div class="visual">
         <span class="chip pop d1">trivial → <b>&nbsp;0 lentes</b></span>
@@ -248,6 +258,7 @@ body{
 
     <section class="scene" data-dag="6" data-col="3">
       <div class="eyebrow up">09 · La entrega justa</div>
+      <div class="hbadge up">Workload Guard · branch-pr</div>
       <h2 class="up d1">PRs que un humano puede leer</h2>
       <div class="visual">
         <div class="gauge up d1">
@@ -261,6 +272,7 @@ body{
 
     <section class="scene" data-dag="8" data-col="4">
       <div class="eyebrow up">10 · El merge es tuyo</div>
+      <div class="hbadge up">Post-approval flow · archive-gate hook</div>
       <h2 class="up d1">Siempre. Incluso en modo auto.</h2>
       <div class="visual">
         <span class="chip pop d1">checks <b style="color:var(--green)">&nbsp;verdes ✓</b></span>
@@ -272,6 +284,7 @@ body{
 
     <section class="scene" data-dag="8" data-col="4">
       <div class="bigfox">🦊</div>
+      <div class="hbadge up">Engram · skill-registry</div>
       <h2 class="up d1">Y todo quedó en la memoria</h2>
       <div class="visual stats">
         <span class="stat pop d1"><b>25</b> skills</span>
