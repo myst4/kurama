@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-_Nothing yet._
+- **OpenCode shared SDD prompts**: The nine SDD phase prompts now live as standalone files under `examples/opencode/prompts/sdd/sdd-<phase>.md` and are installed to `~/.config/opencode/prompts/sdd/`. `opencode.multi.json` references them via `{file:...}` instead of inlining prompt text, so every agent that runs a phase reads the same prompt from one place. Added an `/sdd-status` command to the OpenCode command set.
+- **OpenCode named model profiles**: `setup.sh --opencode-profile NAME[:provider/model]` splices a parallel agent set into `opencode.json` — a `mode:primary` `kurama-orchestrator` (Tab-switchable, `task` permission scoped to its own subagents) plus one hidden `sdd-<phase>-NAME` subagent per phase, all sharing the prompt files and differing only in `model`. The splice is a single idempotent `jq` pass that captures and restores existing `model` values, so re-running setup preserves hand-edited models. Interactive setup asks for a profile name after the mode; an empty answer skips it. A profile is an emergent convention over three native OpenCode primitives (multiple primaries, per-agent `model`, `{file:}` prompt refs) — OpenCode has no profile object. Documented in `docs/opencode-profiles.md`, including what is deliberately not ported from gentle-ai (model picker, reasoning-effort variants, TUI profile manager, external profile files). 5 new install tests (130 total).
 
 ## 5.0.0 — 2026-07-23
 

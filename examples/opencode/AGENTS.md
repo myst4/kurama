@@ -79,6 +79,10 @@ This example ships two OpenCode configs — install exactly one per project:
 
 When delegating, target the `sdd-<phase>` agents in multi mode and the `general` subagent in single mode.
 
+### Named model profiles (optional)
+
+A **profile** is a named parallel set of agents that share the SDD prompts and vary only their `model`. Installing one (`setup.sh --agent opencode --opencode-profile NAME[:provider/model]`) splices a `kurama-orchestrator` agent (`mode:primary`) plus suffixed `sdd-<phase>-NAME` subagents (`mode:subagent`, `hidden`) into `opencode.json`, all referencing the shared `~/.config/opencode/prompts/sdd/sdd-<phase>.md` prompt files. In the OpenCode TUI press **Tab** to cycle among the `mode:primary` orchestrators. The `/sdd-*` slash commands stay frontmatter-pinned to the base agents (executor commands → `sdd-<phase>`, meta commands → `sdd-orchestrator`), so they ignore the selected primary and run at their default models. To use a profile's per-phase models, select `kurama-orchestrator` and drive the flow with a **freeform** (non-slash) request; it delegates only to its own `sdd-<phase>-NAME` subagents, each carrying the profile's configured model. Models are edited by hand in `opencode.json` (or set once via the flag's `:provider/model`) — there is no picker. See `docs/opencode-profiles.md`.
+
 ## SDD Workflow (Spec-Driven Development)
 
 SDD is the structured planning layer for substantial changes.
@@ -213,6 +217,8 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 ## Model Assignments
 
 Read this table at session start (or before first delegation), cache it for the session, and pass the mapped alias in every Agent tool call via the `model` parameter. If a phase is missing, use the `default` row. If you lack access to the assigned model, substitute `sonnet` and continue.
+
+When running under a named profile (the `kurama-orchestrator` primary), the per-phase models come from the `sdd-<phase>-NAME` agent entries in `opencode.json` rather than from these aliases; delegate to those suffixed subagents and let each carry its own configured model. This table remains the default guidance for the base `sdd-orchestrator`.
 
 | Phase | Default Model | Reason |
 |-------|---------------|--------|

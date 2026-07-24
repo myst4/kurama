@@ -242,9 +242,10 @@ test_opencode_commands() {
     assert_file_exists "$commands_dir/sdd-new.md" || return 1
     assert_file_exists "$commands_dir/sdd-ff.md" || return 1
     assert_file_exists "$commands_dir/sdd-continue.md" || return 1
+    assert_file_exists "$commands_dir/sdd-status.md" || return 1
     local count
     count=$(find "$commands_dir" -name "sdd-*.md" | wc -l | tr -d ' ')
-    assert_eq "8" "$count" "Expected exactly 8 OpenCode commands"
+    assert_eq "9" "$count" "Expected exactly 9 OpenCode commands"
 }
 
 # ============================================================================
@@ -407,7 +408,7 @@ test_all_global_opencode_commands() {
     assert_dir_exists "$commands_dir" || return 1
     local count
     count=$(find "$commands_dir" -name "sdd-*.md" | wc -l | tr -d ' ')
-    assert_eq "8" "$count" "Expected 8 OpenCode commands with all-global"
+    assert_eq "9" "$count" "Expected 9 OpenCode commands with all-global"
 }
 
 # ============================================================================
@@ -432,7 +433,7 @@ test_idempotent_opencode() {
     assert_eq "25" "$skill_count" "Expected exactly 25 skills after double install" || return 1
     local cmd_count
     cmd_count=$(find "$HOME/.config/opencode/commands" -name "sdd-*.md" | wc -l | tr -d ' ')
-    assert_eq "8" "$cmd_count" "Expected exactly 8 commands after double install"
+    assert_eq "9" "$cmd_count" "Expected exactly 9 commands after double install"
 }
 
 test_idempotent_all_global() {
@@ -774,6 +775,151 @@ test_opencode_template_files_exist() {
         return 1
     fi
     return 0
+}
+
+# ============================================================================
+# Tests — Phase 11: OpenCode shared prompts + named model profiles (W1–W3, W9)
+#
+# setup.sh --agent opencode runs the global flow (installs the background-agents
+# npm dep). A fake `npm` shim on PATH intercepts that install so the tests never
+# touch the network; jq/python/git behind it stay reachable. --without-engram
+# keeps the O5 flow (brew/engram) out.
+# ============================================================================
+
+# Fake npm that logs nothing and exits 0, so setup_opencode's dependency install
+# is a no-op (no registry, no network). Prepended to PATH; real tools stay behind.
+make_npm_shim() {
+    local bindir="$1"
+    mkdir -p "$bindir"
+    cat > "$bindir/npm" <<'SHIM'
+#!/usr/bin/env bash
+exit 0
+SHIM
+    chmod +x "$bindir/npm"
+}
+
+# Run the global OpenCode setup with the npm shim on PATH. Extra args are passed
+# through (mode/profile). Echoes nothing; returns setup.sh's exit code.
+run_setup_opencode() {
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --without-engram \
+        --non-interactive "$@" > /dev/null 2>&1
+}
+
+test_opencode_shared_prompts_installed() {
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
+    local pdir="$HOME/.config/opencode/prompts/sdd"
+    assert_dir_exists "$pdir" || return 1
+    local phase
+    for phase in init explore propose spec design tasks apply verify archive; do
+        assert_file_not_empty "$pdir/sdd-$phase.md" || return 1
+    done
+    local count
+    count=$(find "$pdir" -name "sdd-*.md" | wc -l | tr -d ' ')
+    assert_eq "9" "$count" "Expected 9 shared SDD prompt files"
+}
+
+test_opencode_multi_references_prompt_files() {
+    # The committed multi template must reference the shared prompt files (not
+    # inline the prompt text) so profiles can share one file per phase.
+    local f="$REPO_DIR/examples/opencode/opencode.multi.json"
+    grep -q 'file:~/.config/opencode/prompts/sdd/sdd-apply.md' "$f" || {
+        echo "opencode.multi.json does not reference the shared apply prompt file"; return 1; }
+    # And it must NOT still carry the old inline executor prompt.
+    if grep -q 'You are an SDD executor' "$f"; then
+        echo "opencode.multi.json still inlines executor prompt text"; return 1
+    fi
+    return 0
+}
+
+test_opencode_profile_generates_agents() {
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "setup opencode profile install failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    assert_file_exists "$cfg" || return 1
+    jq -e . "$cfg" > /dev/null 2>&1 || { echo "opencode.json is not valid JSON"; return 1; }
+    jq -e '.agent["kurama-orchestrator"]' "$cfg" > /dev/null 2>&1 || {
+        echo "kurama-orchestrator agent missing"; return 1; }
+    local n
+    n=$(jq -r '[.agent | keys[] | select(endswith("-testp"))] | length' "$cfg")
+    assert_eq "9" "$n" "Expected 9 sdd-<phase>-testp profile subagents" || return 1
+    # Orchestrator is primary; a suffixed subagent is a hidden subagent.
+    assert_eq "primary" "$(jq -r '.agent["kurama-orchestrator"].mode' "$cfg")" \
+        "kurama-orchestrator must be mode:primary" || return 1
+    assert_eq "subagent" "$(jq -r '.agent["sdd-apply-testp"].mode' "$cfg")" \
+        "sdd-apply-testp must be mode:subagent" || return 1
+    # Task permission scoped to this profile's own suffixed agents.
+    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["sdd-*-testp"]' "$cfg")" \
+        "orchestrator task permission not scoped to sdd-*-testp" || return 1
+    # The model passed on the flag is applied to profile agents on first install.
+    assert_eq "prov/model" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
+        "flag model not applied to sdd-apply-testp" || return 1
+    # The base multi agents survive alongside the profile.
+    jq -e '.agent["sdd-apply"]' "$cfg" > /dev/null 2>&1 || {
+        echo "base sdd-apply agent was clobbered by the profile"; return 1; }
+}
+
+test_opencode_profile_idempotent_preserves_model() {
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "first profile install failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    # Hand-edit one profile agent's model, then re-run the same install.
+    local edited
+    edited=$(jq '.agent["sdd-apply-testp"].model = "HAND/EDITED"' "$cfg")
+    printf '%s\n' "$edited" > "$cfg"
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "second profile install failed"; return 1; }
+    assert_eq "HAND/EDITED" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
+        "re-run did not preserve the hand-edited model" || return 1
+    # No duplicate profile keys after the re-run.
+    local n
+    n=$(jq -r '[.agent | keys[] | select(endswith("-testp"))] | length' "$cfg")
+    assert_eq "9" "$n" "Expected 9 profile agents after re-run (no duplicates)"
+}
+
+test_opencode_profile_rejects_bad_name() {
+    # An invalid profile name must abort before any work.
+    if bash "$SETUP_SCRIPT" --agent opencode --opencode-profile 'Bad Name' \
+        --without-engram --non-interactive > /dev/null 2>&1; then
+        echo "setup.sh accepted an invalid profile name"; return 1
+    fi
+    return 0
+}
+
+test_opencode_base_rerun_prunes_orphan_orchestrator() {
+    # Install a profile, then re-run WITHOUT --opencode-profile. The base merge
+    # strips every sdd-* key (which removes the profile's suffixed subagents), so
+    # it must also prune kurama-orchestrator — otherwise a mode:primary agent is
+    # left dangling, scoped to sdd-*-NAME subagents that no longer exist.
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "profile install failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    jq -e '.agent["kurama-orchestrator"]' "$cfg" > /dev/null 2>&1 || {
+        echo "precondition: kurama-orchestrator should exist after profile install"; return 1; }
+    # Re-run base-only (non-interactive default profile = "no").
+    run_setup_opencode --opencode-mode multi || { echo "base-only re-run failed"; return 1; }
+    jq -e . "$cfg" > /dev/null 2>&1 || { echo "opencode.json not valid JSON after re-run"; return 1; }
+    # The suffixed subagents are gone.
+    local n
+    n=$(jq -r '[.agent | keys[] | select(endswith("-testp"))] | length' "$cfg")
+    assert_eq "0" "$n" "profile subagents should be gone after base-only re-run" || return 1
+    # And the orchestrator no longer dangles.
+    if jq -e '.agent["kurama-orchestrator"]' "$cfg" > /dev/null 2>&1; then
+        echo "orphaned kurama-orchestrator left behind after base-only re-run"; return 1
+    fi
+    # Base multi agents are present and intact.
+    jq -e '.agent["sdd-apply"]' "$cfg" > /dev/null 2>&1 || {
+        echo "base sdd-apply missing after base-only re-run"; return 1; }
+    return 0
+}
+
+test_opencode_status_command_installed() {
+    bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
+    assert_file_exists "$HOME/.config/opencode/commands/sdd-status.md" || return 1
+    # It is a meta command routed to the orchestrator (no subtask rewrite).
+    grep -q '^agent: sdd-orchestrator' "$HOME/.config/opencode/commands/sdd-status.md" || {
+        echo "sdd-status.md must route to sdd-orchestrator"; return 1; }
 }
 
 # ============================================================================
@@ -2121,7 +2267,7 @@ echo ""
 echo -e "${BOLD}OpenCode${NC}"
 run_test "Installs all 25 skills to ~/.config/opencode/skills" test_install_opencode
 run_test "Exactly 25 SKILL.md files" test_opencode_skill_count
-run_test "Installs 8 command files" test_opencode_commands
+run_test "Installs 9 command files" test_opencode_commands
 echo ""
 
 echo -e "${BOLD}Gemini CLI${NC}"
@@ -2212,6 +2358,16 @@ echo -e "${BOLD}OpenCode template references${NC}"
 run_test "No reference to nonexistent examples/opencode/opencode.json" test_no_broken_opencode_json_reference
 run_test "Installers reference opencode.single.json" test_opencode_json_reference_fixed
 run_test "opencode.single/multi.json templates exist" test_opencode_template_files_exist
+echo ""
+
+echo -e "${BOLD}Phase 11 — OpenCode shared prompts + model profiles${NC}"
+run_test "shared SDD prompt files install (9)" test_opencode_shared_prompts_installed
+run_test "multi.json references shared prompt files (not inline)" test_opencode_multi_references_prompt_files
+run_test "profile splices kurama-orchestrator + 9 suffixed agents" test_opencode_profile_generates_agents
+run_test "profile re-run preserves hand-edited models" test_opencode_profile_idempotent_preserves_model
+run_test "invalid profile name is rejected" test_opencode_profile_rejects_bad_name
+run_test "base-only re-run prunes orphaned kurama-orchestrator" test_opencode_base_rerun_prunes_orphan_orchestrator
+run_test "sdd-status command installs + routes to orchestrator" test_opencode_status_command_installed
 echo ""
 
 echo -e "${BOLD}Manifest & versioning${NC}"

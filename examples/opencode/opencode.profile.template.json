@@ -1,15 +1,15 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "agent": {
-    "sdd-orchestrator": {
+    "kurama-orchestrator": {
       "model": "<your-provider/your-model>",
       "mode": "primary",
-      "description": "Kurama Orchestrator (multi mode) - coordinates dedicated per-phase sub-agents, never does work inline",
+      "description": "Kurama Orchestrator (kurama profile) - coordinates the kurama-suffixed per-phase sub-agents, never does work inline. Switch to it with Tab.",
       "prompt": "{file:./AGENTS.md}",
       "permission": {
         "task": {
           "*": "deny",
-          "sdd-*": "allow"
+          "sdd-*-kurama": "allow"
         }
       },
       "tools": {
@@ -22,7 +22,7 @@
         "delegation_list": true
       }
     },
-    "sdd-init": {
+    "sdd-init-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -35,7 +35,7 @@
         "bash": true
       }
     },
-    "sdd-explore": {
+    "sdd-explore-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -48,7 +48,7 @@
         "bash": true
       }
     },
-    "sdd-propose": {
+    "sdd-propose-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -61,7 +61,7 @@
         "bash": true
       }
     },
-    "sdd-spec": {
+    "sdd-spec-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -74,7 +74,7 @@
         "bash": true
       }
     },
-    "sdd-design": {
+    "sdd-design-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -87,7 +87,7 @@
         "bash": true
       }
     },
-    "sdd-tasks": {
+    "sdd-tasks-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -100,7 +100,7 @@
         "bash": true
       }
     },
-    "sdd-apply": {
+    "sdd-apply-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -113,7 +113,7 @@
         "bash": true
       }
     },
-    "sdd-verify": {
+    "sdd-verify-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
@@ -126,7 +126,7 @@
         "bash": true
       }
     },
-    "sdd-archive": {
+    "sdd-archive-kurama": {
       "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,

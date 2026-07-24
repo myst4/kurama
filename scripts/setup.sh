@@ -946,6 +946,95 @@ ask_opencode_mode() {
     esac
 }
 
+# Decide whether to install a named model profile (kurama-orchestrator + suffixed
+# sdd-<phase>-NAME subagents, Tab-switchable). Honors --opencode-profile; asks
+# interactively otherwise and defaults to none when non-interactive. Sets
+# OPENCODE_PROFILE to "no" (skip) or a validated NAME.
+ask_opencode_profile() {
+    # Already resolved via flag ("no" or a NAME) — keep it.
+    [[ -n "$OPENCODE_PROFILE" ]] && return
+
+    if $NON_INTERACTIVE; then
+        OPENCODE_PROFILE="no"
+        return
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Named model profile (optional):${NC}"
+    echo "  A profile adds a Tab-switchable 'kurama-orchestrator' with per-phase"
+    echo "  sub-agents you can point at different models. Leave empty to skip."
+    echo ""
+    read -rp "  Profile name [skip]: " profile_name || profile_name=""
+    profile_name="$(printf '%s' "$profile_name" | tr -d '[:space:]')"
+    if [ -z "$profile_name" ]; then
+        OPENCODE_PROFILE="no"
+        return
+    fi
+    if ! printf '%s' "$profile_name" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
+        warn "Invalid profile name '$profile_name' (lowercase letters, digits, dashes) — skipping profile"
+        OPENCODE_PROFILE="no"
+        return
+    fi
+    OPENCODE_PROFILE="$profile_name"
+}
+
+# Splice a named profile (kurama-orchestrator + sdd-<phase>-NAME) into
+# opencode.json from the committed template. Idempotent: existing user-edited
+# model fields for the profile's own agents are preserved across re-runs.
+install_opencode_profile() {
+    local config_file="$1"
+    local saved="${2:-{\}}"
+    local name="$OPENCODE_PROFILE"
+    local model="$OPENCODE_PROFILE_MODEL"
+    local template="$EXAMPLES_DIR/opencode/opencode.profile.template.json"
+
+    if ! command -v jq &>/dev/null; then
+        warn "jq not found — cannot splice the '$name' opencode profile"
+        return 0
+    fi
+    if [ ! -f "$template" ]; then
+        warn "Profile template not found: $template (skipped)"
+        return 0
+    fi
+    if [ ! -f "$config_file" ]; then
+        warn "opencode.json missing — cannot splice the '$name' profile"
+        return 0
+    fi
+
+    # Derive the profile agents from the template: rename the "-kurama" suffix to
+    # "-NAME", set the model when one was supplied, and scope the orchestrator's
+    # task permission to this profile's own suffixed subagents.
+    local profile_agents
+    profile_agents=$(jq --arg name "$name" --arg model "$model" '
+        .agent
+        | with_entries(
+            if (.key|startswith("sdd-")) and (.key|endswith("-kurama"))
+            then .key |= (.[:-7] + "-" + $name)
+            else . end)
+        | (if $model != "" then with_entries(.value.model = $model) else . end)
+        | .["kurama-orchestrator"].permission.task = {"*":"deny", ("sdd-*-"+$name):"allow"}
+    ' "$template") || { warn "Failed to build profile agents"; return 0; }
+
+    # $saved carries the profile agents' user-edited models captured BEFORE the
+    # base merge (which strips every sdd-* key, this profile's subagents included).
+    local merged
+    merged=$(jq --argjson prof "$profile_agents" --argjson saved "$saved" --arg name "$name" '
+        def isprof(k): (k == "kurama-orchestrator")
+            or ((k|startswith("sdd-")) and (k|endswith("-" + $name)));
+
+        # 1. Drop any lingering profile keys, keep everything else, add the fresh profile.
+        .agent = (((.agent // {}) | with_entries(select(isprof(.key) | not))) + $prof) |
+
+        # 2. Restore preserved model choices onto the new definitions.
+        reduce ($saved | to_entries[]) as $m (.;
+            if .agent[$m.key] then .agent[$m.key].model = $m.value else . end)
+    ' "$config_file") || { warn "Failed to splice profile into $config_file"; return 0; }
+
+    make_backup "$config_file"
+    printf '%s\n' "$merged" | atomic_replace "$config_file"
+    ok "OpenCode profile '$name' installed (kurama-orchestrator + 9 sdd-<phase>-$name agents)"
+}
+
 setup_opencode() {
     local home
     home="$(home_dir)"
@@ -957,6 +1046,23 @@ setup_opencode() {
     ask_opencode_mode
     local example_config="$EXAMPLES_DIR/opencode/opencode.${OPENCODE_MODE}.json"
     info "OpenCode mode: $OPENCODE_MODE"
+
+    # Resolve the profile now (before any merge) and snapshot the models of its
+    # own agents from the pre-merge config. The base merge below removes every
+    # "sdd-*" key — which includes a profile's suffixed subagents — so we must
+    # capture their user-edited models here to restore them idempotently.
+    ask_opencode_profile
+    local profile_saved="{}"
+    if [ "$OPENCODE_PROFILE" != "no" ] && [ -n "$OPENCODE_PROFILE" ] \
+        && command -v jq &>/dev/null && [ -f "$config_file" ]; then
+        profile_saved=$(jq -c --arg name "$OPENCODE_PROFILE" '
+            def isprof(k): (k == "kurama-orchestrator")
+                or ((k|startswith("sdd-")) and (k|endswith("-" + $name)));
+            reduce ((.agent // {}) | to_entries[]
+                | select(isprof(.key)) | select(.value.model)) as $e
+                ({}; . + {($e.key): $e.value.model})
+        ' "$config_file") || profile_saved="{}"
+    fi
 
     # Install commands
     if [ -d "$commands_src" ]; then
@@ -989,6 +1095,14 @@ setup_opencode() {
             # 2. Preserve "model" field from existing sdd-* agents (user customization)
             # 3. Add new agent definitions, restoring preserved model fields
             # 4. Don't touch non-sdd agents
+            #
+            # kurama-orchestrator is a profile-only key (a mode:primary agent
+            # whose task permission is scoped to sdd-*-NAME subagents). Those
+            # subagents are sdd-* keys and are wiped here, so the orchestrator is
+            # pruned alongside them to avoid leaving a primary that delegates to
+            # agents that no longer exist. When a profile follows, install_
+            # opencode_profile re-adds a fresh orchestrator (its model is
+            # snapshotted separately before this merge, see profile_saved).
             local merged
             merged=$(jq --argjson new_agents "$example_agents" '
                 # 1. Capture existing model fields from sdd-* agents (user customization)
@@ -996,9 +1110,11 @@ setup_opencode() {
                     select(.key | startswith("sdd-")) | select(.value.model)) as $e
                     ({}; . + {($e.key): $e.value.model})) as $saved_models |
 
-                # 2. Remove all sdd-* agents, keep user custom agents, add new template agents
+                # 2. Remove all sdd-* agents (and the profile orchestrator), keep
+                #    user custom agents, add new template agents
                 .agent = (
-                    ((.agent // {}) | with_entries(select(.key | startswith("sdd-") | not)))
+                    ((.agent // {}) | with_entries(select(
+                        ((.key | startswith("sdd-")) or (.key == "kurama-orchestrator")) | not)))
                     + $new_agents
                 ) |
 
@@ -1025,6 +1141,31 @@ setup_opencode() {
         fi
         warn "Merge manually: copy agent block from examples/opencode/opencode.${OPENCODE_MODE}.json"
         info "Into: $config_file"
+    fi
+
+    # Install the shared SDD phase prompt files. Both opencode.multi.json and any
+    # named profile reference these via {file:~/.config/opencode/prompts/sdd/...},
+    # so a single prompt file is shared across the base agents and every profile.
+    local prompts_src="$EXAMPLES_DIR/opencode/prompts/sdd"
+    local prompts_target="$home/.config/opencode/prompts/sdd"
+    if [ -d "$prompts_src" ]; then
+        mkdir -p "$prompts_target"
+        local pcount=0 prompt_file
+        for prompt_file in "$prompts_src"/sdd-*.md; do
+            [ -f "$prompt_file" ] || continue
+            cp "$prompt_file" "$prompts_target/"
+            RECEIPT_FILES="$RECEIPT_FILES
+$(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
+            pcount=$((pcount + 1))
+        done
+        ok "$pcount shared SDD prompt files installed -> $prompts_target"
+    fi
+
+    # Optionally splice a named model profile (kurama-orchestrator + suffixed
+    # sdd-<phase>-NAME subagents) into opencode.json. Resolved above; the base
+    # merge just ran, so pass the pre-merge model snapshot for idempotency.
+    if [ "$OPENCODE_PROFILE" != "no" ] && [ -n "$OPENCODE_PROFILE" ]; then
+        install_opencode_profile "$config_file" "$profile_saved"
     fi
 
     # Install AGENTS.md prompt file for prompt references in config templates
@@ -1551,6 +1692,8 @@ AGENT=""
 ALL=false
 NON_INTERACTIVE=false
 OPENCODE_MODE=""  # "", "single", or "multi"
+OPENCODE_PROFILE=""        # "" = unset (ask); "no" = none; otherwise the profile NAME
+OPENCODE_PROFILE_MODEL=""  # optional provider/model applied to every profile agent
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
 ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
 
@@ -1577,6 +1720,21 @@ while [[ $# -gt 0 ]]; do
                 echo "Invalid opencode mode: $2 (use 'single' or 'multi')"; exit 1
             fi
             ;;
+        --opencode-profile)
+            # Grammar: NAME[:provider/model]. Split on the FIRST colon so the
+            # model's own "/" survives; an empty NAME defaults to "kurama".
+            _prof_val="$2"
+            _prof_name="${_prof_val%%:*}"
+            _prof_rest="${_prof_val#*:}"
+            if [ "$_prof_val" = "$_prof_rest" ]; then _prof_rest=""; fi
+            [ -n "$_prof_name" ] || _prof_name="kurama"
+            if ! printf '%s' "$_prof_name" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
+                echo "Invalid opencode profile name: $_prof_name (lowercase letters, digits, dashes)"; exit 1
+            fi
+            OPENCODE_PROFILE="$_prof_name"
+            OPENCODE_PROFILE_MODEL="$_prof_rest"
+            shift 2
+            ;;
         -h|--help)
             echo "Usage: setup.sh [OPTIONS]"
             echo ""
@@ -1586,6 +1744,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --scope SCOPE          Install scope: 'global' (default) or 'project'"
             echo "  --path DIR             Target repo for --scope project (default: cwd; must be a git repo)"
             echo "  --opencode-mode M      OpenCode agent mode: 'single' or 'multi' (per-phase models)"
+            echo "  --opencode-profile P   Install a named model profile: NAME[:provider/model] (Tab-switchable)"
             echo "  --with-pi-packages     Install the Pi package stack (--agent pi, non-interactive)"
             echo "  --without-pi-packages  Skip the Pi package stack (--agent pi, non-interactive)"
             echo "  --with-engram          Use Engram as the persistence engine (register its MCP)"
