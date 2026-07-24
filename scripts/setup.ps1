@@ -300,6 +300,18 @@ function Get-KuramaVersion {
     return 'unknown'
 }
 
+# Short commit SHA of the Kurama repo this setup runs from, used to stamp the
+# receipt (V3). Returns '' when git is unavailable or HEAD is missing; the caller
+# then omits the "commit" field so it never breaks a parser or a git-less host.
+function Get-KuramaCommit {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return '' }
+    try {
+        $c = & git -C $RepoDir rev-parse --short HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and $c) { return ([string]$c).Trim() }
+    } catch { }
+    return ''
+}
+
 # Flush the receipt accumulators to $script:ReceiptDir. Extends the base schema
 # with additive 'scope', 'settings' and 'pi_packages' fields (mirrors setup.sh's
 # finalize_receipt); older consumers ignore what they do not know.
@@ -308,14 +320,16 @@ function Write-Receipt {
     $obj = [ordered]@{
         name        = 'kurama'
         version     = (Get-KuramaVersion)
-        tool        = $script:ReceiptTool
-        scope       = $Scope
-        engram      = $(if ($script:Engram) { $script:Engram } else { 'no' })
-        files       = @($script:ReceiptFiles)
-        settings    = @($script:ReceiptSettings)
-        pi_packages = @($script:ReceiptPiPackages)
-        engram_mcp  = @($script:ReceiptEngramMcp)
     }
+    $commit = Get-KuramaCommit
+    if ($commit) { $obj.commit = $commit }
+    $obj.tool        = $script:ReceiptTool
+    $obj.scope       = $Scope
+    $obj.engram      = $(if ($script:Engram) { $script:Engram } else { 'no' })
+    $obj.files       = @($script:ReceiptFiles)
+    $obj.settings    = @($script:ReceiptSettings)
+    $obj.pi_packages = @($script:ReceiptPiPackages)
+    $obj.engram_mcp  = @($script:ReceiptEngramMcp)
     $json = $obj | ConvertTo-Json -Depth 4
     New-Item -ItemType Directory -Path $script:ReceiptDir -Force | Out-Null
     $manifestPath = Join-Path $script:ReceiptDir $InstallManifestName

@@ -429,6 +429,17 @@ read_version() {
     printf '%s' "$v"
 }
 
+# Short commit SHA of the Kurama repo this setup runs from, used to stamp the
+# receipt (V3). Empty when git is unavailable or HEAD is missing; the caller then
+# omits the "commit" field so it never breaks a jq-less parser or a git-less host.
+read_commit() {
+    local c=""
+    if command -v git >/dev/null 2>&1; then
+        c="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+    fi
+    printf '%s' "$c"
+}
+
 make_writable() {
     if [[ "$OS" != "windows" ]]; then
         chmod u+w "$1" 2>/dev/null || true
@@ -496,8 +507,9 @@ _json_array() {
 finalize_receipt() {
     [ -n "$RECEIPT_DIR" ] || return 0
     local manifest_path="$RECEIPT_DIR/$INSTALL_MANIFEST_NAME"
-    local version
+    local version commit
     version="$(read_version)"
+    commit="$(read_commit)"
 
     mkdir -p "$RECEIPT_DIR"
     make_writable "$manifest_path"
@@ -505,6 +517,7 @@ finalize_receipt() {
         printf '{\n'
         printf '  "name": "kurama",\n'
         printf '  "version": "%s",\n' "$version"
+        [ -n "$commit" ] && printf '  "commit": "%s",\n' "$commit"
         printf '  "tool": "%s",\n' "$RECEIPT_TOOL"
         printf '  "scope": "%s",\n' "$SCOPE"
         printf '  "engram": "%s",\n' "${ENGRAM:-no}"

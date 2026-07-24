@@ -235,6 +235,18 @@ read_version() {
     printf '%s' "$v"
 }
 
+# Short commit SHA of the Kurama repo this installer runs from, used to stamp the
+# receipt (V3). Prints the empty string when git is unavailable or the repo has no
+# HEAD — the caller then omits the "commit" field entirely so it never breaks a
+# jq-less parser or an install on a machine without git.
+read_commit() {
+    local c=""
+    if command -v git >/dev/null 2>&1; then
+        c="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+    fi
+    printf '%s' "$c"
+}
+
 print_version() {
     printf 'kurama %s\n' "$(read_version)"
 }
@@ -340,14 +352,16 @@ write_install_manifest() {
     local tool_name="$2"
     local files="$3"
     local manifest_path="$target_dir/$INSTALL_MANIFEST_NAME"
-    local version
+    local version commit
     version="$(read_version)"
+    commit="$(read_commit)"
 
     make_writable "$manifest_path"
     {
         printf '{\n'
         printf '  "name": "kurama",\n'
         printf '  "version": "%s",\n' "$version"
+        [ -n "$commit" ] && printf '  "commit": "%s",\n' "$commit"
         printf '  "tool": "%s",\n' "$tool_name"
         printf '  "files": [\n'
         printf '%s\n' "$files" | awk 'NF { list[n++] = $0 }

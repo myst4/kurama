@@ -1,6 +1,6 @@
 {
   "name": "kurama",
-  "version": "5.0.0-dev",
+  "version": "5.0.0",
   "description": "Spec-Driven Development for Gemini CLI: a delegate-only orchestrator plus a portable SKILL.md pipeline (explore -> propose -> spec || design -> tasks -> apply -> verify -> archive) with optional adversarial review and an opt-in TDD module.",
   "contextFileName": "examples/gemini-cli/GEMINI.md",
   "skills": "./skills"

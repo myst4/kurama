@@ -159,6 +159,19 @@ function Get-AtlVersion {
     return 'unknown'
 }
 
+# Short commit SHA of the Kurama repo this installer runs from, used to stamp the
+# receipt (V3). Returns '' when git is unavailable or HEAD is missing; the caller
+# then omits the "commit" field entirely so it never breaks a parser or a git-less
+# host.
+function Get-KuramaCommit {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return '' }
+    try {
+        $c = & git -C $RepoDir rev-parse --short HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and $c) { return ([string]$c).Trim() }
+    } catch { }
+    return ''
+}
+
 function Get-ManifestSkills {
     if (-not (Test-Path $ManifestFile)) {
         throw "Missing skills/manifest.json (the skill list source of truth)"
@@ -199,9 +212,11 @@ function Write-InstallManifest {
     $obj = [ordered]@{
         name    = 'kurama'
         version = (Get-AtlVersion)
-        tool    = $ToolName
-        files   = @($Files)
     }
+    $commit = Get-KuramaCommit
+    if ($commit) { $obj.commit = $commit }
+    $obj.tool = $ToolName
+    $obj.files = @($Files)
     $json = $obj | ConvertTo-Json -Depth 4
     $manifestPath = Join-Path $TargetDir $InstallManifestName
     Set-Content -Path $manifestPath -Value $json -Encoding UTF8

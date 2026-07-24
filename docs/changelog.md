@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+_Nothing yet._
+
+## 5.0.0 — 2026-07-23
+
 ### Phase 1 — Stabilization
 
 Cross-cutting stabilization pass: config schema, persistence contract scope, installer hardening + CI, README/identity, OpenCode examples, and docs sync.
@@ -272,6 +276,7 @@ All 9 SDD skills now have critical engram calls (`mem_search`, `mem_save`, `mem_
 
 ## Releases
 
+- `v5.0.0` — First stable release: portable SDD pipeline across eight harnesses, manifest-driven installers with project scope and always-on Claude Code hooks, the 4R + refuter review layer, opt-in TDD and kanban modules, optional Engram persistence wiring, and `update.sh`/`doctor.sh` maintenance scripts. Install receipts now stamp the source commit.
 - `v4.4.1` — Gentle-AI parity sync: compact-rule skill resolution, new mirrored skills, OpenCode `AGENTS.md`, and installers/tests updated to 15 skills.
 - `v4.4.0` — Context-inflation delegation + skill resolution alignment.
 - `v4.3.1` — Compact prompts + judgment-day skill.

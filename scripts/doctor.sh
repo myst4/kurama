@@ -76,6 +76,21 @@ read_version() {
     printf '%s' "$v"
 }
 
+# Short commit SHA of the current Kurama repo checkout ('' when git is unavailable).
+repo_commit() {
+    local c=""
+    if command -v git >/dev/null 2>&1; then
+        c="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+    fi
+    printf '%s' "$c"
+}
+
+# Render "version (commit)", collapsing to just "version" when no commit is known.
+fmt_ver_commit() {
+    local v="$1" c="$2"
+    if [ -n "$c" ]; then printf '%s (%s)' "$v" "$c"; else printf '%s' "$v"; fi
+}
+
 # ============================================================================
 # Path + receipt helpers (mirror setup.sh)
 # ============================================================================
@@ -201,13 +216,18 @@ EOF
 
 check_version() {
     local manifest="$1"
-    local installed repo
+    local installed repo icommit rcommit
     installed="$(manifest_field "$manifest" "version")"; [ -n "$installed" ] || installed="unknown"
     repo="$(read_version)"
-    if [ "$installed" = "$repo" ]; then
-        pass "version in sync: $installed"
+    icommit="$(manifest_field "$manifest" "commit")"   # '' on a pre-5.0.0 receipt
+    rcommit="$(repo_commit)"
+    if [ "$installed" != "$repo" ]; then
+        soft "version mismatch: installed $(fmt_ver_commit "$installed" "$icommit"), repo $(fmt_ver_commit "$repo" "$rcommit") (run update.sh)"
+    elif [ -n "$icommit" ] && [ -n "$rcommit" ] && [ "$icommit" != "$rcommit" ]; then
+        # V5: same version, different commit is not an error — it's an available update.
+        note "update available: $installed installed at commit $icommit, repo at $rcommit (run update.sh)"
     else
-        soft "version mismatch: installed $installed, repo $repo (run update.sh)"
+        pass "version in sync: $(fmt_ver_commit "$installed" "$icommit")"
     fi
 }
 

@@ -9,7 +9,7 @@
       "name": "kurama",
       "source": "./",
       "description": "Spec-Driven Development for AI coding agents: delegate-only orchestrator, portable SKILL.md pipeline, optional adversarial review, and an opt-in TDD module.",
-      "version": "5.0.0-dev",
+      "version": "5.0.0",
       "author": {
         "name": "Gentleman Programming",
         "url": "https://github.com/Gentleman-Programming"

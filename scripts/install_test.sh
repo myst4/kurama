@@ -1490,6 +1490,145 @@ test_plugin_json_version_matches_version_file() {
 }
 
 # ============================================================================
+# Tests — Release commit stamping (V3–V6): receipts stamp the source commit,
+# update.sh shows an honest version+commit transition, and a git-less host still
+# installs (the commit field is simply omitted). These use the REAL repo git for
+# the positive cases and a git-less symlink-farm PATH for the negative case.
+# ============================================================================
+
+# Extract the receipt "commit" field ('' when absent). jq when present, awk fallback.
+receipt_commit_value() {
+    local manifest="$1"
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.commit // ""' "$manifest" 2>/dev/null
+    else
+        awk '
+            match($0, /"commit"[[:space:]]*:[[:space:]]*"[^"]*"/) {
+                s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
+            }' "$manifest"
+    fi
+}
+
+test_receipt_records_commit() {
+    # install.sh runs from the real Kurama git repo, so the receipt must carry a
+    # "commit" field with a valid short SHA. The "version" field format is unchanged.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q '"commit"' "$manifest" || { echo "receipt missing commit field"; return 1; }
+    local commit
+    commit="$(receipt_commit_value "$manifest")"
+    echo "$commit" | grep -qE '^[0-9a-f]{7,40}$' || {
+        echo "commit is not a valid short SHA: '$commit'"; return 1; }
+    # The version field is still a plain version string (format not broken).
+    grep -q '"version"[[:space:]]*:[[:space:]]*"[0-9]' "$manifest" || {
+        echo "version field format changed unexpectedly"; return 1; }
+    return 0
+}
+
+test_setup_receipt_records_commit() {
+    # setup.sh writes the same commit stamp (parity with install.sh).
+    bash "$SETUP_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    local commit
+    commit="$(receipt_commit_value "$manifest")"
+    echo "$commit" | grep -qE '^[0-9a-f]{7,40}$' || {
+        echo "setup.sh receipt commit is not a valid short SHA: '$commit'"; return 1; }
+    return 0
+}
+
+test_update_shows_commit_transition() {
+    # update.sh's transition line reports version+commit; with nothing changed and an
+    # identical commit it says "up to date". The new-side commit appears in parens.
+    bash "$SETUP_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local output
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code 2>&1)
+    echo "$output" | grep -q 'Version:' || { echo "update missing Version transition line"; return 1; }
+    echo "$output" | grep -qE 'Version:.*\([0-9a-f]{7,40}\)' || {
+        echo "update transition line missing the (commit) segment"; return 1; }
+    echo "$output" | grep -qi 'up to date' || {
+        echo "expected 'up to date' when version+commit identical and nothing changed"; return 1; }
+    return 0
+}
+
+test_update_restamps_install_sh_receipt() {
+    # install.sh stores the human DISPLAY name in the receipt "tool" field
+    # ("Claude Code", with a space) — unlike setup.sh, which stores the slug. The
+    # re-sync must normalize that back to the slug before delegating to setup.sh;
+    # otherwise the space word-splits into a bogus --agent token ("Unknown option:
+    # Code"), the re-sync fails, update exits 1, and the receipt is NEVER re-stamped
+    # (V4 unmet). This drives the INSTALL_SCRIPT path that
+    # test_update_shows_commit_transition (SETUP_SCRIPT, slug tool) never exercises.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    # Guard the premise: install.sh really does store the spaced display name.
+    grep -q '"tool"[[:space:]]*:[[:space:]]*"Claude Code"' "$manifest" || {
+        echo "expected install.sh to store display-name tool 'Claude Code'"; return 1; }
+
+    # Simulate a pre-5.0.0 receipt so the re-stamp is observable: roll the version
+    # back and drop the commit line (portable awk rewrite, no jq required).
+    local tmp="$manifest.stale"
+    awk '
+        /"commit"[[:space:]]*:/ { next }
+        /"version"[[:space:]]*:/ { print "  \"version\": \"5.0.0-dev\","; next }
+        { print }
+    ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+
+    local output rc
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "update.sh must exit 0 on an install.sh-created receipt (got exit $rc)"
+        printf '%s\n' "$output" | awk '{ print "    " $0 }'
+        return 1
+    fi
+    echo "$output" | grep -qi 'Re-sync failed' && {
+        echo "update.sh reported 'Re-sync failed' on the install.sh path"; return 1; }
+    echo "$output" | grep -qE 'Version:.*5\.0\.0-dev.*\([0-9a-f]{7,40}\)' || {
+        echo "transition line missing the '-dev -> version (commit)' re-stamp"; return 1; }
+
+    # The receipt must be re-stamped: commit present again, version bumped to the
+    # repo VERSION, and the tool normalized to the slug the re-sync wrote.
+    grep -q '"commit"' "$manifest" || {
+        echo "receipt not re-stamped: commit still absent"; return 1; }
+    local ver
+    IFS= read -r ver < "$REPO_DIR/VERSION"
+    grep -q "\"version\"[[:space:]]*:[[:space:]]*\"$ver\"" "$manifest" || {
+        echo "receipt version not re-stamped to repo VERSION ($ver)"; return 1; }
+    grep -q '"tool"[[:space:]]*:[[:space:]]*"claude-code"' "$manifest" || {
+        echo "receipt tool not normalized to the slug after re-sync"; return 1; }
+    return 0
+}
+
+test_receipt_omits_commit_without_git() {
+    # A git-less host must still install cleanly — the commit field is simply omitted,
+    # never a hard failure. Build a symlink-farm PATH that deliberately excludes git.
+    local bindir="$TEST_TMPDIR/nogit-bin"
+    mkdir -p "$bindir"
+    local tool p
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date chmod rm ls awk sed tr wc find mktemp sort head printf test jq; do
+        p="$(command -v "$tool" 2>/dev/null)" || continue
+        ln -sf "$p" "$bindir/$tool"
+    done
+    # Deliberately DO NOT link git into the farm.
+
+    if ! PATH="$bindir" bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1; then
+        echo "install must succeed even when git is absent from PATH"
+        return 1
+    fi
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    if grep -q '"commit"' "$manifest"; then
+        echo "commit field must be omitted when git is unavailable"
+        return 1
+    fi
+    # The install itself is still complete and valid.
+    assert_all_skills_installed "$HOME/.claude/skills" || return 1
+    return 0
+}
+
+# ============================================================================
 # Tests — Phase 10b: scope project (O1), hooks (O2), Pi agents (O4),
 # update.sh (O6), doctor.sh (O7). Fully offline: git init is local, and the
 # doctor tooling probes (gh/pi/engram) are shadowed by fast local shims so no
@@ -2149,6 +2288,14 @@ run_test "plugin.json is valid JSON" test_plugin_json_valid
 run_test "marketplace.json is valid JSON" test_marketplace_json_valid
 run_test "gemini-extension.json is valid JSON" test_gemini_extension_json_valid
 run_test "plugin.json version equals VERSION file" test_plugin_json_version_matches_version_file
+echo ""
+
+echo -e "${BOLD}Release commit stamping (V3–V6)${NC}"
+run_test "install.sh receipt records a valid source commit" test_receipt_records_commit
+run_test "setup.sh receipt records a valid source commit" test_setup_receipt_records_commit
+run_test "update.sh shows a version+commit transition line" test_update_shows_commit_transition
+run_test "update re-stamps an install.sh (display-name) receipt" test_update_restamps_install_sh_receipt
+run_test "git-absent host installs, commit field omitted" test_receipt_omits_commit_without_git
 echo ""
 
 echo -e "${BOLD}Phase 10b — scope project (O1)${NC}"

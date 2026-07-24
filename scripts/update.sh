@@ -81,6 +81,21 @@ read_version() {
     printf '%s' "$v"
 }
 
+# Short commit SHA of the current Kurama repo checkout ('' when git is unavailable).
+repo_commit() {
+    local c=""
+    if command -v git >/dev/null 2>&1; then
+        c="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+    fi
+    printf '%s' "$c"
+}
+
+# Render "version (commit)", collapsing to just "version" when no commit is known.
+fmt_ver_commit() {
+    local v="$1" c="$2"
+    if [ -n "$c" ]; then printf '%s (%s)' "$v" "$c"; else printf '%s' "$v"; fi
+}
+
 # Skills dir (= receipt dir for global) for a global agent, mirroring setup.sh.
 global_skills_path() {
     local agent="$1" home; home="$(home_dir)"
@@ -93,6 +108,27 @@ global_skills_path() {
         codex)        echo "$home/.codex/skills" ;;
         pi)           echo "$home/.pi/agent/skills" ;;
         *)            echo "" ;;
+    esac
+}
+
+# Map a receipt "tool" value to the canonical agent slug setup.sh accepts.
+# setup.sh-written receipts already store the slug (e.g. "claude-code"), but
+# install.sh-written receipts store the human DISPLAY name (e.g. "Claude Code",
+# "Gemini CLI", "VS Code (Copilot)"). Those embedded spaces would otherwise
+# word-split the re-sync command into a bogus --agent token (setup.sh: "Unknown
+# option: Code"), aborting the update and leaving the receipt un-re-stamped.
+# Recognized slugs pass through unchanged; an unknown value yields the empty
+# string so the caller fails loudly instead of mis-invoking setup.sh.
+tool_to_slug() {
+    case "$1" in
+        claude-code|"Claude Code")   echo "claude-code" ;;
+        opencode|"OpenCode")         echo "opencode" ;;
+        gemini-cli|"Gemini CLI")     echo "gemini-cli" ;;
+        codex|"Codex")               echo "codex" ;;
+        vscode|"VS Code (Copilot)")  echo "vscode" ;;
+        cursor|"Cursor")             echo "cursor" ;;
+        pi|"Pi")                     echo "pi" ;;
+        *)                           echo "" ;;
     esac
 }
 
@@ -179,14 +215,19 @@ resync_target() {
         return 0
     fi
 
-    local tool rscope old_ver new_ver
+    local tool rscope old_ver new_ver old_commit new_commit
     tool="$(manifest_field "$manifest" "tool")"
     rscope="$(manifest_field "$manifest" "scope")"; [ -n "$rscope" ] || rscope="global"
     old_ver="$(manifest_field "$manifest" "version")"; [ -n "$old_ver" ] || old_ver="unknown"
     new_ver="$(read_version)"
+    # V4: honest transition — the OLD receipt's version+commit → the CURRENT repo's
+    # version+commit. A pre-5.0.0 receipt has no "commit" field, so old_commit is
+    # empty and only the new side shows a SHA (e.g. "5.0.0-dev → 5.0.0 (416ef29)").
+    old_commit="$(manifest_field "$manifest" "commit")"
+    new_commit="$(repo_commit)"
 
     header "Updating $tool ($rscope) — $receipt_dir"
-    info "Version: $old_ver → $new_ver"
+    info "Version: $(fmt_ver_commit "$old_ver" "$old_commit") → $(fmt_ver_commit "$new_ver" "$new_commit")"
 
     # Snapshot pre-sync hashes of every recorded file.
     local files rel pre
@@ -206,15 +247,27 @@ EOF
         return 0
     fi
 
+    # Normalize the receipt's "tool" to the canonical slug setup.sh accepts.
+    # install.sh stores a display name ("Claude Code") whose space would corrupt
+    # the delegated command; setup.sh stores the slug already. An unrecognized
+    # value is a hard stop — mis-invoking setup.sh would be worse than aborting.
+    local slug
+    slug="$(tool_to_slug "$tool")"
+    if [ -z "$slug" ]; then
+        fail "Unrecognized tool in receipt: '$tool' — cannot re-sync $receipt_dir"
+        rm -f "$hashfile"
+        return 1
+    fi
+
     # Delegate the actual re-sync to the idempotent installer, matching the
     # recorded scope. --without-pi-packages so an update never silently
     # (re)installs the package stack; skills/agents/hooks/orchestrator re-sync.
-    local args="--agent $tool --non-interactive --without-pi-packages"
+    # An argv array keeps the slug and any spaced --path intact (no word-splitting).
+    local -a args=(--agent "$slug" --non-interactive --without-pi-packages)
     if [ "$rscope" = "project" ]; then
-        args="$args --scope project --path $receipt_dir"
+        args+=(--scope project --path "$receipt_dir")
     fi
-    # shellcheck disable=SC2086
-    if ! bash "$SETUP_SCRIPT" $args >/dev/null 2>&1; then
+    if ! bash "$SETUP_SCRIPT" "${args[@]}" >/dev/null 2>&1; then
         fail "Re-sync failed for $tool ($rscope)"
         rm -f "$hashfile"
         return 1
@@ -233,7 +286,15 @@ EOF
     rm -f "$hashfile"
 
     if [ "$changed" -eq 0 ]; then
-        info "Already up to date (no recorded file changed)"
+        # V4: only call it "already up to date" when the version AND the commit are
+        # identical too — otherwise the content is byte-identical but the source moved
+        # (e.g. a -dev → stable bump with no file changes), which the receipt re-stamp
+        # already recorded.
+        if [ "$old_ver" = "$new_ver" ] && [ "$old_commit" = "$new_commit" ]; then
+            info "Already up to date — $(fmt_ver_commit "$new_ver" "$new_commit"), no recorded file changed"
+        else
+            info "No recorded file changed; version/commit re-stamped to $(fmt_ver_commit "$new_ver" "$new_commit")"
+        fi
     else
         echo -e "  ${GREEN}${BOLD}$changed file(s) re-synced${NC}"
     fi
