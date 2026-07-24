@@ -161,6 +161,14 @@ fail()  { echo -e "  ${RED}✗${NC} $1"; }
 info()  { echo -e "  ${BLUE}→${NC} $1"; }
 header() { echo -e "\n${CYAN}${BOLD}$1${NC}"; }
 
+# Print the fox banner instead of the plain ASCII title box. TTY-only, so piped
+# runs (CI, the install test suite) keep byte-identical output. Non-zero means
+# nothing was printed and the caller should fall back to the box.
+print_banner() {
+    [ -t 1 ] || return 1
+    bash "$SCRIPT_DIR/banner.sh" --no-anim 2>/dev/null
+}
+
 # ============================================================================
 # Agent Detection
 # ============================================================================
@@ -1681,11 +1689,13 @@ interactive_menu() {
 detect_os
 setup_colors
 
-echo ""
-echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}${BOLD}║    Kurama — Full Setup          ║${NC}"
-echo -e "${CYAN}${BOLD}║   Detect • Install • Configure            ║${NC}"
-echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+if ! print_banner; then
+    echo ""
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║    Kurama — Full Setup          ║${NC}"
+    echo -e "${CYAN}${BOLD}║   Detect • Install • Configure            ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+fi
 
 # Parse arguments
 AGENT=""

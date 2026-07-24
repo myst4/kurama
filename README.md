@@ -255,11 +255,39 @@ native subagents, ask-user, web access, todo, side-conversations) at pinned vers
 - [docs/sub-agents.md](docs/sub-agents.md) — how phases run as sub-agents and share conventions.
 - [docs/persistence.md](docs/persistence.md) — the four artifact store modes in depth.
 - [docs/kanban-github.md](docs/kanban-github.md) — the optional GitHub Projects board sync module.
+- [docs/opencode-profiles.md](docs/opencode-profiles.md) — named model profiles for the OpenCode integration.
 - [docs/companion-skills.md](docs/companion-skills.md) — optional pairings with external process skills like superpowers.
 - [docs/token-economics.md](docs/token-economics.md) — the cost analysis behind context isolation.
 - [docs/smoke-test.md](docs/smoke-test.md) — a ~15-minute manual end-to-end walk through the SDD cycle.
 - [docs/migration.md](docs/migration.md) — upgrade notes for existing installs, phase by phase.
 - [docs/changelog.md](docs/changelog.md) — release history.
+
+## Banner
+
+`scripts/banner.sh` prints the nine-tailed fox and the KURAMA wordmark in 24-bit
+truecolor, followed by a small stats panel (branch, version, skill and agent
+counts, MCP servers). `setup.sh` and `install.sh` show it automatically when they
+run on a terminal; piped or CI runs get the plain text header instead.
+
+```sh
+./scripts/banner.sh            # with the fade-in animation
+./scripts/banner.sh --no-anim  # skip it
+```
+
+Every probe in the script is best-effort and it always exits 0, so it is safe to
+chain in front of an agent launch:
+
+```sh
+export KURAMA="$HOME/path/to/kurama"
+alias kurama-claude='"$KURAMA"/scripts/banner.sh && claude'
+alias kurama-opencode='"$KURAMA"/scripts/banner.sh && opencode'
+alias kurama-pi='"$KURAMA"/scripts/banner.sh && pi'
+```
+
+It honors [NO_COLOR](https://no-color.org), and skips the animation on its own
+when stdout is not a terminal. The fox art is generated from
+`assets/banner/fox-grid.txt` by `scripts/gen-braille.mjs`; `banner.sh` only
+renders what is already in `assets/banner/`.
 
 ## Contributing
 

@@ -164,12 +164,22 @@ make_writable() {
     fi
 }
 
+# Print the fox banner instead of the plain ASCII title box. TTY-only, so piped
+# runs (CI, the install test suite) keep byte-identical output. Non-zero means
+# nothing was printed and the caller should fall back to the box.
+print_banner() {
+    [ -t 1 ] || return 1
+    bash "$SCRIPT_DIR/banner.sh" --no-anim 2>/dev/null
+}
+
 print_header() {
-    echo ""
-    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}${BOLD}║      Kurama — Installer        ║${NC}"
-    echo -e "${CYAN}${BOLD}║   Spec-Driven Development for AI Agents  ║${NC}"
-    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    if ! print_banner; then
+        echo ""
+        echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}${BOLD}║      Kurama — Installer        ║${NC}"
+        echo -e "${CYAN}${BOLD}║   Spec-Driven Development for AI Agents  ║${NC}"
+        echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    fi
     echo ""
     echo -e "  ${BOLD}Detected:${NC} $(os_label)"
     echo ""
