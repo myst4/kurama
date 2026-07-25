@@ -204,11 +204,14 @@ On **PASS**: continue automatically — auto stays auto on the happy path. On **
 
 ### Dependency Graph
 ```
-proposal -> specs --> tasks -> apply -> verify -> archive
-             ^
-             |
-           design
+                  ┌─> spec ──┐
+explore -> propose┤          ├─> tasks -> apply -> verify -> archive
+                  └─> design ┘
 ```
+`spec` and `design` both depend only on `propose` and MAY run in parallel; each treats the
+other's output as OPTIONAL context, and `tasks` is the reconciliation point that requires
+both. The canonical declaration lives in `skills/_shared/sdd-phase-common.md` — this drawing
+must never contradict it.
 
 ### Result Contract
 Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`.

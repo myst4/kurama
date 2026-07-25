@@ -35,7 +35,7 @@ Where the flag lives is mode-dependent — the same settings-home rule as
 | Mode | Where the `tdd` flag lives |
 |------|-----------------------------|
 | `openspec` / `hybrid` | The top-level `tdd:` block in `openspec/config.yaml`, written by `sdd-init`. |
-| `engram` / `none` | The `tdd` flag in the `sdd-init/{project}` context artifact (there is no `config.yaml` in these modes). |
+| `engram` | The `tdd` flag in the `sdd-init/{project}` context artifact (there is no `config.yaml` in these modes). |
 
 The orchestrator reads the flag once and propagates `tdd: true|false` into **every**
 phase prompt. On conflict — a stale file value vs. a freshly propagated prompt
@@ -71,7 +71,7 @@ without it can adopt the cycle mid-stream. On an already-initialized project:
 | Mode | How to enable |
 |------|----------------|
 | `openspec` / `hybrid` | Edit `openspec/config.yaml`: set `tdd.enabled: true` and fill `tdd.single_test_command` (the fast single-test invocation; leave empty to auto-detect). |
-| `engram` / `none` | The flag lives in the `sdd-init/{project}` settings bundle, not a file. Re-run `/sdd-init` (it upserts the bundle and asks the enable question again), or update `tdd.enabled` / `tdd.single_test_command` in that artifact directly. |
+| `engram` | The flag lives in the `sdd-init/{project}` settings bundle, not a file. Re-run `/sdd-init` (it upserts the bundle and asks the enable question again), or update `tdd.enabled` / `tdd.single_test_command` in that artifact directly. |
 
 The **next cycle** picks up the resolved flag: `sdd-tasks` plans
 RED → GREEN → REFACTOR subtasks, `sdd-apply` runs them, and `sdd-verify` audits

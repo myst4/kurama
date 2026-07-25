@@ -34,7 +34,6 @@ Recover the DAG state for the change using the **Recovery Rule** and **State Per
 - `engram` (degraded, Engram unavailable) → read `.kurama/sdd/{change-name}/state.md`
 - `openspec` → read `openspec/changes/{change-name}/state.yaml`
 - `hybrid` → filesystem `state.yaml` first (authoritative), Engram mirror as fallback
-- `none` → state was not persisted; explain to the user that the change cannot be recovered
 
 Also read the pipeline settings (`artifact_store.mode`, `execution_mode`, `compliance_mode`,
 `tdd.enabled`, `tdd.single_test_command`) once and propagate them into every sub-agent prompt
@@ -52,6 +51,12 @@ explore → propose → (spec ‖ design) → tasks → apply → verify → arc
 
 When both `spec` and `design` are outstanding and their upstream (`propose`) is ready, they MAY be
 launched in parallel (`spec ‖ design`); `tasks` is the reconciliation point.
+
+**Check the proposal's `## Change Size` before computing the next phase.** For a `small`
+change the spec and design were collapsed into the proposal, so `spec` and `design` are NOT
+outstanding — the next dependency-ready phase after `propose` is `tasks`. Treat an absent or
+unrecognized size as `standard`, which is what every change created before this existed will
+have; never fail on the missing section.
 
 ### 3. Delegate the next phase
 

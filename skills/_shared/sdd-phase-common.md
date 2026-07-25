@@ -22,6 +22,32 @@ explore → propose → (spec ‖ design) → tasks → apply → verify → arc
 
 Which specific upstream artifacts a phase treats as REQUIRED vs OPTIONAL is stated in that phase's SKILL.md; the retrieval-failure semantics for both classes live in Section B below.
 
+### Change size and the collapsed path
+
+The DAG above is the `standard` path and is unchanged. `sdd-propose` classifies every change
+as `small` or `standard` and records it in the proposal's `## Change Size` section; for a
+`small` change it writes the spec and the design as sections INSIDE the proposal, and the
+orchestrator runs:
+
+```
+explore → propose → tasks → apply → verify → archive
+```
+
+This **collapses artifacts, it does not remove them**. `tasks` still requires a spec and a
+design, and `archive` still requires a delta spec to merge into the main specs — they are read
+from the proposal's `## Spec (inline)` and `## Design (inline)` sections instead of from
+separate artifacts. Skipping them outright would deadlock at both phases.
+
+Resolution rules, binding on every orchestrator and phase:
+
+- An absent or unrecognized `## Change Size` means **`standard`**. Changes created before this
+  section existed carry none; they MUST continue on the long path, and no phase may fail on
+  the missing section.
+- A `small` change MUST NOT be blocked for a missing standalone `spec` or `design`.
+- A `small` change whose inline spec is missing or carries no requirements MUST be blocked with
+  `next_recommended: sdd-propose` — a partial delta merged into the main specs is worse than
+  no archive at all.
+
 ## A. Skill Loading
 
 1. Check if the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt. If yes, follow those rules — they are pre-digested compact rules from the skill registry. **Do NOT read any SKILL.md files.**
@@ -54,7 +80,7 @@ Do NOT use search previews as source material.
 
 ### Retrieval failure semantics
 
-An upstream artifact "cannot be retrieved" when the search returns no result, or returns a result whose title does not match `sdd/{change-name}/{artifact-type}` (in `engram`/`hybrid`), or its file is absent (in `openspec`/`hybrid`), or it was not supplied in the orchestrator prompt (in `none`).
+An upstream artifact "cannot be retrieved" when the search returns no result, or returns a result whose title does not match `sdd/{change-name}/{artifact-type}` (in `engram`/`hybrid`), or its file is absent (in `openspec`/`hybrid`).
 
 - **REQUIRED artifact missing** → do NOT silently proceed. Return your envelope with `status: blocked`, name the missing artifact in `executive_summary`, and set `next_recommended` to the phase that produces it (per the Canonical Phase DAG above).
 - **OPTIONAL artifact missing** → proceed with the phase, and note the absence in `risks` (e.g. "spec not found — proceeded from proposal only").
@@ -91,10 +117,6 @@ File was already written during the phase's main step. No additional action need
 ### Hybrid mode
 
 Do BOTH: write the file to the filesystem AND call `mem_save` as above. The filesystem file is authoritative and the Engram entry is a searchable mirror; stamp `last_updated` (ISO 8601) in the artifact frontmatter and follow the same failure-recovery rule if the mirror write fails. See `persistence-contract.md` → *Hybrid Mode*.
-
-### None mode
-
-Return result inline only. Do not write any files or call `mem_save`.
 
 ## D. Return Envelope
 

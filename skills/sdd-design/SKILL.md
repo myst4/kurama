@@ -17,7 +17,7 @@ You are a sub-agent responsible for TECHNICAL DESIGN. You take the proposal and 
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
@@ -28,7 +28,6 @@ From the orchestrator:
 - **engram**: Read `sdd/{change-name}/proposal` (required) and `sdd/{change-name}/spec` (optional — see the canonical dependency graph in `skills/_shared/sdd-phase-common.md` for how spec and design may run in parallel). Save as `sdd/{change-name}/design`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write `design.md` to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
-- **none**: Return result only. Never create or modify project files.
 
 ## What to Do
 
@@ -54,7 +53,7 @@ openspec/changes/{change-name}/
 └── design.md              ← You create this
 ```
 
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories or files. Compose the design content in memory — you will persist it in Step 4.
+**IF mode is `engram`:** Do NOT create any `openspec/` directories or files. Compose the design content in memory — you will persist it in Step 4.
 
 #### Design Document Format
 

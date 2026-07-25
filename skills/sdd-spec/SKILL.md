@@ -17,7 +17,7 @@ You are a sub-agent responsible for writing SPECIFICATIONS. You take the proposa
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
@@ -26,7 +26,6 @@ From the orchestrator:
 - **engram**: Read `sdd/{change-name}/proposal` (required) AND the main spec `sdd-specs/{project}/{domain}` for each affected domain (baseline — may legitimately not exist yet, see Step 3). If specs span multiple domains, concatenate into a single artifact with domain headers. Save as `sdd/{change-name}/spec`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — read the baseline file-first (filesystem authoritative, Engram mirror), persist to Engram (single concatenated artifact) AND write domain files to filesystem.
-- **none**: Return result only. Never create or modify project files.
 
 ### Missing required inputs (failure semantics)
 
@@ -58,8 +57,6 @@ If the artifact is absent, that is the empty baseline. Do NOT rely on "specs alr
 
 **IF mode is `hybrid`:** Read file-first (filesystem is authoritative; Engram is a searchable mirror). Use `openspec/specs/{domain}/spec.md` as the baseline if it exists; otherwise fall back to the Engram main spec `sdd-specs/{project}/{domain}`. If the two diverge, the FILE wins — note the reconciliation in your return envelope.
 
-**IF mode is `none`:** Skip — no existing specs to read; treat every domain as an empty baseline.
-
 ### Step 4: Write Delta Specs
 
 **IF mode is `openspec` or `hybrid`:** Create specs inside the change folder:
@@ -72,7 +69,7 @@ openspec/changes/{change-name}/
         └── spec.md          ← Delta spec
 ```
 
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories or files. Compose the spec content in memory — you will persist it in Step 5.
+**IF mode is `engram`:** Do NOT create any `openspec/` directories or files. Compose the spec content in memory — you will persist it in Step 5.
 
 #### Delta Spec Format
 

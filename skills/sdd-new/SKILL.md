@@ -27,7 +27,7 @@ It is user-invocable as `/sdd-new <change-name>`. `<change-name>` names the chan
 
 ### 1. Init check
 
-Confirm SDD is initialized for this project — a `sdd-init/{project}` context artifact (engram/none)
+Confirm SDD is initialized for this project — a `sdd-init/{project}` context artifact (engram)
 or `openspec/config.yaml` (openspec/hybrid) exists. Use the Recovery Rule from
 `skills/_shared/persistence-contract.md` to look it up. If nothing is found, delegate `sdd-init`
 first (it detects the stack, asks the explicit TDD question, and persists the pipeline settings) and
@@ -58,9 +58,15 @@ This is the post-propose human gate; its behavior depends on `execution_mode`:
   continue into specs and design (e.g. via `/sdd-ff <change-name>` or `/sdd-continue <change-name>`).
   Do NOT auto-advance past the proposal; `sdd-new` ends at this human gate.
 - **`auto`**: Do NOT stop at the proposal gate. Auto-continue into the planning phases exactly as
-  `/sdd-ff` does — `(spec ‖ design) → tasks` with no inter-phase prompts — halting only on a
-  `status: blocked` return or when the implementation boundary is reached (after `tasks`, before
-  `/sdd-apply`, which stays a human gate even in `auto`). Present ONE combined summary at the end.
+  `/sdd-ff` does — `(spec ‖ design) → tasks` for a `standard` change, or straight to `tasks` for a
+  `small` one — with no inter-phase prompts, halting only on a `status: blocked` return or when the
+  implementation boundary is reached (after `tasks`, before `/sdd-apply`, which stays a human gate
+  even in `auto`). Present ONE combined summary at the end.
+
+Read the proposal's `## Change Size` section before sequencing the planning phases.
+An absent or unrecognized size means `standard`.
+For `small`, the spec and design already live inside the proposal, so their separate
+delegations are skipped.
 
 ## Rules
 

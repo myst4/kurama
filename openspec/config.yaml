@@ -1,0 +1,82 @@
+# openspec/config.yaml
+schema: spec-driven
+
+execution_mode: auto  # supervised | auto; supervised stops at human gates, auto continues unless blocked/verify FAIL
+
+context: |
+  Tech stack: POSIX shell (bash 3.2 compatible) + Markdown. No package manager,
+  no compiled artifacts. The product IS the content: skills/ holds the SDD phase
+  contracts as SKILL.md files, scripts/ holds the installer lifecycle
+  (setup/install/update/doctor/uninstall), examples/ holds per-harness generated
+  configuration.
+  Architecture: a multi-harness SDD workflow. Nine phase skills form a DAG
+  (explore -> propose -> (spec || design) -> tasks -> apply -> verify -> archive)
+  declared once in skills/_shared/sdd-phase-common.md. Phases are EXECUTORS and
+  never delegate; only the meta skills (sdd-new, sdd-continue, sdd-ff) orchestrate.
+  Shared contracts live in skills/_shared/. Generated harness configs are built
+  from examples/_templates/ by scripts/build-examples.sh and must never be edited
+  directly.
+  Testing: scripts/install_test.sh, a self-contained bash suite (132 tests) that
+  installs into a temp HOME with shimmed binaries and asserts on the result.
+  scripts/validate_skills.sh is a structural linter for skill frontmatter and
+  packaging manifests.
+  Style: shellcheck-clean scripts (CI runs shellcheck scripts/*.sh); atomic writes
+  and timestamped backups in the installers; every installed file recorded in a
+  receipt (.kurama-install-manifest.json) so update and uninstall are exact.
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Identify affected modules/packages
+    - State whether the change breaks an existing install (receipts, config schema, phase contract)
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+    - Name the consumer of every artifact a phase produces before changing that phase
+  tasks:
+    - Group tasks by phase (infrastructure, implementation, testing)
+    - Use hierarchical numbering (1.1, 1.2, etc.)
+    - Keep tasks small enough to complete in one session
+  apply:
+    - Follow existing code patterns and conventions
+    - Load relevant coding skills for the project stack
+    - Edit examples/_templates/ and rebuild; never edit generated files under examples/<harness>/
+  verify:
+    test_command: "bash scripts/install_test.sh"
+    build_command: "bash scripts/build-examples.sh"
+    coverage_threshold: 0        # minimum coverage %; 0 disables the check
+    compliance_mode: behavioral  # behavioral | static; static downgrades UNTESTED to WARNING
+  archive:
+    - Warn before merging destructive deltas (large removals)
+
+# Optional TDD module — single opt-in switch (see skills/tdd/SKILL.md).
+tdd:
+  enabled: false               # opt-in switch for the optional TDD module (RED → GREEN → REFACTOR)
+  single_test_command: ""      # e.g. "npm test -- {file}"; runs ONE test/scenario for a fast RED cycle
+
+# Optional Kanban module — GitHub Projects board sync (see skills/kanban-github/SKILL.md).
+kanban:
+  enabled: false             # opt-in switch; set true only after the gh prerequisite checks pass
+  user: ""                   # optional assignee override; empty => @me
+  owner: ""                  # repo owner, deduced from the git remote and confirmed
+  repo: ""                   # repository name
+  project_number: 0          # GitHub Project (v2) number
+  project_id: ""             # cached ProjectV2 node id (PVT_...)
+  status_field_id: ""        # node id of the board's Status single-select field (PVTSSF_...)
+  merge_method: squash       # merge | squash | rebase; used at the final human OK gate
+  stages:                    # canonical stage -> real board option_id
+    backlog: ""
+    ready: ""
+    in_progress: ""
+    in_review: ""
+    done: ""
+  size_field_id: ""          # optional: node id of the board's Size single-select field
+  sizes:                     # optional: t-shirt size -> real board option_id
+    xs: ""
+    s: ""
+    m: ""
+    l: ""
+    xl: ""

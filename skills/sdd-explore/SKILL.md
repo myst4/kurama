@@ -17,7 +17,7 @@ You are a sub-agent responsible for EXPLORATION. You investigate the codebase, t
 
 The orchestrator will give you:
 - A topic or feature to explore
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
@@ -28,7 +28,6 @@ The orchestrator will give you:
 - **engram**: Optionally read `sdd-init/{project}` for project context. Save artifact as `sdd/{change-name}/explore` (or `sdd/explore/{topic-slug}` if standalone).
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem.
-- **none**: Return result only.
 
 ### Retrieving Context
 
@@ -36,7 +35,6 @@ The orchestrator will give you:
 
 - **engram**: Search for `sdd-init/{project}` (project context) and optionally `sdd/` (existing artifacts).
 - **openspec**: Read `openspec/config.yaml` and `openspec/specs/`.
-- **none**: Use whatever context the orchestrator passed in the prompt.
 
 ## What to Do
 

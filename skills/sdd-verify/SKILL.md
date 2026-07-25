@@ -19,7 +19,7 @@ Static analysis alone is NOT enough. You must execute the code.
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 - Pipeline settings propagated per phase (E6): `compliance_mode`, `tdd.enabled` (and
   `tdd.single_test_command` when enabled), and the verify commands (`test_command`,
   `build_command`, `coverage_threshold`). A propagated value WINS over any value read from
@@ -32,7 +32,6 @@ From the orchestrator:
 - **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks`. Save as `sdd/{change-name}/verify-report`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Save to `openspec/changes/{change-name}/verify-report.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write `verify-report.md` to filesystem.
-- **none**: Return the verification report inline only. Never write files.
 
 **Required artifacts**: `spec` (the compliance matrix cannot be built without it) and
 `tasks` (completeness cannot be checked without it) are REQUIRED. `proposal` and `design`
@@ -45,6 +44,19 @@ missing artifact in `executive_summary`, and set `next_recommended` to the phase
 produces it (`sdd-spec` for a missing spec, `sdd-tasks` for missing tasks).
 
 ## What to Do
+
+This phase does two separable jobs, and they are kept apart on purpose:
+
+- **Part A — Gather evidence** (Steps 1–5d): find out what is true. Completeness, static spec
+  match, design coherence, and the real execution of tests, build, and coverage. Nothing here
+  decides whether the change passes; it only produces facts.
+- **Part B — Render the verdict** (Steps 6–8): decide what those facts MEAN. This is where
+  `compliance_mode` applies and where a scenario becomes COMPLIANT, UNTESTED, or FAILING.
+
+Run Part A first, in full. Do not let a verdict form while gathering — an early conclusion
+biases which evidence you bother to collect.
+
+## Part A — Gather Evidence
 
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
@@ -156,7 +168,7 @@ Detect and run the build/type-check command:
 
 ```
 Detect build command from:
-├── Propagated rules.verify.build_command / openspec/config.yaml → rules.verify.build_command (highest priority; the propagated value is the only source in engram/none mode)
+├── Propagated rules.verify.build_command / openspec/config.yaml → rules.verify.build_command (highest priority; the propagated value is the only source in engram mode)
 ├── package.json → scripts.build → also run tsc --noEmit if tsconfig.json exists
 ├── pyproject.toml → python -m build or equivalent
 ├── Makefile → make build
@@ -175,7 +187,7 @@ Flag: WARNING if there are type errors even with passing build
 ### Step 5d: Coverage Validation (Real Execution — if threshold configured)
 
 Resolve `coverage_threshold` the same way as the other verify settings: a value propagated
-in your launch prompt WINS (it is the only source in `engram`/`none` mode, which have no
+in your launch prompt WINS (it is the only source in `engram` mode, which have no
 `openspec/config.yaml`), else read `rules.verify.coverage_threshold` from `openspec/config.yaml`.
 Run with coverage only if the resolved threshold is set (non-zero):
 
@@ -190,6 +202,21 @@ IF coverage_threshold is configured (propagated value wins, else openspec/config
 IF coverage_threshold is NOT configured:
 └── Skip this step, report as "Not configured"
 ```
+
+## Part B — Render the Verdict
+
+Everything below turns the evidence from Part A into a verdict. The single switch that
+changes what a result MEANS is `compliance_mode`, resolved in Step 5a:
+
+| Evidence | `behavioral` (default) | `static` |
+|---|---|---|
+| Test exists and passed | COMPLIANT | COMPLIANT |
+| MUST scenario, no passing test, structural evidence only | **CRITICAL** (UNTESTED) | **WARNING** (UNTESTED) |
+| Test executed and failed | **CRITICAL** | **CRITICAL** |
+
+A failing test is CRITICAL in both modes — `static` softens the absence of evidence, never
+the presence of contrary evidence. Do not re-derive this table anywhere else; Step 5a resolves
+the mode and this is what it selects between.
 
 ### Step 6: Spec Compliance Matrix (Behavioral Validation)
 
@@ -273,7 +300,7 @@ rm -f "$tmp_index"
 
 Record `tree_hash` and the changed-file list in the report's **Content Binding** section
 (Step 8), and SURFACE `tree_hash` in your return envelope (`Reviewed-Tree: {tree_hash}`) so the
-orchestrator can stamp it into the `sdd/{change-name}/state` artifact. In `engram`/`none` mode
+orchestrator can stamp it into the `sdd/{change-name}/state` artifact. In `engram` mode
 the report is not on disk, so the state artifact is where sdd-archive Step 0 reads the recorded
 hash back.
 

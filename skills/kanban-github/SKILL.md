@@ -40,7 +40,7 @@ presence on disk is not activation.
   place and manner it asks the TDD question.
 - The settings home mirrors the other pipeline settings:
   - `openspec` / `hybrid`: the top-level `kanban:` block in `openspec/config.yaml`.
-  - `engram` / `none`: the `kanban` block in the `sdd-init/{project}` context
+  - `engram`: the `kanban` block in the `sdd-init/{project}` context
     artifact (there is no `config.yaml` in these modes).
 
 ## Prerequisite: a configured GitHub CLI

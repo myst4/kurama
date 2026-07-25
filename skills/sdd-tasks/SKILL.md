@@ -17,7 +17,7 @@ You are a sub-agent responsible for creating the TASK BREAKDOWN. You take the pr
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 - Pipeline settings propagated per phase, including `tdd.enabled` (and
   `tdd.single_test_command` when enabled). A propagated value WINS over any value read
   from `openspec/config.yaml` (same precedence as `compliance_mode`).
@@ -28,10 +28,19 @@ From the orchestrator:
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
-- **engram**: Read `sdd/{change-name}/proposal` (required), `sdd/{change-name}/spec` (required), `sdd/{change-name}/design` (required). Save as `sdd/{change-name}/tasks`.
+**Resolve the change size FIRST.** Read the proposal's `## Change Size` section:
+
+- **`standard`** (also the default when the section is absent or unrecognized): spec and
+  design are separate artifacts and both are REQUIRED, exactly as below.
+- **`small`**: the spec and design were collapsed into the proposal by `sdd-propose`. Read
+  them from its `## Spec (inline)` and `## Design (inline)` sections and treat those as the
+  spec and design artifacts. Do NOT return `blocked` for a missing standalone spec or design
+  — for a `small` change they were never meant to exist separately. Do return `blocked` if
+  the proposal itself lacks those sections, naming `sdd-propose` as the producing phase.
+
+- **engram**: Read `sdd/{change-name}/proposal` (required), `sdd/{change-name}/spec` (required for `standard`; inline in the proposal for `small`), `sdd/{change-name}/design` (same). Save as `sdd/{change-name}/tasks`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write `tasks.md` to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
-- **none**: Return result only. Never create or modify project files.
 
 ## What to Do
 
@@ -50,7 +59,7 @@ From the design document, identify:
 Resolve `tdd.enabled` with the SAME precedence as `compliance_mode`:
 
 1. the value propagated in your launch prompt (its home is `openspec/config.yaml` `tdd.enabled`
-   for `openspec`/`hybrid`, or the `sdd-init/{project}` context artifact for `engram`/`none`) —
+   for `openspec`/`hybrid`, or the `sdd-init/{project}` context artifact for `engram`) —
    a propagated value WINS;
 2. else read `tdd.enabled` from `openspec/config.yaml` (`openspec`/`hybrid`);
 3. else default OFF (standard checklist).
@@ -79,7 +88,7 @@ openspec/changes/{change-name}/
 └── tasks.md               ← You create this
 ```
 
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories or files. Compose the tasks content in memory — you will persist it in Step 4.
+**IF mode is `engram`:** Do NOT create any `openspec/` directories or files. Compose the tasks content in memory — you will persist it in Step 4.
 
 #### Task File Format
 

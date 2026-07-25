@@ -4,7 +4,7 @@ A hands-on checklist that drives one full SDD cycle — `init → new → ff →
 verify → archive` — on a throwaway toy project, so you can prove an install (or a
 change to the skills, scripts, or hooks) works end to end before shipping it.
 
-Run it **once per persistence mode** (`engram`, `openspec`, `none`/degraded). Each
+Run it **once per persistence mode** (`engram`, `openspec`, degraded `engram`). Each
 pass takes **~15 minutes**. Nothing here is automated: you type the commands into
 your harness and inspect the artifacts, envelopes, and gates yourself.
 
@@ -49,16 +49,14 @@ preflight (Step 0) and where you look for artifacts change between passes.
 |------|------|------------------|--------------------------|
 | A | `engram` | Preflight → Artifact store = **Engram** (needs Engram reachable) | Engram observations (`sdd/<change>/<type>`) |
 | B | `openspec` | Preflight → Artifact store = **OpenSpec** | Files under `openspec/` in the toy repo |
-| C | `none` / degraded | Run with **Engram not reachable** (MCP unregistered / binary absent) and do not pick OpenSpec | Degraded fallback: `.kurama/sdd/<change>/*.md` |
+| C | degraded `engram` | Run with **Engram not reachable** (MCP unregistered / binary absent) and do not pick OpenSpec | Degraded fallback: `.kurama/sdd/<change>/*.md` |
 
 Notes on Pass C: with Engram intended but unavailable, the contract **degrades to
-the `.kurama/sdd/` filesystem fallback** — it never silently drops to `none` (see
+the `.kurama/sdd/` filesystem fallback** — persistence is never skipped (see
 [persistence.md](persistence.md)). Artifacts are markdown under
-`.kurama/sdd/<change>/`. To also spot-check *explicit* `none`, re-run just Steps
-0–2 choosing an inline/none store: the orchestrator persists **no SDD artifacts**
-(explore/proposal/etc.) and warns you to enable `engram` or `openspec` — confirm
-that warning appears and no SDD artifact files are written. Note that Step 1 still
-writes `.kurama/skill-registry.md` even in `none` — that file is harness
+`.kurama/sdd/<change>/`. Confirm the degrade warning appears and that the artifacts
+land there rather than in `openspec/`. Note that Step 1 still
+writes `.kurama/skill-registry.md` in every mode — that file is harness
 infrastructure, not an SDD artifact, and is written in **every** mode (see Step 1).
 
 ---

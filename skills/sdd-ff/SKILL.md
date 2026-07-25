@@ -44,11 +44,18 @@ Run the remaining planning phases from the **Canonical Phase DAG** in
 `skills/_shared/sdd-phase-common.md`, resuming from the current state:
 
 ```
-propose → (spec ‖ design) → tasks
+standard:  propose → (spec ‖ design) → tasks
+small:     propose → tasks
 ```
 
-Auto-continue between phases — do NOT stop for user approval between planning phases. `spec` and
-`design` MAY run in parallel; `tasks` reconciles them. Pass each phase's required upstream by reference
+**Read the proposal's `## Change Size` before sequencing.** For `small`, `sdd-propose` already
+wrote the spec and design as sections inside the proposal, so the separate `sdd-spec` and
+`sdd-design` delegations are skipped — `tasks` reads them inline. An absent or unrecognized
+size means `standard`: never guess `small`, and never fail on the missing section (changes
+created before this existed have none).
+
+Auto-continue between phases — do NOT stop for user approval between planning phases. On the
+`standard` path `spec` and `design` MAY run in parallel; `tasks` reconciles them. Pass each phase's required upstream by reference
 (topic key / path); sub-agents read from the backend. This preserves the established `sdd-ff` scope:
 fast-forward planning up to (but not into) implementation.
 

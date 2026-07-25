@@ -34,7 +34,7 @@ Where the flag lives is mode-dependent — the same settings-home rule as
 | Mode | Where the `kanban` block lives |
 |------|--------------------------------|
 | `openspec` / `hybrid` | The top-level `kanban:` block in `openspec/config.yaml`, written by `sdd-init`. |
-| `engram` / `none` | The `kanban` block in the `sdd-init/{project}` context artifact (there is no `config.yaml` in these modes). |
+| `engram` | The `kanban` block in the `sdd-init/{project}` context artifact (there is no `config.yaml` in these modes). |
 
 The orchestrator reads the block once and propagates it into every phase, exactly
 as it does for `compliance_mode`, `tdd`, and `execution_mode` — the propagated

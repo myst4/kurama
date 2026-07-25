@@ -21,7 +21,9 @@ openspec/
     └── {change-name}/       <- Active change folder
         ├── state.yaml       <- DAG state (survives compaction)
         ├── exploration.md   <- (optional) from sdd-explore
-        ├── proposal.md      <- from sdd-propose
+        ├── proposal.md      <- from sdd-propose (carries ## Change Size; for a `small`
+        │                       change also ## Spec (inline) and ## Design (inline), and
+        │                       the two files below are not produced)
         ├── specs/           <- from sdd-spec
         │   └── {domain}/
         │       └── spec.md  <- Delta spec
@@ -37,9 +39,9 @@ openspec/
 | orchestrator | Creates/Updates | `openspec/changes/{change-name}/state.yaml` |
 | sdd-init | Creates | `openspec/config.yaml`, `openspec/specs/`, `openspec/changes/`, `openspec/changes/archive/` |
 | sdd-explore | Creates (optional) | `openspec/changes/{change-name}/exploration.md` |
-| sdd-propose | Creates | `openspec/changes/{change-name}/proposal.md` |
-| sdd-spec | Creates | `openspec/changes/{change-name}/specs/{domain}/spec.md` |
-| sdd-design | Creates | `openspec/changes/{change-name}/design.md` |
+| sdd-propose | Creates | `openspec/changes/{change-name}/proposal.md` (carries `## Change Size`; for `small`, also `## Spec (inline)` and `## Design (inline)`) |
+| sdd-spec | Creates | `openspec/changes/{change-name}/specs/{domain}/spec.md` (`standard` only) |
+| sdd-design | Creates | `openspec/changes/{change-name}/design.md` (`standard` only) |
 | sdd-tasks | Creates | `openspec/changes/{change-name}/tasks.md` |
 | sdd-apply | Updates | `openspec/changes/{change-name}/tasks.md` (marks `[x]`) |
 | sdd-verify | Creates | `openspec/changes/{change-name}/verify-report.md` |

@@ -13,7 +13,6 @@ the project, in every mode. For quick start, see the [main README](../README.md)
 | `engram` | Default when Engram is reachable. Persistent memory across sessions; main specs also live as artifacts (see below). |
 | `openspec` | File-based artifacts in `openspec/`. Never chosen automatically. |
 | `hybrid` | Both engram + openspec, written simultaneously; filesystem is authoritative (see below). Never chosen automatically. |
-| `none` | No persistence. Results returned inline only. |
 
 ## Default resolution and Engram degradation
 
@@ -22,12 +21,10 @@ call at the start of the cycle — it never assumes:
 
 1. Engram reachable → default resolves to `engram`.
 2. Engram unreachable → default **degrades to the `.kurama/sdd/` filesystem
-   fallback**, with an explicit warning to the user. It never degrades
-   silently to `none`.
+   fallback**, with an explicit warning to the user. Persistence is never
+   skipped — every mode writes somewhere.
 3. `openspec` and `hybrid` are NEVER chosen automatically — only when the user
    or orchestrator explicitly requests them.
-4. `none` is reached only by explicit choice, or when the `.kurama/sdd/` fallback
-   itself is unavailable too.
 
 A separate rule covers a `mem_save` that fails mid-cycle, as opposed to Engram
 being unreachable at cycle start: one retry, then a fallback file written under
@@ -44,7 +41,7 @@ Every cycle needs a single home for the settings that steer it: the resolved
 | Mode | Settings home |
 |------|----------------|
 | `openspec` / `hybrid` | `openspec/config.yaml`, written by `sdd-init` — `compliance_mode` and the verify commands live under `rules.verify`; in `hybrid` the Engram context mirrors it. See [openspec-convention.md](../skills/_shared/openspec-convention.md). |
-| `engram` / `none` | The `sdd-init/{project}` context artifact in Engram — there is no `config.yaml` in these modes, so it carries the settings itself. |
+| `engram` | The `sdd-init/{project}` context artifact in Engram — there is no `config.yaml` in these modes, so it carries the settings itself. |
 
 The orchestrator resolves the mode once per cycle (via the Engram
 Availability Check above) and reads the settings home once per session, then
@@ -89,7 +86,7 @@ baseline when starting a new change.
 
 ## `.kurama/` — harness state directory
 
-`.kurama/` is written in every mode, including `none` — it is harness
+`.kurama/` is written in every mode — it is harness
 infrastructure, not an SDD project artifact:
 
 - `.kurama/skill-registry.md` — the scanned skill + convention registry (see

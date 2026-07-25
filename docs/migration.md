@@ -5,6 +5,33 @@ stabilization work (Phases 1-8). For what changed and when, see
 [docs/changelog.md](changelog.md). For the persistence contract itself, see
 [docs/persistence.md](persistence.md).
 
+## Breaking change: the `none` artifact-store mode was removed
+
+The artifact-store enum is now `engram | openspec | hybrid`. `none` — persist no
+SDD artifacts, return them inline — no longer exists.
+
+**Why it went.** The whole point of the workflow is that specs are the source of
+truth, and `none` produced nothing that survived the session. `sdd-archive` had no
+delta spec to merge, so the main specs never advanced: a cycle could complete and
+leave the source of truth exactly where it started. The mode also cost a branch in
+every phase's persistence section, for a setting no project benefited from choosing.
+
+**If your project used it**, you will see the mode reported as unsupported rather
+than silently writing nothing. To migrate:
+
+1. Set the mode to `openspec` in `openspec/config.yaml` (or in the
+   `sdd-init/{project}` settings artifact for Engram-backed projects).
+2. Re-run `/sdd-init` to regenerate the config against the current schema.
+
+**There is no data to move.** `none` never wrote artifacts, so nothing exists to
+migrate — only the setting changes. Everything a past `none` cycle produced was
+already inline in a conversation and is not recoverable by this or any other route.
+
+**Unrelated to this change**: `.kurama/` is harness infrastructure and was never
+gated by the persistence mode. The skill registry and the `.kurama/sdd/` fallback
+(used when Engram is the intended backend but is unreachable) behave exactly as
+before.
+
 ## Phase 1 — Breaking change: verify commands moved to `rules.verify.*`
 
 Older `openspec/config.yaml` files defined `test_command`, `build_command`,
@@ -137,7 +164,7 @@ version so an install manifest is recorded before relying on `uninstall.sh`.
 
 A top-level `tdd:` block was added to the canonical `openspec/config.yaml`
 schema (a sibling of `rules:`), holding exactly two keys: `enabled` (bool) and
-`single_test_command` (string). In `engram`/`none` mode the same two keys
+`single_test_command` (string). In `engram` mode the same two keys
 live in the `sdd-init/{project}` context artifact instead of a config file.
 See [skills/tdd/SKILL.md](../skills/tdd/SKILL.md) and
 [docs/tdd.md](tdd.md) for the full cycle contract and activation precedence.
@@ -277,7 +304,7 @@ schema (a sibling of `schema:` and `rules:`), with two values:
 
 Resolution mirrors `compliance_mode` and `tdd`: a value the orchestrator explicitly
 propagates wins, else `execution_mode` in `openspec/config.yaml` (openspec/hybrid) or
-the `sdd-init/{project}` settings bundle (engram/none), else the default `supervised`.
+the `sdd-init/{project}` settings bundle (engram), else the default `supervised`.
 `sdd-init` asks for the mode at initialization and persists it; `sdd-new`/`sdd-continue`
 condition their human gates on it; `/sdd-ff` always runs in `auto` regardless of the
 configured value. The schema line is kept byte-identical between `openspec-convention.md`
@@ -478,7 +505,7 @@ kanban — every other skill works without it.
 ### New `kanban` config block (opt-in, defaults inert)
 
 Enabling the board persists a top-level `kanban:` block (in `openspec/config.yaml`
-for openspec/hybrid, or the `sdd-init/{project}` context artifact for engram/none)
+for openspec/hybrid, or the `sdd-init/{project}` context artifact for engram)
 holding the board wiring `sdd-init` caches during onboarding: `enabled`, the OPTIONAL
 `user` (empty => `@me`), `owner`, `repo`, `project_number`, the cached `project_id`
 (`PVT_...`), `status_field_id`, `merge_method`, the `stages` map (canonical stage →

@@ -119,7 +119,6 @@ Sub-agents MUST report their skill resolution status in their return envelope:
 - `injected` — received a `## Project Standards` block from the orchestrator (paths to load by default, or pre-digested compact rules in opt-in mode) and loaded it (ideal path)
 - `fallback-registry` — no standards received, self-loaded from the skill registry
 - `fallback-path` — no standards received, resolved the SKILL.md via its registry path directly
-- `none` — no skills loaded at all
 
 **Orchestrator self-correction rule**: if a sub-agent reports anything other than `injected`, the orchestrator MUST:
 1. Re-read the skill registry immediately (it may have been lost to compaction)

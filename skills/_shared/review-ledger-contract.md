@@ -104,10 +104,11 @@ The orchestrator persists the merged ledger according to the resolved
 - **`hybrid`**: write `openspec/changes/{change-name}/review-ledger.md` (authoritative) and
   mirror it to the `sdd/{change-name}/review-ledger` engram topic (`mem_save` with
   `capture_prompt: false`); the file wins on divergence.
-- **`none`**: keep the ledger inline in the phase return envelope (Section D). Do not write
-  files or Engram artifacts — the ledger lives only in this conversation, so complete the
-  review → fix → re-review loop within the session because it is not persisted across
-  compaction.
+- **degraded `engram`** (Engram unavailable): write the ledger to
+  `.kurama/sdd/{change-name}/review-ledger.md`, the same filesystem fallback every other
+  artifact uses. The ledger is never left unpersisted — an inline-only ledger does not
+  survive compaction, and a review → fix → re-review loop that loses its ledger mid-way
+  re-reports findings that were already resolved.
 
 ## Scoped validation
 

@@ -41,7 +41,7 @@ removes that behavior: installation ≠ activation.)
 2. The explicit project setting the orchestrator resolves it from:
    - `openspec` / `hybrid`: the top-level `tdd:` block in `openspec/config.yaml`
      (`tdd.enabled`).
-   - `engram` / `none`: the `tdd` flag in the `sdd-init/{project}` context
+   - `engram`: the `tdd` flag in the `sdd-init/{project}` context
      artifact (there is no `config.yaml` in these modes).
 3. An interactive suggestion during `sdd-init` ONLY — e.g. "codebase looks
    test-first — enable TDD?". A test-first-looking codebase may trigger this

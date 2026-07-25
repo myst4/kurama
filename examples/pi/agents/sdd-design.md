@@ -1,6 +1,6 @@
 ---
 name: sdd-design
-description: SDD technical design executor. Launch to produce the design document (architecture decisions, data flow, file changes, rationale) for a change from its proposal and specs. May run in parallel with sdd-spec.
+description: SDD technical design executor. Launch to produce the design document (architecture decisions, data flow, file changes, rationale) for a change from its proposal (required), using its specs as optional context when they already exist. May run in parallel with sdd-spec.
 tools:
   - read
   - grep

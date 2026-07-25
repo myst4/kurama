@@ -1610,6 +1610,150 @@ test_gemini_extension_json_valid() {
     return 0
 }
 
+test_none_mode_fully_removed() {
+    # S-mode-1. `none` meant "persist no SDD artifacts" in a workflow whose premise is that
+    # specs are the source of truth: sdd-archive had nothing to merge, so the main specs
+    # never advanced. Removing the enum value is not enough — every phase carried a `none`
+    # branch, and a leftover branch is what makes a removed mode quietly still reachable.
+    # Two files are exempt because naming the mode is their job: docs/changelog.md is a
+    # historical record and must keep describing it as it existed, and docs/migration.md
+    # exists precisely to tell a project still on `none` what to do.
+    local hits
+    # shellcheck disable=SC2016  # literal backticks are the point — this matches the mode as written in prose
+    hits=$(grep -rn -- '`none`' "$REPO_DIR/skills" "$REPO_DIR/docs" 2>/dev/null \
+        | grep -v 'docs/changelog.md' \
+        | grep -v 'docs/migration.md' \
+        | grep -v 'Removed mode' \
+        | grep -v 'skill_resolution' || true)
+    if [ -n "$hits" ]; then
+        echo "the none artifact-store mode still appears:"
+        echo "$hits" | head -5
+        return 1
+    fi
+    # The enum itself must be the three surviving modes.
+    grep -q 'engram | openspec | hybrid`' "$REPO_DIR/skills/_shared/persistence-contract.md" \
+        || { echo "persistence-contract.md does not declare the three-mode enum"; return 1; }
+    # And the removal must be explained where someone hitting an old config would look.
+    grep -qi 'report it as unsupported' "$REPO_DIR/skills/_shared/persistence-contract.md" \
+        || { echo "persistence-contract.md must say what to do when a config still says none"; return 1; }
+    return 0
+}
+
+test_kurama_state_survives_mode_removal() {
+    # S-mode-3. `.kurama/` is harness infrastructure, not an SDD artifact — the persistence
+    # modes never gated it, and removing a mode must not accidentally make it conditional.
+    local f="$REPO_DIR/skills/_shared/persistence-contract.md"
+    assert_file_exists "$f" || return 1
+    grep -q '.kurama/sdd/' "$f" \
+        || { echo "the .kurama/sdd/ fallback disappeared from the persistence contract"; return 1; }
+    grep -qi 'written in every mode' "$REPO_DIR/skills/sdd-init/SKILL.md" \
+        || { echo "sdd-init must still write the registry in every mode"; return 1; }
+    return 0
+}
+
+test_change_size_absent_means_standard() {
+    # S-seq-2 / S-size-2. Every change created before the size field existed has no
+    # `## Change Size` section. The contract must resolve that to `standard` — the long path
+    # — in every place that sequences phases. Guessing `small` would silently strip two
+    # planning phases from in-flight work; failing would block it outright.
+    local f
+    for f in "$REPO_DIR/skills/_shared/sdd-phase-common.md" \
+             "$REPO_DIR/skills/sdd-ff/SKILL.md" \
+             "$REPO_DIR/skills/sdd-new/SKILL.md" \
+             "$REPO_DIR/skills/sdd-continue/SKILL.md" \
+             "$REPO_DIR/skills/sdd-tasks/SKILL.md"; do
+        assert_file_exists "$f" || return 1
+        # Normalize newlines: these are prose contracts and the normative phrase must be
+        # findable regardless of where the author wrapped the line.
+        local flat
+        flat=$(tr '\n' ' ' < "$f")
+        case "$flat" in
+            *"Change Size"*) ;;
+            *) echo "$f does not resolve the change size before sequencing"; return 1 ;;
+        esac
+        case "$flat" in
+            *"absent or unrecognized"*|*"default when the section is absent"*) ;;
+            *) echo "$f does not state that an absent size means standard"; return 1 ;;
+        esac
+    done
+    return 0
+}
+
+test_small_change_collapses_without_omitting() {
+    # S-collapse-1..3. Skipping spec/design deadlocks: sdd-tasks requires both and
+    # sdd-archive blocks without a delta spec because it has nothing to merge into the main
+    # specs. The contract must therefore collapse them into the proposal, and must still
+    # block when the inline spec is missing or empty.
+    local propose="$REPO_DIR/skills/sdd-propose/SKILL.md"
+    local tasks="$REPO_DIR/skills/sdd-tasks/SKILL.md"
+    local archive="$REPO_DIR/skills/sdd-archive/SKILL.md"
+    assert_file_exists "$propose" || return 1
+
+    grep -q '## Spec (inline)' "$propose" \
+        || { echo "sdd-propose has no inline spec template for small changes"; return 1; }
+    grep -q '## Design (inline)' "$propose" \
+        || { echo "sdd-propose has no inline design template for small changes"; return 1; }
+    # All five criteria must be present, and ambiguity must resolve to standard.
+    grep -qi 'ambiguity always resolves to .\?standard' "$propose" \
+        || { echo "sdd-propose must resolve ambiguity to standard"; return 1; }
+
+    grep -q '## Spec (inline)' "$tasks" \
+        || { echo "sdd-tasks does not read the inline spec for small changes"; return 1; }
+    grep -q '## Spec (inline)' "$archive" \
+        || { echo "sdd-archive does not locate the inline delta spec"; return 1; }
+    # The guard that protects the source of truth.
+    grep -qi 'missing, empty, or carries no' "$archive" \
+        || { echo "sdd-archive must block on a missing or empty inline spec"; return 1; }
+    return 0
+}
+
+test_sdd_design_description_marks_spec_optional() {
+    # S-design-1. sdd-design reads proposal (required) and spec (OPTIONAL) — the phase may
+    # run in parallel with sdd-spec, so a spec is not guaranteed to exist. An agent
+    # description that promises "proposal and specs" reads as a hard dependency and would
+    # have a reader treat a missing spec as a blocker. Description and SKILL.md must agree.
+    local skill="$REPO_DIR/skills/sdd-design/SKILL.md"
+    assert_file_exists "$skill" || return 1
+    grep -qi 'spec.*(optional' "$skill" \
+        || { echo "sdd-design SKILL.md no longer marks spec optional — this test is stale"; return 1; }
+
+    local f
+    for f in "$REPO_DIR/examples/claude-code/agents/sdd-design.md" \
+             "$REPO_DIR/examples/pi/agents/sdd-design.md"; do
+        assert_file_exists "$f" || return 1
+        local desc
+        desc=$(grep -m1 '^description:' "$f") || { echo "no description in $f"; return 1; }
+        # The contradictory phrasing: promises specs as an input with no optionality.
+        case "$desc" in
+            *"proposal and specs"*)
+                echo "$(basename "$(dirname "$(dirname "$f")")")/agents/sdd-design.md still reads 'proposal and specs' — spec must be described as optional"
+                return 1 ;;
+        esac
+        echo "$desc" | grep -qi 'optional' \
+            || { echo "$f description must state the spec is optional context"; return 1; }
+    done
+    return 0
+}
+
+test_dependency_graph_matches_canonical_dag() {
+    # The orchestrator prompt ships a drawing of the DAG. A drawing that implies design
+    # depends on spec contradicts the canonical declaration in sdd-phase-common.md, and the
+    # generated prompt is what the orchestrator actually reads.
+    local canonical="$REPO_DIR/skills/_shared/sdd-phase-common.md"
+    assert_file_exists "$canonical" || return 1
+    grep -q 'may run in parallel\|MAY run in parallel' "$canonical" \
+        || { echo "canonical DAG no longer declares the parallel branch — this test is stale"; return 1; }
+
+    local f="$REPO_DIR/examples/claude-code/CLAUDE.md"
+    assert_file_exists "$f" || return 1
+    # The old drawing pointed design's arrow into specs.
+    grep -q 'proposal -> specs' "$f" \
+        && { echo "CLAUDE.md still ships the ambiguous 'proposal -> specs' graph"; return 1; }
+    grep -qi 'optional' "$f" \
+        || { echo "CLAUDE.md dependency graph must state the spec/design optionality"; return 1; }
+    return 0
+}
+
 test_plugin_json_version_matches_version_file() {
     local f="$REPO_DIR/.claude-plugin/plugin.json"
     local version_file="$REPO_DIR/VERSION"
@@ -2479,6 +2623,12 @@ run_test "plugin.json is valid JSON" test_plugin_json_valid
 run_test "marketplace.json is valid JSON" test_marketplace_json_valid
 run_test "gemini-extension.json is valid JSON" test_gemini_extension_json_valid
 run_test "plugin.json version equals VERSION file" test_plugin_json_version_matches_version_file
+run_test "none artifact-store mode is fully removed" test_none_mode_fully_removed
+run_test ".kurama state survives the mode removal" test_kurama_state_survives_mode_removal
+run_test "absent change size resolves to standard" test_change_size_absent_means_standard
+run_test "small change collapses spec/design, never omits" test_small_change_collapses_without_omitting
+run_test "sdd-design description marks spec optional" test_sdd_design_description_marks_spec_optional
+run_test "dependency graph matches the canonical DAG" test_dependency_graph_matches_canonical_dag
 echo ""
 
 echo -e "${BOLD}Release commit stamping (V3–V6)${NC}"

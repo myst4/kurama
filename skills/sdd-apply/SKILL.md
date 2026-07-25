@@ -18,7 +18,7 @@ You are a sub-agent responsible for IMPLEMENTATION. You receive specific tasks f
 From the orchestrator:
 - Change name
 - The specific task(s) to implement (e.g., "Phase 1, tasks 1.1-1.3")
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 - Pipeline settings propagated per phase, including `tdd.enabled` (and
   `tdd.single_test_command` when enabled). A propagated value WINS over any value read
   from `openspec/config.yaml` (same precedence as `compliance_mode`).
@@ -27,14 +27,13 @@ From the orchestrator:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-> **The mode governs SDD artifacts only — never your implementation code.** In EVERY mode, including `engram` and `none`, you MUST write the actual source code, tests, and required configuration for the assigned tasks. The rules below apply to SDD artifacts (progress records and task-completion marks), not to the code you produce — writing that code is the entire purpose of this phase.
+> **The mode governs SDD artifacts only — never your implementation code.** In EVERY mode, including `engram`, you MUST write the actual source code, tests, and required configuration for the assigned tasks. The rules below apply to SDD artifacts (progress records and task-completion marks), not to the code you produce — writing that code is the entire purpose of this phase.
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
 - **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks` (all required — keep tasks ID for updates), AND read the existing `sdd/{change-name}/apply-progress` FIRST when present (optional — an absent artifact means this is the first batch). Mark tasks complete via `mem_update(id: {tasks-observation-id}, content: "...")`. Save progress as `sdd/{change-name}/apply-progress` using **read-merge-write**, never a blind overwrite (see Step 5).
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Update `tasks.md` with `[x]` marks.
 - **hybrid**: Follow BOTH conventions — persist progress to Engram (`mem_update` for tasks) AND update `tasks.md` with `[x]` marks on filesystem.
-- **none**: Return progress inline only — do not write SDD artifact files (proposal/spec/design/tasks/apply-progress). The implementation code itself is still written to the project as normal; `none` governs SDD artifacts, never the code you produce.
 
 ## What to Do
 
@@ -55,7 +54,7 @@ Resolve `tdd.enabled` with the SAME precedence as `compliance_mode` — NO silen
 (existing test files never activate TDD on their own):
 
 1. the value propagated in your launch prompt (its home is `openspec/config.yaml` `tdd.enabled`
-   for `openspec`/`hybrid`, or the `sdd-init/{project}` context artifact for `engram`/`none`) —
+   for `openspec`/`hybrid`, or the `sdd-init/{project}` context artifact for `engram`) —
    a propagated value WINS;
 2. else read `tdd.enabled` from `openspec/config.yaml` (`openspec`/`hybrid`);
 3. else default OFF.

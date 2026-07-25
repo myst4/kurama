@@ -70,7 +70,7 @@ Sub-agents are also instructed to save discoveries, decisions, and bug fixes to 
 **Why inline + shared:**
 - **Sub-agents fail multi-hop chains** — A 3-hop read chain (skill → convention file → actual instructions) breaks non-Claude models. Inlining the critical calls eliminates this.
 - **Deterministic recovery** — Engram artifact naming follows a strict `sdd/{change}/{type}` convention with `topic_key`, so any skill can reliably find artifacts created by other skills.
-- **Consistent mode behavior** — All skills resolve `engram | openspec | hybrid | none` the same way. `openspec` and `hybrid` are never chosen automatically.
+- **Consistent mode behavior** — All skills resolve `engram | openspec | hybrid` the same way. `openspec` and `hybrid` are never chosen automatically.
 
 ---
 
@@ -112,7 +112,7 @@ gate; `WARNING`/`SUGGESTION` are recorded once as `info`), sweep budget 1 (stand
 (4R), refuter verdicts with 2-of-3 voting in 4R, and max 2 fix rounds. The merged
 findings ledger persists per the artifact store (engram `topic_key
 sdd/{change-name}/review-ledger`, openspec `openspec/changes/{change}/review-ledger.md`,
-or inline in `none` mode).
+or in the `.kurama/sdd/` fallback when Engram is unavailable).
 
 ---
 

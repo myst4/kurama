@@ -38,7 +38,6 @@ You are an EXECUTOR for this phase, not the orchestrator. Do the initialization 
   (See `skills/_shared/engram-convention.md` for full naming conventions.)
 - If mode is `openspec`: Read and follow `skills/_shared/openspec-convention.md`. Run full bootstrap.
 - If mode is `hybrid`: Read and follow BOTH convention files. Run openspec bootstrap AND persist context to Engram.
-- If mode is `none`: Return detected context without writing project files. Exception: `.kurama/skill-registry.md` is harness infrastructure (not a project file), so it is still written in `none` mode — see Step 4.
 
 ## What to Do
 
@@ -235,7 +234,7 @@ Follow the same logic as the `skill-registry` skill (`skills/skill-registry/SKIL
 
 1. Scan user skills: glob `*/SKILL.md` across ALL known skill directories (they mirror the per-harness install targets in `skills/manifest.json`). **User-level**: `~/.claude/skills/`, `~/.config/opencode/skills/`, `~/.gemini/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`, `~/.copilot/skills/`, `~/.gemini/antigravity/skills/`, and the parent directory of this skill file (the catch-all — Kurama's own skills are co-located wherever it was installed, so this always covers the active harness target even if it is not in the explicit list). **Project-level**: `.claude/skills/`, `.config/opencode/skills/`, `.gemini/skills/`, `.codex/skills/`, `.cursor/skills/`, `.copilot/skills/`, `.gemini/antigravity/skills/`, `skills/`. Skip `sdd-*`, `_shared`, `skill-registry`. Deduplicate by name (project-level wins). Read frontmatter triggers.
 2. Scan project conventions: check for `agents.md`, `AGENTS.md`, `CLAUDE.md` (project-level), `.cursorrules`, `GEMINI.md`, `copilot-instructions.md` in the project root. If an index file is found (e.g., `agents.md`), READ it and extract all referenced file paths — include both the index and its referenced files in the registry.
-3. **ALWAYS write `.kurama/skill-registry.md`** in the project root (create `.kurama/` if needed). This file is harness infrastructure, NOT an SDD project artifact, so it is written in EVERY mode — including `none`. The persistence-mode gates that suppress project files (e.g. `openspec/`) never apply to `.kurama/`.
+3. **ALWAYS write `.kurama/skill-registry.md`** in the project root (create `.kurama/` if needed). This file is harness infrastructure, NOT an SDD project artifact, so it is written in EVERY mode. The persistence-mode gates that suppress project files (e.g. `openspec/`) never apply to `.kurama/`.
 4. If engram is available, **ALSO save to engram**: `mem_save(title: "skill-registry", topic_key: "skill-registry", type: "config", project: "{project}", capture_prompt: false, content: "{registry markdown}")` (`capture_prompt: false` — automated build output, not a human decision)
 
 See `skills/skill-registry/SKILL.md` for the full registry format and scanning details.
@@ -247,7 +246,7 @@ See `skills/skill-registry/SKILL.md` for the full registry format and scanning d
 **Pipeline settings are part of the persisted context.** SDD phases need a single home
 for the settings that steer the whole cycle:
 
-- `artifact_store.mode`: `engram | openspec | hybrid | none`
+- `artifact_store.mode`: `engram | openspec | hybrid`
 - `execution_mode`: `supervised | auto` (chosen in Step 1)
 - `compliance_mode`: `behavioral | static` (chosen in Step 1)
 - `test_command`, `build_command`, `coverage_threshold` (detected in Step 1)
@@ -259,7 +258,7 @@ for the settings that steer the whole cycle:
 Settings home per mode:
 - `openspec` / `hybrid`: `openspec/config.yaml` (written in Step 3) is the home; in
   `hybrid` the Engram context mirrors it.
-- `engram` / `none`: the `sdd-init/{project-name}` context artifact is the home — it
+- `engram`: the `sdd-init/{project-name}` context artifact is the home — it
   MUST carry the settings above (there is no `config.yaml`).
 
 **Propagation contract (the orchestrator honors this):** the orchestrator reads these
@@ -297,24 +296,24 @@ Phase-specific fields to surface in `detailed_report` (adapt wording to the mode
 
 - **Project**: {name}
 - **Stack**: {detected stack}
-- **Persistence**: {engram | openspec | hybrid | none}
+- **Persistence**: {engram | openspec | hybrid}
 - **Execution mode**: {supervised | auto} — {user's answer to the explicit question}
 - **Compliance mode**: {behavioral | static} — {test infra detected? one-line rationale}
 - **TDD**: {enabled | disabled} — {user's answer to the explicit question; single_test_command if enabled}
 - **Kanban**: {enabled | disabled} — {user's answer; when enabled: project_number + stage mapping + merge_method; when a `gh` prerequisite failed: which check and the fix command}
-- **Settings home**: `sdd-init/{project}` context artifact (engram/none) or `openspec/config.yaml` (openspec/hybrid)
+- **Settings home**: `sdd-init/{project}` context artifact (engram) or `openspec/config.yaml` (openspec/hybrid)
 - **Skill registry**: `.kurama/skill-registry.md` (+ Engram `skill-registry` when available)
 
 Populate the envelope fields per mode:
 
 - `artifacts`: what was written — for `openspec`/`hybrid`, `openspec/config.yaml` plus
   the created directories (and the Engram `sdd-init/{project}` observation for
-  `hybrid`); for `engram`, the Engram `sdd-init/{project}` observation ID; for `none`,
-  only `.kurama/skill-registry.md` (no project files — the `.kurama/` registry is harness
-  infrastructure, not a project artifact).
+  `hybrid`); for `engram`, the Engram `sdd-init/{project}` observation ID. Every mode also
+  writes `.kurama/skill-registry.md`, which is harness infrastructure rather than a project
+  artifact and is therefore never suppressed by a persistence mode.
 - `next_recommended`: `sdd-explore` (or `sdd-new` when the user already has a change name).
-- `risks`: include a note in `none` mode recommending `engram` or `openspec` so SDD
-  artifacts survive across sessions; when the user asked for Kanban but the module was
+- `risks`: when Engram was the resolved backend but was unavailable, note the degrade to the
+  `.kurama/sdd/` filesystem fallback; when the user asked for Kanban but the module was
   absent or a `gh` prerequisite check failed, note that `kanban.enabled` was recorded
   `false` and the exact command to fix it (re-run `/sdd-init` afterward); otherwise `None`.
 

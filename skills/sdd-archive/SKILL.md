@@ -17,7 +17,7 @@ You are a sub-agent responsible for ARCHIVING. You merge delta specs into the ma
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
@@ -26,7 +26,6 @@ From the orchestrator:
 - **engram**: Read `sdd/{change-name}/explore` (optional), `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks`, `sdd/{change-name}/verify-report` (all required). Merge the delta `spec` into the cross-change main specs `sdd-specs/{project}/{domain}` (Step 2). Record all observation IDs in the archive report for traceability. Save as `sdd/{change-name}/archive-report`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Perform merge and archive folder moves.
 - **hybrid**: Follow BOTH conventions — persist archive report to Engram (with observation IDs), upsert the merged main specs to `sdd-specs/{project}/{domain}` AND perform filesystem merge + archive folder moves.
-- **none**: Return closure summary only. Do not perform archive file operations.
 
 ### Missing required inputs (failure semantics)
 
@@ -34,6 +33,17 @@ Per E2: a REQUIRED upstream artifact that cannot be retrieved is a hard stop —
 - missing `verify-report` → see **Step 0** (blocked unless an explicit user-authorized override is passed).
 - missing delta `spec` → blocked; `next_recommended: sdd-spec` (there is nothing to merge into the source of truth).
 - missing `proposal`, `design`, or `tasks` → blocked; name it and set `next_recommended` to its producing phase (the archive is an audit trail and must be complete).
+
+**Small changes carry the delta spec inline.** Read the proposal's `## Change Size` section
+first (absent or unrecognized ⇒ `standard`). When the size is `small`, the delta spec and the
+design live in the proposal's `## Spec (inline)` and `## Design (inline)` sections rather than
+as separate artifacts — locate them there and merge the inline delta exactly as you would a
+standalone one. Do NOT block on a missing standalone `spec`/`design` for a `small` change.
+
+Do block when the inline spec is missing, empty, or carries no `### Requirement:` entries:
+`status: blocked`, `next_recommended: sdd-propose`. Merging a partial delta would write an
+incomplete requirement set into the main specs, which is worse than not archiving — the main
+specs are the source of truth and a silent partial merge is unrecoverable without git history.
 
 The exploration artifact (`explore` in engram, `exploration.md` in openspec) is OPTIONAL — if absent, note it in `risks` and continue; do NOT block.
 
@@ -47,7 +57,6 @@ BEFORE any merge or move, retrieve the verification report and gate on it. Archi
 - **engram**: `mem_search("sdd/{change-name}/verify-report")` → `mem_get_observation(id)`.
 - **openspec**: read `openspec/changes/{change-name}/verify-report.md`.
 - **hybrid**: read file-first (`openspec/changes/{change-name}/verify-report.md`), fall back to Engram if absent.
-- **none**: the orchestrator passes the verify verdict inline in your prompt.
 
 **Gate:**
 - If the verify report is MISSING (not found in any store / not provided) → return `status: blocked`, name the missing `verify-report`, set `next_recommended: sdd-verify`. Do NOT archive.
@@ -70,7 +79,7 @@ live_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
 rm -f "$tmp_index"
 ```
 
-- Read the RECORDED hash from the report's `Tree-Hash` line (openspec/hybrid). In `engram`/`none`
+- Read the RECORDED hash from the report's `Tree-Hash` line (openspec/hybrid). In `engram`
   mode the report is not on disk — read it from the `sdd/{change-name}/state` artifact (the
   orchestrator stamped `Reviewed-Tree` there) or from the value the orchestrator passed inline.
 - If `live_tree` ≠ the recorded hash → the code changed after verification → return
@@ -90,8 +99,6 @@ rm -f "$tmp_index"
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 2: Sync Delta Specs to Main Specs
-
-**IF mode is `none`:** Skip — no persisted specs to sync (report the merge summary inline).
 
 **IF mode is `engram`:** Merge the change's delta into the cross-change MAIN SPEC artifacts `sdd-specs/{project}/{domain}` (one per domain) — the engram equivalent of the filesystem merge below. This is what makes specs a living source of truth in engram mode; do NOT skip it. The delta `spec` artifact (`sdd/{change-name}/spec`) concatenates all domains under domain headers (`# Delta for {Domain}`). Split it by domain and, FOR EACH domain:
 
@@ -143,8 +150,6 @@ openspec/changes/{change-name}/specs/{domain}/spec.md
 
 **IF mode is `engram`:** Skip — there are no `openspec/` directories to move. The archive report in Engram serves as the audit trail.
 
-**IF mode is `none`:** Skip — no filesystem operations.
-
 **IF mode is `openspec` or `hybrid`:** Move the entire change folder to archive with date prefix:
 
 ```
@@ -163,8 +168,6 @@ Use today's date in ISO format (e.g., `2026-02-16`).
 - [ ] Active changes directory no longer has this change
 
 **IF mode is `engram`:** Confirm each affected `sdd-specs/{project}/{domain}` main spec was upserted, and all artifact observation IDs — including `explore` (if present) and `verify-report` — are recorded in the archive report.
-
-**IF mode is `none`:** Skip verification — no persisted artifacts.
 
 ### Step 5: Persist Archive Report
 

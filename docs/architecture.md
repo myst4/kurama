@@ -38,7 +38,7 @@ graph TB
         L2_Orch -->|"DAG phase"| L2_Verify
         L2_Orch -->|"DAG phase"| L2_Archive
 
-        L2_Store[("Pluggable Store<br/>engram | openspec | hybrid | none")]
+        L2_Store[("Pluggable Store<br/>engram | openspec | hybrid")]
         L2_Registry[("Skill Registry<br/>auto-discover coding skills<br/>+ project conventions")]
         L2_Spec -.->|"persist"| L2_Store
         L2_Design -.->|"persist"| L2_Store

@@ -18,7 +18,7 @@ You are a sub-agent responsible for creating PROPOSALS. You take the exploration
 From the orchestrator:
 - Change name (e.g., "add-dark-mode")
 - Exploration analysis (from sdd-explore) OR direct user description
-- Artifact store mode (`engram | openspec | hybrid | none`)
+- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
@@ -29,7 +29,6 @@ From the orchestrator:
 - **engram**: Read `sdd/{change-name}/explore` (optional) and `sdd-init/{project}` (optional). Save artifact as `sdd/{change-name}/proposal`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
-- **none**: Return result only. Never create or modify project files.
 - Never force `openspec/` creation unless user requested file-based persistence or mode is `hybrid`.
 
 ## What to Do
@@ -46,7 +45,7 @@ openspec/changes/{change-name}/
 └── proposal.md
 ```
 
-**IF mode is `engram` or `none`:** Do NOT create any `openspec/` directories. Skip this step.
+**IF mode is `engram`:** Do NOT create any `openspec/` directories. Skip this step.
 
 ### Step 3: Read Existing Specs
 
@@ -54,11 +53,39 @@ openspec/changes/{change-name}/
 
 **IF mode is `engram`:** Existing context was already retrieved from Engram in the Persistence Contract. Skip filesystem reads.
 
-**IF mode is `none`:** Skip — no existing specs to read.
+### Step 3b: Classify the Change Size
+
+Classify the change as `small` or `standard`. This is an explicit judgement you record with
+its rationale — **never a silent heuristic**, and never inferred from line counts alone.
+
+A change is `small` ONLY when **every** criterion below holds:
+
+1. it touches a single domain;
+2. it introduces no new or changed public contract (API surface, config schema, phase contract);
+3. it requires no data or configuration migration;
+4. it adds no new dependency;
+5. it does not modify a phase contract or the canonical DAG.
+
+If any criterion fails, or if you cannot resolve one from the available context, the size is
+`standard`. **Ambiguity always resolves to `standard`** — the long path is the safe default,
+and a change that turns out smaller than expected costs two extra documents, while one that
+turns out larger than expected reaches `apply` under-specified.
+
+Anything that edits a phase's SKILL.md contract or the DAG is `standard` by criterion 5,
+regardless of how few lines it touches.
+
+**What the classification changes**: for `small`, you write the spec and the design as
+sections INSIDE `proposal.md` (Step 4), and the orchestrator skips the separate `sdd-spec`
+and `sdd-design` delegations. The information is collapsed, never omitted — `sdd-tasks` and
+`sdd-archive` still receive everything they require, and the inline delta spec is what
+`sdd-archive` merges into the main specs.
 
 ### Step 4: Write proposal.md
 
 If the skill registry exposes a brainstorming-type skill, you MAY run it for the product-question round — optional, never required.
+
+Every proposal ends with a `## Change Size` section. A `small` proposal additionally carries
+`## Spec (inline)` and `## Design (inline)` — see the template after this one.
 
 ```markdown
 # Proposal: {Change Title}
@@ -108,6 +135,56 @@ Reference the recommended approach from exploration if available.}
 
 - [ ] {How do we know this change succeeded?}
 - [ ] {Measurable outcome}
+
+## Change Size
+
+**`small`** | **`standard`** — {state how each of the five criteria resolved; when
+`standard`, name the criterion that disqualified it or the ambiguity you could not resolve}
+```
+
+#### Additional sections for a `small` change
+
+When Step 3b classified the change as `small`, append these two sections. They replace the
+separate `sdd-spec` and `sdd-design` phases, so they carry the SAME content those phases
+would have produced — the same rigor in one document, not a lighter version of it.
+
+The inline spec MUST use the standalone delta-spec format verbatim (`# Delta for {Domain}`,
+`## ADDED/MODIFIED/REMOVED Requirements`, RFC 2119 keywords, `#### Scenario: [S-{req}-N]`
+with GIVEN/WHEN/THEN). `sdd-archive` merges this section into the main specs unchanged, so a
+malformed or empty spec here corrupts the source of truth — it MUST block instead.
+
+```markdown
+## Spec (inline)
+
+# Delta for {Domain}
+
+## ADDED Requirements
+
+### Requirement: {Requirement Name}
+
+The system {MUST/SHALL/SHOULD} {do something specific}.
+
+#### Scenario: [S-{req}-1] {Happy path}
+
+- GIVEN {precondition}
+- WHEN {action}
+- THEN {expected outcome}
+
+## Design (inline)
+
+### Architecture Decisions
+
+**{Decision}.** {What was chosen and the rationale — including what was rejected and why.}
+
+### File Changes
+
+| File | Change | Description |
+|------|--------|-------------|
+| `path/to/file.ext` | Create/Modify/Delete | {What changes and why} |
+
+### Testing Strategy
+
+{How each scenario above is verified.}
 ```
 
 ### Step 5: Persist Artifact
