@@ -28,7 +28,15 @@ This is the foundation of the **Skill Resolver Protocol** (see `_shared/skill-re
 
 1. Glob for `*/SKILL.md` files across ALL known skill directories. These mirror the
    per-harness install targets in `skills/manifest.json`. Check every path below — scan
-   ALL that exist, not just the first match:
+   ALL that exist, not just the first match.
+
+   **Scan EXACTLY one level deep**: a skill is `<skills-dir>/<skill-name>/SKILL.md` and
+   nothing deeper. Do NOT recurse with `**/SKILL.md`. Skill bundles often keep their source
+   checkout inside the skills directory (`<skills-dir>/<bundle>/` holding `.git`,
+   `package.json`, and per-skill `SKILL.md.tmpl` templates) alongside the rendered skills
+   installed flat at the top level. Recursing turns one skill into two entries — the
+   installed copy and its own template source — and the delegator then picks between them
+   arbitrarily, sometimes landing on a source copy that was never rendered.
 
    **User-level (global skills):**
    - `~/.claude/skills/` — Claude Code
@@ -55,12 +63,16 @@ This is the foundation of the **Skill Resolver Protocol** (see `_shared/skill-re
 
 2. **SKIP `sdd-*` and `_shared`** — those are SDD workflow skills, not coding/task skills
 3. Also **SKIP `skill-registry`** — that's this skill
-4. **Deduplicate** — if the same skill name appears in multiple locations, keep the project-level version (more specific). If both are user-level, keep the first found.
-5. For each skill found, read the **full SKILL.md** (if a SKILL.md exceeds 200 lines, focus on the frontmatter and Critical Patterns / Rules sections only) to extract:
+4. **SKIP bundle source checkouts** — a directory that holds `.git`, `package.json`, or
+   `SKILL.md.tmpl` is a bundle's source, not an installed skill. Skip the directory and
+   everything under it; the rendered skills it produced are already installed flat at the
+   top level. Only `SKILL.md` counts — never `SKILL.md.tmpl`.
+5. **Deduplicate by skill name** — if the same `name` appears in multiple locations, keep the project-level version (more specific). If both are user-level, keep the first found. Deduplicate on the frontmatter `name`, not on the path, so two paths for one skill collapse to a single row.
+6. For each skill found, read the **full SKILL.md** (if a SKILL.md exceeds 200 lines, focus on the frontmatter and Critical Patterns / Rules sections only) to extract:
    - `name` field (from frontmatter)
    - `description` field → extract the trigger text (after "Trigger:" in the description)
    - **Compact rules** — the actionable patterns and constraints (see Step 1b)
-6. Build a table of: Trigger | Skill Name | Full Path
+7. Build a table of: Trigger | Skill Name | Full Path
 
 ### Step 1b: Generate Compact Rules
 
@@ -178,7 +190,34 @@ mem_save(
 because the registry is an automated build output, not a human decision (see
 `_shared/engram-convention.md` → *Prompt Capture*).
 
-### Step 5: Return Summary
+### Step 5: Verify the Artifact Landed
+
+Do this BEFORE reporting anything. A registry that was never written fails silently in the
+worst direction: every later delegation hits the resolver's "no registry found" branch and
+proceeds WITHOUT project standards, so the damage shows up as sub-agents quietly ignoring
+conventions, not as an error.
+
+1. Read back `.kurama/skill-registry.md`. It MUST exist and contain the `## User Skills`
+   table with at least one row per skill you catalogued.
+2. Compare the row count against the number of skills you scanned. They MUST match.
+3. If the file is missing, empty, truncated, or short on rows, **do NOT report success**.
+   Return `status: blocked` naming what is missing:
+
+```markdown
+## Skill Registry — BLOCKED
+
+**Reason**: {file not written | truncated at N of M skills | unreadable}
+**Scanned**: {M} skills across {K} directories
+**Written**: {N} rows
+
+Re-run `skill-registry`. If the scan is too large for one pass, split it by directory and
+merge: each run appends its rows to the same file.
+```
+
+Reporting completion without this check is a protocol violation. "I finished" is not
+evidence — the file on disk is.
+
+### Step 6: Return Summary
 
 ```markdown
 ## Skill Registry Updated
@@ -206,8 +245,11 @@ To update after installing/removing skills, run this again.
 ## Rules
 
 - ALWAYS write `.kurama/skill-registry.md` regardless of any SDD persistence mode
+- ALWAYS verify the file landed before reporting success (Step 5); a missing registry degrades silently, so never report completion you have not read back from disk
 - ALWAYS save to engram if the `mem_save` tool is available
 - SKIP `sdd-*`, `_shared`, and `skill-registry` directories when scanning
+- SKIP bundle source checkouts (`.git` / `package.json` / `SKILL.md.tmpl` present) and scan exactly one level deep — never `**/SKILL.md`
+- When a scan is too large for one pass, split it BY DIRECTORY with disjoint explicit lists and merge into the same file — never let one agent carry more than it can finish
 - Read SKILL.md files (respecting the 200-line guard in Step 1) to generate accurate compact rules — this is a build-time cost, not a runtime cost
 - Compact rules MUST be 5-15 lines per skill — concise, actionable, no fluff
 - Include ALL convention index files found (not just the first)
