@@ -109,6 +109,60 @@ global_skills_path() {
     esac
 }
 
+# No receipt does not automatically mean "nothing installed". Kurama artifacts can
+# survive on disk with the receipt gone — a hand-moved skills dir, a partial
+# migration, an interrupted uninstall. That state is worse than a clean absence:
+# the agents and commands are still wired and still route work, but they reference
+# skill files that may no longer be there, and update.sh/uninstall.sh cannot manage
+# what no receipt records. Reporting "healthy" for it is a false green, so any
+# orphan found here is a failure with the exact paths to look at.
+check_orphans() {
+    local home found=false; home="$(home_dir)"
+    local agents_dir="$home/.claude/agents" cmds_dir="$home/.claude/commands"
+    local skills_dir; skills_dir="$(global_skills_path claude-code)"
+
+    # Kurama-owned native agents (sdd-* / jd-*) wired with no receipt behind them.
+    local orphan_agents=0 f base
+    if [ -d "$agents_dir" ]; then
+        for f in "$agents_dir"/sdd-*.md "$agents_dir"/jd-*.md; do
+            [ -f "$f" ] || continue
+            orphan_agents=$((orphan_agents + 1))
+        done
+    fi
+    if [ "$orphan_agents" -gt 0 ]; then
+        found=true
+        bad "$orphan_agents Kurama agent(s) in $agents_dir with no install receipt"
+        # The agents read their phase skill at launch; a missing skills dir means
+        # every delegation silently runs without its phase instructions.
+        if [ ! -d "$skills_dir/sdd-init" ]; then
+            bad "  agents reference $skills_dir/sdd-*/SKILL.md — that path does not exist"
+            for f in "$home"/.claude/skills-*backup*; do
+                [ -d "$f" ] || continue
+                bad "  skills appear to have been moved to $(basename "$f")"
+                break
+            done
+        fi
+    fi
+
+    if [ -d "$cmds_dir" ]; then
+        local orphan_cmds=0
+        for f in "$cmds_dir"/sdd-*.md; do
+            [ -f "$f" ] || continue
+            orphan_cmds=$((orphan_cmds + 1))
+        done
+        if [ "$orphan_cmds" -gt 0 ]; then
+            found=true
+            bad "$orphan_cmds Kurama command(s) in $cmds_dir with no install receipt"
+        fi
+    fi
+
+    if $found; then
+        note "Re-run setup.sh to reinstall and write a receipt, or remove the stale files by hand."
+    else
+        note "No Kurama artifacts on disk either — nothing is installed."
+    fi
+}
+
 global_prompt_path() {
     local agent="$1" home; home="$(home_dir)"
     case "$agent" in
@@ -444,7 +498,10 @@ else
         [ -n "$dir" ] || continue
         if [ -f "$dir/$INSTALL_MANIFEST_NAME" ]; then any=true; diagnose_target "$dir"; fi
     done
-    $any || note "No global install receipts found."
+    if ! $any; then
+        note "No global install receipts found."
+        check_orphans
+    fi
 fi
 
 check_tooling "$SCOPE"

@@ -2031,6 +2031,41 @@ test_doctor_broken_receipt_exit_nonzero() {
     return 0
 }
 
+test_doctor_orphaned_agents_exit_nonzero() {
+    # Artifacts on disk with the receipt gone (hand-moved skills dir, partial
+    # migration, interrupted uninstall). doctor must NOT call this healthy: the
+    # agents are still wired and still route work, but nothing manages them.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    bash "$SETUP_SCRIPT" --agent claude-code > /dev/null 2>&1
+    # Strip the receipt and move the skills aside, leaving agents + commands wired.
+    rm -f "$HOME/.claude/skills/.kurama-install-manifest.json"
+    mv "$HOME/.claude/skills" "$HOME/.claude/skills-gentle-backup-20260101000000"
+    local output
+    if output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" 2>&1); then
+        echo "doctor.sh must exit non-zero when Kurama agents exist with no receipt"
+        return 1
+    fi
+    echo "$output" | grep -qi 'no install receipt' \
+        || { echo "doctor.sh should name the orphaned agents"; return 1; }
+    echo "$output" | grep -qi 'does not exist' \
+        || { echo "doctor.sh should report the missing skills path the agents reference"; return 1; }
+    return 0
+}
+
+test_doctor_no_install_is_not_a_failure() {
+    # The clean case: no receipt AND no artifacts. That is absence, not breakage,
+    # so it must stay exit 0 — otherwise doctor cries wolf on a fresh machine.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    local output
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" 2>&1) \
+        || { echo "doctor.sh must exit 0 when nothing is installed"; return 1; }
+    echo "$output" | grep -qi 'nothing is installed' \
+        || { echo "doctor.sh should say nothing is installed"; return 1; }
+    return 0
+}
+
 test_doctor_project_scope_healthy() {
     local shim="$TEST_TMPDIR/doctorbin"
     make_doctor_shims "$shim"
@@ -2482,6 +2517,8 @@ echo -e "${BOLD}Phase 10b — doctor.sh health check (O7)${NC}"
 run_test "doctor is green on a healthy install (exit 0)" test_doctor_healthy_exit_zero
 run_test "doctor is red on a broken receipt (exit 1)" test_doctor_broken_receipt_exit_nonzero
 run_test "doctor is green on a healthy project install" test_doctor_project_scope_healthy
+run_test "doctor is red on orphaned agents (no receipt)" test_doctor_orphaned_agents_exit_nonzero
+run_test "doctor is green when nothing is installed" test_doctor_no_install_is_not_a_failure
 echo ""
 
 echo -e "${BOLD}Phase 10b — Engram persistence engine (O5, fake engram/brew/claude)${NC}"
