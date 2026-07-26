@@ -9,17 +9,29 @@ context: |
   contracts as SKILL.md files, scripts/ holds the installer lifecycle
   (setup/install/update/doctor/uninstall), examples/ holds per-harness generated
   configuration.
-  Architecture: a multi-harness SDD workflow. Nine phase skills form a DAG
-  (explore -> propose -> (spec || design) -> tasks -> apply -> verify -> archive)
-  declared once in skills/_shared/sdd-phase-common.md. Phases are EXECUTORS and
-  never delegate; only the meta skills (sdd-new, sdd-continue, sdd-ff) orchestrate.
-  Shared contracts live in skills/_shared/. Generated harness configs are built
-  from examples/_templates/ by scripts/build-examples.sh and must never be edited
-  directly.
-  Testing: scripts/install_test.sh, a self-contained bash suite (132 tests) that
+  Architecture: a multi-harness SDD workflow across 9 harnesses (claude-code,
+  opencode, omp, gemini-cli, codex, cursor, vscode, antigravity, pi). Nine phase
+  skills form a DAG (explore -> propose -> (spec || design) -> tasks -> apply ->
+  verify -> archive) declared once in skills/_shared/sdd-phase-common.md, which
+  also owns the Phase I/O table and the size-aware collapsed path. Phases are
+  EXECUTORS and never delegate; only the meta skills (sdd-new, sdd-continue,
+  sdd-ff) orchestrate. Shared contracts live in skills/_shared/ — notably
+  orchestrator-sdd-protocol.md (preflight, entry routing, auto gatekeeper) and
+  review-ledger-contract.md (lens selection triage), both loaded on demand to keep
+  the orchestrator prompt under its 24KB budget. Generated harness configs are
+  built from examples/_templates/ by scripts/build-examples.sh and must never be
+  edited directly; examples/{claude-code,pi,omp}/agents/ hold per-harness native
+  subagents whose frontmatter contracts are NOT interchangeable.
+  Stack agnosticism: the harness carries no language knowledge. Test and build
+  commands are ASKED at sdd-init and recorded in rules.verify — never detected —
+  and skills/_shared/test-runners.md is a suggestion table with no authority.
+  Per-language pattern skills live in the opt-in `lang` manifest group (OFF by
+  default).
+  Testing: scripts/install_test.sh, a self-contained bash suite (149 tests) that
   installs into a temp HOME with shimmed binaries and asserts on the result.
   scripts/validate_skills.sh is a structural linter for skill frontmatter and
-  packaging manifests.
+  packaging manifests. CI runs both on ubuntu-latest AND macos-latest, plus
+  shellcheck and an examples-drift check.
   Style: shellcheck-clean scripts (CI runs shellcheck scripts/*.sh); atomic writes
   and timestamped backups in the installers; every installed file recorded in a
   receipt (.kurama-install-manifest.json) so update and uninstall are exact.
