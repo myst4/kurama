@@ -39,4 +39,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec`, `none`, and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+The memory tools above (`memory_search`, `memory_get`, `memory_add`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).

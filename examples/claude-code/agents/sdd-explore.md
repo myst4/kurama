@@ -28,4 +28,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools in the `tools:` line (`mem_search`, `mem_get_observation`, `mem_save`) follow this repo's bare-name convention for the Engram MCP backend. If your environment namespaces them (e.g. `mcp__engram__mem_save`) or uses a different memory MCP, adjust the `tools:` line to match. `openspec`, `none`, and degraded-`engram` (filesystem fallback) modes use only the built-in file tools.
+The memory tools in the `tools:` line (`mem_search`, `mem_get_observation`, `mem_save`) follow this repo's bare-name convention for the Engram MCP backend. If your environment namespaces them (e.g. `mcp__engram__mem_save`) or uses a different memory MCP, adjust the `tools:` line to match. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools.

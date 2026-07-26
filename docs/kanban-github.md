@@ -219,14 +219,14 @@ Two independent things, easy to conflate:
   `optional` manifest group, **installed by default** — `setup.sh`/`install.sh` (and
   their PowerShell equivalents) include it in the default set. Remove it with
   `--without optional` if you never want the module on disk (this also removes the
-  `go-testing` plugin, the other member of the group).
+  it is now the only member of the group — `go-testing` moved to the opt-in `lang` group).
 - **Activating the board** turns board sync on for a *specific project* via the
   explicit `kanban.enabled` flag, and requires a configured `gh`. Installing the
   module never activates it; the flag starts `false` everywhere, and no project state
   ever flips it on.
 
 ```bash
-./scripts/install.sh --without optional   # bash — exclude go-testing + kanban from disk
+./scripts/install.sh --without optional   # bash — exclude the kanban module from disk
 ```
 
 ```powershell

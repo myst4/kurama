@@ -28,7 +28,7 @@ REQUIRED_GROUPS=" sdd-core "
 
 # Every group name the flags accept (default-on ones plus opt-in ones). Kept in
 # sync with skills/manifest.json "groups"; drives validation + the rebuild loop.
-KNOWN_GROUPS="sdd-core quality review optional tdd"
+KNOWN_GROUPS="sdd-core quality review optional tdd lang"
 
 # Populated from the manifest once flags are parsed (see compute_active_skills).
 ACTIVE_SKILLS=()
@@ -217,7 +217,7 @@ show_help() {
     echo "Options:"
     echo "  --agent NAME     Install for a specific agent (non-interactive)"
     echo "  --path DIR       Custom install path (use with --agent custom)"
-    echo "  --with GROUP     Include an optional skill group (quality, review, optional, tdd)"
+    echo "  --with GROUP     Include an optional skill group (quality, review, optional, tdd, lang)"
     echo "  --without GROUP  Exclude an optional skill group (quality, review, optional, tdd)"
     echo "  --version        Print the Kurama version and exit"
     echo "  -h, --help       Show this help"
@@ -228,7 +228,8 @@ show_help() {
     echo "  sdd-core   Core SDD pipeline + authoring utilities (always installed)"
     echo "  quality    Adversarial review skills, e.g. judgment-day (on by default; --without quality to skip)"
     echo "  review     4R review lenses + refuter, e.g. review-risk (on by default; --without review to skip)"
-    echo "  optional   Language/testing skills, e.g. go-testing (on by default; --without optional to skip)"
+    echo "  optional   Optional modules, e.g. kanban-github (on by default; --without optional to skip)"
+    echo "  lang       Per-language pattern skills, e.g. go-testing (OFF by default; --with lang to include)"
     echo "  tdd        TDD module (RED-GREEN-REFACTOR), skills/tdd (on by default; --without tdd to skip)"
 }
 
@@ -301,9 +302,9 @@ group_is_active() {
 
 validate_group_name() {
     case "$1" in
-        sdd-core|quality|review|optional|tdd) return 0 ;;
+        sdd-core|quality|review|optional|tdd|lang) return 0 ;;
         *)
-            print_error "Unknown skill group: $1 (valid: quality, review, optional, tdd)"
+            print_error "Unknown skill group: $1 (valid: quality, review, optional, tdd, lang)"
             exit 1
             ;;
     esac

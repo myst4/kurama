@@ -156,7 +156,7 @@ Two independent things, easy to conflate:
   [skills/manifest.json](../skills/manifest.json) is now **installed by default** —
   `setup.sh`/`setup.ps1` and `install.sh`/`install.ps1` all include it in the
   default set. Remove it with `--without tdd` if you never want the module on disk.
-  (The language-pattern plugins like `go-testing` live in the separate `optional`
+  (The language-pattern plugins like `go-testing` live in the separate opt-in `lang`
   group.)
 - **Activating TDD** turns the RED → GREEN → REFACTOR cycle on for a *specific
   project* via the explicit `tdd.enabled` flag above. Installing the module never

@@ -19,52 +19,151 @@
       "required": false
     },
     "optional": {
-      "description": "Optional language/testing skills plus the GitHub Projects kanban-github module. Installed by default; opt out with --without optional. Installing the kanban-github module does not activate the board — activation stays opt-in per project via kanban.enabled.",
+      "description": "Optional language/testing skills plus the GitHub Projects kanban-github module. Installed by default; opt out with --without optional. Installing the kanban-github module does not activate the board \u2014 activation stays opt-in per project via kanban.enabled.",
       "default": true,
       "required": false
     },
     "tdd": {
-      "description": "TDD module: the RED-GREEN-REFACTOR protocol skill (skills/tdd). Installed by default; opt out with --without tdd. Installing the module does not activate TDD — activation stays opt-in per project (a project can start without tests and add them later).",
+      "description": "TDD module: the RED-GREEN-REFACTOR protocol skill (skills/tdd). Installed by default; opt out with --without tdd. Installing the module does not activate TDD \u2014 activation stays opt-in per project (a project can start without tests and add them later).",
       "default": true,
+      "required": false
+    },
+    "lang": {
+      "description": "Per-language coding/testing pattern skills. OFF by default \u2014 Kurama is stack-agnostic and carries no language knowledge in a default install; opt in with --with lang, or install your own language skills where the skill registry finds them.",
+      "default": false,
       "required": false
     }
   },
   "skills": [
-    { "name": "sdd-explore", "group": "sdd-core" },
-    { "name": "sdd-propose", "group": "sdd-core" },
-    { "name": "sdd-spec", "group": "sdd-core" },
-    { "name": "sdd-design", "group": "sdd-core" },
-    { "name": "sdd-tasks", "group": "sdd-core" },
-    { "name": "sdd-apply", "group": "sdd-core" },
-    { "name": "sdd-verify", "group": "sdd-core" },
-    { "name": "sdd-archive", "group": "sdd-core" },
-    { "name": "sdd-init", "group": "sdd-core" },
-    { "name": "sdd-new", "group": "sdd-core" },
-    { "name": "sdd-continue", "group": "sdd-core" },
-    { "name": "sdd-ff", "group": "sdd-core" },
-    { "name": "skill-registry", "group": "sdd-core" },
-    { "name": "skill-creator", "group": "sdd-core" },
-    { "name": "branch-pr", "group": "sdd-core" },
-    { "name": "issue-creation", "group": "sdd-core" },
-    { "name": "judgment-day", "group": "quality" },
-    { "name": "review-risk", "group": "review" },
-    { "name": "review-readability", "group": "review" },
-    { "name": "review-reliability", "group": "review" },
-    { "name": "review-resilience", "group": "review" },
-    { "name": "review-refuter", "group": "review" },
-    { "name": "go-testing", "group": "optional" },
-    { "name": "kanban-github", "group": "optional" },
-    { "name": "tdd", "group": "tdd" }
+    {
+      "name": "sdd-explore",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-propose",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-spec",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-design",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-tasks",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-apply",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-verify",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-archive",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-init",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-new",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-continue",
+      "group": "sdd-core"
+    },
+    {
+      "name": "sdd-ff",
+      "group": "sdd-core"
+    },
+    {
+      "name": "skill-registry",
+      "group": "sdd-core"
+    },
+    {
+      "name": "skill-creator",
+      "group": "sdd-core"
+    },
+    {
+      "name": "branch-pr",
+      "group": "sdd-core"
+    },
+    {
+      "name": "issue-creation",
+      "group": "sdd-core"
+    },
+    {
+      "name": "judgment-day",
+      "group": "quality"
+    },
+    {
+      "name": "review-risk",
+      "group": "review"
+    },
+    {
+      "name": "review-readability",
+      "group": "review"
+    },
+    {
+      "name": "review-reliability",
+      "group": "review"
+    },
+    {
+      "name": "review-resilience",
+      "group": "review"
+    },
+    {
+      "name": "review-refuter",
+      "group": "review"
+    },
+    {
+      "name": "go-testing",
+      "group": "lang"
+    },
+    {
+      "name": "kanban-github",
+      "group": "optional"
+    },
+    {
+      "name": "tdd",
+      "group": "tdd"
+    }
   ],
   "targets": {
-    "claude-code": { "skills": ".claude/skills" },
-    "opencode": { "skills": ".config/opencode/skills", "commands": ".config/opencode/commands" },
-    "gemini-cli": { "skills": ".gemini/skills" },
-    "codex": { "skills": ".codex/skills" },
-    "vscode": { "skills": ".copilot/skills" },
-    "antigravity": { "skills": ".gemini/antigravity/skills" },
-    "cursor": { "skills": ".cursor/skills" },
-    "pi": { "skills": ".pi/agent/skills" },
-    "project-local": { "skills": "skills" }
+    "claude-code": {
+      "skills": ".claude/skills"
+    },
+    "opencode": {
+      "skills": ".config/opencode/skills",
+      "commands": ".config/opencode/commands"
+    },
+    "gemini-cli": {
+      "skills": ".gemini/skills"
+    },
+    "codex": {
+      "skills": ".codex/skills"
+    },
+    "vscode": {
+      "skills": ".copilot/skills"
+    },
+    "antigravity": {
+      "skills": ".gemini/antigravity/skills"
+    },
+    "cursor": {
+      "skills": ".cursor/skills"
+    },
+    "pi": {
+      "skills": ".pi/agent/skills"
+    },
+    "project-local": {
+      "skills": "skills"
+    }
   }
 }

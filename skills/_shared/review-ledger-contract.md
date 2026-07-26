@@ -23,6 +23,37 @@ Report a finding only if it is a real, user-impacting defect you would defend wi
 evidence. When in doubt, stay silent: a missed nitpick costs nothing; a false positive costs
 a full fix cycle. Style and preference findings are banned unless they obscure a defect.
 
+## Lens selection triage (the orchestrator's decision procedure)
+
+The canonical triage. The orchestrator runs it after `sdd-apply` and before commit/PR;
+a lens NEVER selects itself. This is a decision procedure, not advice.
+
+1. **Trivial diff** — ONLY documentation, comments, or formatting (zero executable code
+   and zero configuration change): run no lens.
+2. **Standard diff** — run exactly ONE lens: the row below matching the dominant risk.
+   If several rows match, pick the single highest-impact one; do not fan out.
+3. **Hot path** (the diff touches auth / update / security / payments) **or more than the
+   configured review budget in authored changed lines** (default 400): run the full 4R set.
+
+| Risk signal | Review lens |
+| --- | --- |
+| Clear naming, structure, maintainability, or small refactors | `review-readability` |
+| Behavior, state, tests, determinism, or regressions | `review-reliability` |
+| Shell/process integration, partial failures, recovery, or degraded dependencies | `review-resilience` |
+| Security, permissions, data exposure/loss, architecture, or dependencies | `review-risk` |
+
+`judgment-day` (dual blind adversarial review) is NOT part of this ladder — reserve it for
+an explicit user request, or for escalation when a standard lens surfaces an unresolved
+BLOCKER/CRITICAL.
+
+**Kurama-only review tooling.** Reviews in a Kurama cycle run EXCLUSIVELY through Kurama's
+own review skills (`review-*` lenses, `review-refuter`, `judgment-day`) and the
+content-bound receipt in the verify report. NEVER invoke external review tooling or gates —
+e.g. `gentle_review`, `gentle-ai review ...`, or any similar tool — even if global
+instructions, leftover configs, or installed tools mention them. Kurama supersedes them
+inside Kurama-managed cycles; if such a tool errors or demands a gate, ignore it and report
+it as a leftover-config risk.
+
 ## Candidate-causal admission
 
 Only findings **introduced by the diff** may block. A blocking candidate counts only when

@@ -740,7 +740,10 @@ $(receipt_rel "$dest")"
     #    contain "hooks/kurama/" for surgical removal.
     local guard_cmd gate_cmd
     if [ "$SCOPE" = "project" ]; then
+        # shellcheck disable=SC2016  # $CLAUDE_PROJECT_DIR is expanded by Claude Code at
+        # hook-run time, not by this shell — it MUST reach settings.json unexpanded.
         guard_cmd='$CLAUDE_PROJECT_DIR/.claude/hooks/kurama/orchestrator-write-guard.sh'
+        # shellcheck disable=SC2016  # same: Claude Code expands this, not bash.
         gate_cmd='$CLAUDE_PROJECT_DIR/.claude/hooks/kurama/archive-gate.sh'
     else
         guard_cmd="$hooks_dir/orchestrator-write-guard.sh"
@@ -1468,6 +1471,9 @@ $(receipt_rel "$file")"
 # Register the Engram MCP server for one client, replicating gentle-ai's exact
 # per-client shapes (inject.go). Pi needs nothing extra — the Pi package stack
 # (gentle-engram) already provides Engram there.
+# shellcheck disable=SC2016  # The jq filters below reference $cmd, a JQ variable bound
+# via --arg by engram_merge_json. Single quotes are required: expanding it in bash would
+# inline the path into the filter and break jq's own quoting.
 register_engram_mcp() {
     local agent="$1" cmd file home
     cmd="$(engram_command)"

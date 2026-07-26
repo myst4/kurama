@@ -26,9 +26,9 @@ param(
                  'antigravity', 'cursor', 'pi', 'project-local', 'all-global', 'custom')]
     [string]$Agent,
     [string]$Path,
-    [ValidateSet('quality', 'review', 'optional', 'tdd')]
+    [ValidateSet('quality', 'review', 'optional', 'tdd', 'lang')]
     [string[]]$Without,
-    [ValidateSet('quality', 'review', 'optional', 'tdd')]
+    [ValidateSet('quality', 'review', 'optional', 'tdd', 'lang')]
     [string[]]$With,
     [switch]$Version,
     [switch]$Help
@@ -132,7 +132,7 @@ function Show-Usage {
     Write-Host 'Options:'
     Write-Host '  -Agent NAME      Install for a specific agent (non-interactive)'
     Write-Host '  -Path DIR        Custom install path (use with -Agent custom)'
-    Write-Host '  -With GROUP      Include an optional skill group (quality, review, optional, tdd)'
+    Write-Host '  -With GROUP      Include an optional skill group (quality, review, optional, tdd, lang)'
     Write-Host '  -Without GROUP   Exclude an optional skill group (quality, review, optional, tdd)'
     Write-Host '  -Version         Print the Kurama version and exit'
     Write-Host '  -Help            Show this help'
@@ -143,7 +143,8 @@ function Show-Usage {
     Write-Host '  sdd-core   Core SDD pipeline + authoring utilities (always installed)'
     Write-Host '  quality    Adversarial review skills, e.g. judgment-day (on by default; -Without quality to skip)'
     Write-Host '  review     4R review lenses + refuter, e.g. review-risk (on by default; -Without review to skip)'
-    Write-Host '  optional   Language/testing skills, e.g. go-testing (on by default; -Without optional to skip)'
+    Write-Host '  optional   Optional modules, e.g. kanban-github (on by default; -Without optional to skip)'
+    Write-Host '  lang       Per-language pattern skills, e.g. go-testing (OFF by default; -With lang to include)'
     Write-Host '  tdd        TDD module (RED-GREEN-REFACTOR), skills/tdd (on by default; -Without tdd to skip)'
 }
 
@@ -181,10 +182,10 @@ function Get-ManifestSkills {
 }
 
 function Resolve-ActiveGroups {
-    # sdd-core is always active; quality/review/optional/tdd are all on by default.
+    # sdd-core is always active; quality/review/optional/tdd are on by default; lang is opt-in.
     # Installing the tdd module does NOT activate TDD — activation stays opt-in per
     # project. Toggles restricted by ValidateSet.
-    $active = @{ 'sdd-core' = $true; 'quality' = $true; 'review' = $true; 'optional' = $true; 'tdd' = $true }
+    $active = @{ 'sdd-core' = $true; 'quality' = $true; 'review' = $true; 'optional' = $true; 'tdd' = $true; 'lang' = $false }
     foreach ($g in $Without) { $active.Remove($g) }
     foreach ($g in $With) { $active[$g] = $true }
     return $active

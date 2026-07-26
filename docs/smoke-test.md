@@ -30,8 +30,9 @@ your harness and inspect the artifacts, envelopes, and gates yourself.
   harness (adapt the invocation to your host).
 - `git` and a shell.
 - **Node 18+** for the toy project below (its test runner is `node --test`, zero
-  dependencies). Any project with a runner `sdd-verify` can detect works — swap in
-  Go (`go.mod` → `go test ./...`) or pytest if you prefer; the detection table is
+  dependencies). Any project works — swap in Go, Ruby, pytest, or anything else: the test
+  and build commands are **asked at `/sdd-init`**, not detected, so no stack is privileged.
+  Suggested defaults for common ecosystems live in
   [`skills/_shared/test-runners.md`](../skills/_shared/test-runners.md).
 - **Engram pass only**: the `engram` binary on `PATH` and its MCP registered for
   your client (see the Engram section of [installation.md](installation.md)).
@@ -113,13 +114,23 @@ sequential ones), and does not re-appear on later phases this session.
 
 ### Step 1 — `/sdd-init`
 
-Detects the stack and conventions and bootstraps the backend. It asks explicit
+Reads the stack and conventions and bootstraps the backend. It asks explicit
 questions — answer them:
 
+- **Test command?** → `npm test` (it should offer this as a pre-filled default, since
+  `package.json` declares a `test` script — confirm it).
+- **Build/type-check command?** → *leave blank*. This toy project has no build step, and
+  an empty answer is a VALID answer meaning "none" — verify it is recorded as empty
+  rather than replaced with a guess like `npm run build`.
 - **Enable TDD?** → *No* (keeps the cycle short; TDD has its own coverage elsewhere).
 - **Execution mode?** → *supervised*.
 - **Enable Kanban board sync?** → *No* (unless you are running the optional Kanban
   check below).
+
+To prove the harness is genuinely stack-agnostic, run one pass in a project whose
+ecosystem is absent from the suggestion table. `sdd-init` must ask with no pre-filled
+default and the cycle must complete normally — an unfamiliar stack is a normal case, not
+a degraded one.
 
 ✅ **Verify**:
 - Return envelope: `status: success`, `skill_resolution: none` (init *builds* the
@@ -295,6 +306,55 @@ deterministic gates fail *closed*.
    verdict and stale-receipt gates — confirm it only bypasses the mechanism and that
    `sdd-archive` still records the override reason in the archive report. Never
    self-authorize this.
+
+4. **A `small` change with an empty inline spec is refused.** Classify a change `small`
+   but leave `## Spec (inline)` with no `### Requirement:` under it, then attempt archive.
+   It must block with `next_recommended: sdd-propose` — a partial delta merged into the
+   source of truth is worse than no archive at all.
+
+5. **A proposal with no `## Change Size` runs the long path.** Every change created before
+   the size field existed lacks the section. No phase may fail on it, and it must resolve
+   to `standard` — never guessed as `small`, which would silently strip two planning
+   phases from in-flight work.
+
+---
+
+## Optional — the `small` collapsed path
+
+The cycle above walks a `standard` change: six artifacts, seven phases. A `small` change
+collapses the spec and design into the proposal and runs
+`explore → propose → tasks → apply → verify → archive` — **3 artifacts instead of 6**.
+Worth one pass, because the collapse is where `tasks` and `archive` could deadlock.
+
+Drive the same `add-sum` change, but at Step 2 confirm the proposal classified itself
+`small`. It qualifies on all five criteria: single domain, no changed public contract, no
+migration, no new dependency, no phase-contract or DAG change.
+
+✅ **Verify**:
+
+- The proposal carries `## Change Size` reading **`small`** with a per-criterion
+  rationale, plus `## Spec (inline)` and `## Design (inline)` sections. The inline spec
+  uses the standalone delta format verbatim (`# Delta for {Domain}`,
+  `## ADDED Requirements`, RFC 2119, `#### Scenario: [S-{req}-N]` with GIVEN/WHEN/THEN).
+- **`/sdd-ff` skips `spec` and `design`.** No standalone `spec.md` or `design.md` is
+  produced, and no phase blocks for their absence:
+  ```bash
+  ls openspec/changes/add-sum/     # proposal.md and tasks.md only
+  ```
+- **`sdd-tasks` succeeded on collapsed inputs** — every scenario ID from the inline spec
+  appears in `tasks.md`. This is the first place a naive "skip" implementation deadlocks.
+- **`sdd-archive` merged the INLINE delta** into `openspec/specs/<domain>/spec.md`. This
+  is the second deadlock point, and the one that matters most: if the inline delta does
+  not reach the main specs, the cycle completed without advancing the source of truth.
+  ```bash
+  grep -c '^#### Scenario:' openspec/specs/arithmetic/spec.md   # scenarios merged
+  ls openspec/changes/archive/*/                                # 3 artifacts + archive-report
+  ```
+- The archive report names the delta's source as the proposal's inline section, so the
+  collapse is auditable after the fact.
+
+A `standard` change must behave **exactly** as before — the collapsed path is additive,
+and ambiguity always resolves to `standard`.
 
 ---
 

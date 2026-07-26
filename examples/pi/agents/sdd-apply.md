@@ -33,7 +33,7 @@ Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/
 
 ## The mode governs SDD artifacts, never your code
 
-In EVERY mode — including `engram` and `none` — you MUST write the actual source code, tests, and required configuration for the assigned tasks. The artifact-store mode only decides where SDD artifacts (progress records, task marks) live; it never restricts the implementation code you produce.
+In EVERY mode — including `engram` — you MUST write the actual source code, tests, and required configuration for the assigned tasks. The artifact-store mode only decides where SDD artifacts (progress records, task marks) live; it never restricts the implementation code you produce.
 
 ## Settings & TDD propagation
 
@@ -45,4 +45,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`, `memory_update`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec`, `none`, and degraded-`engram` (filesystem fallback) modes use only the built-in file tools for SDD artifacts (implementation code is always written regardless). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+The memory tools above (`memory_search`, `memory_get`, `memory_add`, `memory_update`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools for SDD artifacts (implementation code is always written regardless). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
