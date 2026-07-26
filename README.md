@@ -4,7 +4,7 @@
 
 **A lightweight, multi-harness Spec-Driven Development framework for AI coding agents.**
 
-24 pure-Markdown skills · 8 supported harnesses · zero runtime, zero dependencies
+24 pure-Markdown skills · 9 supported harnesses · zero runtime, zero dependencies
 
 </div>
 
@@ -23,7 +23,7 @@ specify, design, implement, and verify a change.
 
 Everything is plain Markdown following the open
 [Agent Skills](https://agentskills.io) format, so the same skill set installs
-across **8 harnesses**: Claude Code, OpenCode, Gemini CLI, Codex, Cursor,
+across **9 harnesses**: Claude Code, OpenCode, omp, Gemini CLI, Codex, Cursor,
 VS Code Copilot, Antigravity, and Pi. There is no binary to install and nothing to
 compile — copy the skills, wire the orchestrator prompt, and run `/sdd-init`.
 
@@ -240,6 +240,7 @@ exposes. "Full" means true sub-agents with isolated, fresh context windows.
 | VS Code Copilot | Inline (agent mode with tool use) | `setup.sh --agent vscode` |
 | Antigravity | Single-agent | Manual (see installation guide) |
 | Pi | Inline (skills load as instructions) | `setup.sh --agent pi` (global `~/.pi/agent/AGENTS.md`; see installation guide) |
+| omp | Full (native task agents, isolated per-phase contexts) | `setup.sh --agent omp` (global `~/.omp/agent/`; see installation guide) |
 
 Harness-specific extras land through the same setup command. On **Claude Code**,
 `setup.sh --agent claude-code` also installs all **17 native subagents** (the 9 SDD
@@ -251,8 +252,14 @@ merged into `settings.json`). On **Pi**, `setup.sh --agent pi` installs the **sa
 17 agents** in Pi's format into `~/.pi/agent/agents/`, and can optionally add a
 curated, consent-gated stack of Pi runtime packages (persistent memory, MCP adapter,
 native subagents, ask-user, web access, todo, side-conversations) at pinned versions
-— it never installs the rival `gentle-pi` harness. All are detailed in
-[docs/installation.md](docs/installation.md).
+— it never installs the rival `gentle-pi` harness. On **omp**, `setup.sh --agent omp`
+installs the **same 17 agents** in omp's task-agent format into `~/.omp/agent/agents/`
+plus a `RULES.md` sticky-rule file — omp re-attaches always-apply rules near the current
+turn, so the orchestrator's hard invariants survive a long conversation. The omp agent set
+is **not interchangeable** with the Claude or Pi ones: omp deliberately skips
+cross-harness agent roots whose frontmatter is not its task-agent contract, so installing
+the wrong format would leave the agents silently invisible and the cycle degraded to
+inline. All are detailed in [docs/installation.md](docs/installation.md).
 
 ## Documentation
 

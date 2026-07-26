@@ -185,6 +185,7 @@ detect_agents() {
     check_agent "vscode"      "code"
     check_agent "codex"       "codex"
     check_agent "pi"          "pi"
+    check_agent "omp"         "omp"
 
     echo ""
     if [[ ${#DETECTED_AGENTS[@]} -eq 0 ]]; then
@@ -222,7 +223,19 @@ get_skills_path() {
         vscode)       echo "$home/.copilot/skills" ;;
         codex)        echo "$home/.codex/skills" ;;
         pi)           echo "$home/.pi/agent/skills" ;;
+        omp)          echo "$(omp_agent_base)/skills" ;;
     esac
+}
+
+# omp resolves its user base from PI_CODING_AGENT_DIR when set, else ~/.omp/agent
+# (see omp's context-files docs). Every omp path in this script goes through here so
+# a relocated base stays consistent across skills, prompt, agents, and the receipt.
+omp_agent_base() {
+    if [[ -n "${PI_CODING_AGENT_DIR:-}" ]]; then
+        echo "$PI_CODING_AGENT_DIR"
+    else
+        echo "$(home_dir)/.omp/agent"
+    fi
 }
 
 get_prompt_path() {
@@ -246,6 +259,7 @@ get_prompt_path() {
             ;;
         codex)        echo "$home/.codex/agents.md" ;;
         pi)           echo "$home/.pi/agent/AGENTS.md" ;;
+        omp)          echo "$(omp_agent_base)/AGENTS.md" ;;
     esac
 }
 
@@ -259,6 +273,7 @@ get_example_file() {
         vscode)       echo "$EXAMPLES_DIR/vscode/copilot-instructions.md" ;;
         codex)        echo "$EXAMPLES_DIR/codex/agents.md" ;;
         pi)           echo "$EXAMPLES_DIR/pi/AGENTS.md" ;;
+        omp)          echo "$EXAMPLES_DIR/omp/AGENTS.md" ;;
     esac
 }
 
@@ -272,6 +287,7 @@ get_example_file() {
 #   claude-code → <repo>/.claude/{skills,agents,hooks}, <repo>/CLAUDE.md,
 #                 <repo>/.claude/settings.json
 #   pi          → <repo>/.pi/{skills,agents}, <repo>/AGENTS.md
+#   omp         → <repo>/.omp/{skills,agents}, <repo>/.omp/AGENTS.md
 #   other       → <repo>/.claude/skills, <repo>/CLAUDE.md (best-effort parity)
 #
 # The install receipt lives in RECEIPT_DIR: the skills dir for global (unchanged),
@@ -284,6 +300,7 @@ scoped_skills_path() {
     if [ "$SCOPE" = "project" ]; then
         case "$agent" in
             pi)  echo "$TARGET_PATH/.pi/skills" ;;
+            omp) echo "$TARGET_PATH/.omp/skills" ;;
             *)   echo "$TARGET_PATH/.claude/skills" ;;
         esac
     else
@@ -291,17 +308,19 @@ scoped_skills_path() {
     fi
 }
 
-# Native-agents directory for the current scope (claude-code + pi only).
+# Native-agents directory for the current scope (claude-code, pi, and omp).
 scoped_agents_path() {
     local agent="$1"
     if [ "$SCOPE" = "project" ]; then
         case "$agent" in
             pi)  echo "$TARGET_PATH/.pi/agents" ;;
+            omp) echo "$TARGET_PATH/.omp/agents" ;;
             *)   echo "$TARGET_PATH/.claude/agents" ;;
         esac
     else
         case "$agent" in
             pi)  echo "$(home_dir)/.pi/agent/agents" ;;
+            omp) echo "$(omp_agent_base)/agents" ;;
             *)   echo "$(dirname "$(get_skills_path "$agent")")/agents" ;;
         esac
     fi
@@ -314,6 +333,9 @@ scoped_prompt_path() {
         case "$agent" in
             pi)        echo "$TARGET_PATH/AGENTS.md" ;;
             opencode)  echo "$TARGET_PATH/AGENTS.md" ;;
+            # omp's native provider reads the nearest non-empty .omp/AGENTS.md and has
+            # the highest discovery priority, so it beats a standalone AGENTS.md.
+            omp)       echo "$TARGET_PATH/.omp/AGENTS.md" ;;
             *)         echo "$TARGET_PATH/CLAUDE.md" ;;
         esac
     else
@@ -607,14 +629,20 @@ $(receipt_rel "$target_dir/$skill_name/SKILL.md")"
         exit 1
     fi
 
-    # Native subagents. claude-code ships Claude-format agents; pi ships the
-    # Pi-format agents (O4 wiring — the brother authored examples/pi/agents/*.md).
+    # Native subagents. Each harness has its own frontmatter contract, so the
+    # agent sets are NOT interchangeable: claude-code ships Claude-format agents,
+    # pi ships Pi-format, and omp ships omp task-agent format. omp deliberately
+    # skips cross-harness agent roots (.claude/agents, .codex/agents, …) because
+    # their frontmatter is not the omp task-agent contract, so omp needs its own
+    # set under .omp/agents to get isolated per-phase contexts at all.
     # Every other target has no native agents. Pre-existing files are backed up
     # then replaced atomically, and each is recorded in the receipt so
     # uninstall.sh removes them too.
     case "$agent_name" in
         claude-code) install_native_agents "$EXAMPLES_DIR/claude-code/agents" "Claude Code" ;;
         pi)          install_native_agents "$EXAMPLES_DIR/pi/agents" "Pi" ;;
+        omp)         install_native_agents "$EXAMPLES_DIR/omp/agents" "omp"
+                     install_omp_rules ;;
     esac
 
     ok "$count skills installed"
@@ -646,6 +674,39 @@ $(receipt_rel "$agent_dest")"
         acount=$((acount + 1))
     done
     ok "$acount $label agents installed → $agents_target"
+}
+
+# omp-only: install the sticky rules file. omp reads RULES.md ONLY at its native
+# locations (~/.omp/agent/RULES.md, or the nearest <ancestor>/.omp/RULES.md) and
+# loads it as an always-apply rule re-attached near the current turn, so the
+# orchestrator's hard invariants survive a long conversation. No other supported
+# harness has this primitive, so this is not part of the shared prompt path.
+#
+# Unlike AGENTS.md, this file is NOT marker-merged: omp has no convention for
+# partial rule files, and a marker block inside an always-apply rule would ship
+# the markers to the model on every turn. A pre-existing file is backed up and
+# replaced whole, and recorded in the receipt so uninstall removes exactly it.
+install_omp_rules() {
+    local rules_src="$EXAMPLES_DIR/omp/RULES.md"
+    local rules_dest
+    if [ "$SCOPE" = "project" ]; then
+        rules_dest="$TARGET_PATH/.omp/RULES.md"
+    else
+        rules_dest="$(omp_agent_base)/RULES.md"
+    fi
+    if [ ! -f "$rules_src" ]; then
+        warn "omp RULES.md source not found: $rules_src (skipped)"
+        return 0
+    fi
+    mkdir -p "$(dirname "$rules_dest")"
+    if [ -f "$rules_dest" ]; then
+        make_backup "$rules_dest"
+        make_writable "$rules_dest"
+    fi
+    atomic_replace "$rules_dest" < "$rules_src"
+    RECEIPT_FILES="$RECEIPT_FILES
+$(receipt_rel "$rules_dest")"
+    ok "omp sticky rules installed → $rules_dest"
 }
 
 # ============================================================================

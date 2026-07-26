@@ -33,7 +33,7 @@ INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 EXAMPLES_DIR="$REPO_DIR/examples"
 SKILLS_SRC="$REPO_DIR/skills"
 
-ALL_AGENTS="claude-code opencode gemini-cli codex vscode cursor pi"
+ALL_AGENTS="claude-code opencode gemini-cli codex vscode cursor pi omp"
 
 SCOPE="global"
 AGENT=""
@@ -105,6 +105,7 @@ global_skills_path() {
         vscode)       echo "$home/.copilot/skills" ;;
         codex)        echo "$home/.codex/skills" ;;
         pi)           echo "$home/.pi/agent/skills" ;;
+        omp)          echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/skills" ;;
         *)            echo "" ;;
     esac
 }
@@ -171,6 +172,7 @@ global_prompt_path() {
         gemini-cli)   echo "$home/.gemini/GEMINI.md" ;;
         codex)        echo "$home/.codex/agents.md" ;;
         pi)           echo "$home/.pi/agent/AGENTS.md" ;;
+        omp)          echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/AGENTS.md" ;;
         *)            echo "" ;;
     esac
 }
@@ -219,6 +221,7 @@ resolve_source() {
         */hooks/kurama/*)  echo "$EXAMPLES_DIR/claude-code/hooks/$base" ;;
         */agents/*)
             if [ "$tool" = "pi" ]; then echo "$EXAMPLES_DIR/pi/agents/$base";
+            elif [ "$tool" = "omp" ]; then echo "$EXAMPLES_DIR/omp/agents/$base";
             else echo "$EXAMPLES_DIR/claude-code/agents/$base"; fi ;;
         */SKILL.md|SKILL.md)
             # .../<skill>/SKILL.md → repo skills/<skill>/SKILL.md
@@ -291,6 +294,7 @@ check_markers() {
     if [ "$scope" = "project" ]; then
         case "$tool" in
             pi|opencode) prompt="$receipt_dir/AGENTS.md" ;;
+            omp)         prompt="$receipt_dir/AGENTS.md" ;;
             *)           prompt="$receipt_dir/CLAUDE.md" ;;
         esac
     else

@@ -150,6 +150,20 @@ get_tool_path() {
                 *)        echo "$HOME/.pi/agent/skills" ;;
             esac
             ;;
+        omp)
+            # omp keeps user skills under its agent config dir (~/.omp/agent/skills).
+            # PI_CODING_AGENT_DIR relocates that base when set — honor it, since omp
+            # itself resolves the user base from that variable.
+            if [[ -n "${PI_CODING_AGENT_DIR:-}" ]]; then
+                echo "$PI_CODING_AGENT_DIR/skills"
+            else
+                case "$OS" in
+                    windows)  echo "$USERPROFILE/.omp/agent/skills" ;;
+                    wsl)      echo "$HOME/.omp/agent/skills" ;;
+                    *)        echo "$HOME/.omp/agent/skills" ;;
+                esac
+            fi
+            ;;
         project-local) echo "./skills" ;;
     esac
 }
@@ -205,10 +219,10 @@ print_next_step() {
 }
 
 print_engram_note() {
-    echo -e "\n${YELLOW}Recommended persistence backend:${NC} ${BOLD}Engram${NC}"
-    echo -e "  ${CYAN}https://github.com/gentleman-programming/engram${NC}"
-    echo -e "  If Engram is available, it will be used automatically (recommended)"
-    echo -e "  If not, falls back to ${BOLD}none${NC} — enable ${BOLD}engram${NC} or ${BOLD}openspec${NC} for better results"
+    echo -e "\n${YELLOW}Persistence backend:${NC} artifacts default to the built-in markdown store"
+    echo -e "  ${BOLD}openspec${NC} — files under ${BOLD}openspec/${NC}, version-controlled with the repo (default)"
+    echo -e "  ${BOLD}engram${NC}   — cross-session memory: ${CYAN}https://github.com/gentleman-programming/engram${NC}"
+    echo -e "  Pick one at ${BOLD}/sdd-init${NC}; ${BOLD}setup.sh --with-engram${NC} wires the Engram MCP for you"
 }
 
 show_help() {
@@ -222,7 +236,7 @@ show_help() {
     echo "  --version        Print the Kurama version and exit"
     echo "  -h, --help       Show this help"
     echo ""
-    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, project-local, all-global"
+    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, omp, project-local, all-global"
     echo ""
     echo "Skill groups:"
     echo "  sdd-core   Core SDD pipeline + authoring utilities (always installed)"
@@ -557,6 +571,10 @@ install_for_agent() {
             install_skills "$(get_tool_path pi)" "Pi"
             print_next_step "~/.pi/agent/AGENTS.md" "examples/pi/AGENTS.md"
             ;;
+        omp)
+            install_skills "$(get_tool_path omp)" "omp"
+            print_next_step "~/.omp/agent/AGENTS.md" "examples/omp/AGENTS.md"
+            ;;
         project-local)
             install_skills "$(get_tool_path project-local)" "Project-local"
             echo -e "\n${YELLOW}Note:${NC} Skills installed in ${BOLD}./skills/${NC} — relative to this project"
@@ -605,11 +623,12 @@ interactive_menu() {
     echo "  6) Antigravity    (~/.gemini/antigravity/skills/)"
     echo "  7) Cursor         ($(get_tool_path cursor))"
     echo "  8) Pi             ($(get_tool_path pi))"
-    echo "  9) Project-local  ($(get_tool_path project-local))"
-    echo "  10) All global    (Claude Code + OpenCode + Gemini CLI + Codex + Cursor)"
-    echo "  11) Custom path"
+    echo "  9) omp            ($(get_tool_path omp))"
+    echo "  10) Project-local  ($(get_tool_path project-local))"
+    echo "  11) All global    (Claude Code + OpenCode + Gemini CLI + Codex + Cursor)"
+    echo "  12) Custom path"
     echo ""
-    read -rp "Choice [1-11]: " choice
+    read -rp "Choice [1-12]: " choice
 
     case $choice in
         1)  install_for_agent "claude-code" ;;
@@ -620,9 +639,10 @@ interactive_menu() {
         6)  install_for_agent "antigravity" ;;
         7)  install_for_agent "cursor" ;;
         8)  install_for_agent "pi" ;;
-        9)  install_for_agent "project-local" ;;
-        10) install_for_agent "all-global" ;;
-        11) install_for_agent "custom" ;;
+        9)  install_for_agent "omp" ;;
+        10) install_for_agent "project-local" ;;
+        11) install_for_agent "all-global" ;;
+        12) install_for_agent "custom" ;;
         *)
             print_error "Invalid choice"
             exit 1

@@ -658,6 +658,96 @@ in `setup.sh` (and mirrored in `setup.ps1`); to refresh one, run
 
 ---
 
+## omp
+
+[omp](https://github.com/can1357/oh-my-pi) is a **separate binary** from Pi, with its
+own config root. It is not Pi under another name, and the two layouts are not
+interchangeable:
+
+| Concern | Pi | omp |
+|---|---|---|
+| Skills | `~/.pi/agent/skills/` | `~/.omp/agent/skills/` |
+| Orchestrator context | `~/.pi/agent/AGENTS.md` | `~/.omp/agent/AGENTS.md` |
+| Native subagents | `~/.pi/agent/agents/` | `~/.omp/agent/agents/` |
+| Sticky rules | *(no equivalent)* | `~/.omp/agent/RULES.md` |
+
+Installing with `--agent pi` when you actually run omp lands everything where omp
+never looks, leaving Kurama installed and completely invisible. Use `--agent omp`.
+
+If `PI_CODING_AGENT_DIR` is set, omp resolves its user base from it, and every Kurama
+path above moves with it.
+
+> **Automatic:** `./scripts/setup.sh --agent omp` detects the `omp` binary, copies the
+> skills into `~/.omp/agent/skills/`, installs the **17 native omp task agents** into
+> `~/.omp/agent/agents/`, writes the sticky `RULES.md`, and merges the orchestrator into
+> `~/.omp/agent/AGENTS.md` with the standard idempotent
+> `<!-- BEGIN:kurama -->` / `<!-- END:kurama -->` markers. With
+> `--scope project` everything lands under `<repo>/.omp/` instead — skills, agents,
+> `RULES.md`, and `AGENTS.md`.
+
+### Why omp needs its own agent set
+
+This is the one part that cannot be shared. omp **deliberately skips** cross-harness
+agent roots — `.claude/agents`, `.codex/agents`, `.gemini/agents` are filtered out
+because their frontmatter is not omp's task-agent contract. Kurama's Claude and Pi
+agents are therefore invisible to omp, and without a dedicated set the SDD cycle
+silently degrades to inline execution with no per-phase context isolation.
+
+The omp set applies the real contract differences:
+
+| Pi | omp | Why |
+|---|---|---|
+| `effort:` | `thinkingLevel:` | omp's field name |
+| `find` | `glob` | omp's tool name |
+| `memory_search`, `memory_get`, … | *(dropped)* | omp has no built-in mem tools: its own memory is an autonomous pipeline read via `memory://`, and Engram arrives as MCP tools whose names depend on the registered server |
+| *(implicit)* | `spawns: ""` | makes "phases are executors and never delegate" mechanical instead of prose |
+| *(n/a)* | `read-summarize: false` | on the read-only lenses and the fix agent — they adjudicate exact lines, and structural summaries would hide the code they must judge |
+
+The 7 read-only review lenses carry `tools: read` alone, so omp enforces read-only from
+the allowlist rather than trusting the prompt. Model routing lives in each agent's
+frontmatter, overridable per agent with `task.agentModelOverrides` in
+`~/.omp/agent/config.yml`.
+
+### RULES.md — omp's sticky rules
+
+omp loads `RULES.md` as an **always-apply rule** re-attached near the current turn, so
+it keeps its hold after a long conversation has pushed the opening context far up the
+transcript. Only the invariants that must not decay live there — delegate-only
+orchestration, phases never delegating, and the human merge gate — while the full
+orchestrator contract stays in `AGENTS.md`, where it costs context budget once.
+
+omp reads it **only** at its native locations: `~/.omp/agent/RULES.md`, or the nearest
+`<ancestor>/.omp/RULES.md` walking up to the repo root. A `RULES.md` anywhere else is
+ignored.
+
+Unlike `AGENTS.md`, this file is replaced whole rather than marker-merged — omp has no
+convention for partial rule files, and marker text inside an always-apply rule would
+ship to the model on every turn. A pre-existing file is backed up first and recorded in
+the receipt, so `uninstall.sh` removes exactly what was installed.
+
+<details>
+<summary>Manual installation</summary>
+
+**1. Copy skills** into `~/.omp/agent/skills/` (global) or `<repo>/.omp/skills/`
+(project). omp discovers `<root>/<name>/SKILL.md` non-recursively, which is already
+Kurama's layout, and its `native` provider requires `description` frontmatter — every
+Kurama skill has one.
+
+**2. Copy the agents** from [`examples/omp/agents/`](../examples/omp/agents/) into
+`~/.omp/agent/agents/` (or `<repo>/.omp/agents/`).
+
+**3. Copy the sticky rules** from [`examples/omp/RULES.md`](../examples/omp/RULES.md) to
+`~/.omp/agent/RULES.md` (or `<repo>/.omp/RULES.md`).
+
+**4. Add the orchestrator:** append
+[`examples/omp/AGENTS.md`](../examples/omp/AGENTS.md) to `~/.omp/agent/AGENTS.md`, or to
+`<repo>/.omp/AGENTS.md` for one project. omp's `native` provider has the highest
+discovery priority, so this file shadows every other user-level context convention.
+
+</details>
+
+---
+
 ## Other Tools
 
 The skills are pure Markdown. Any AI assistant that can read files can use them.

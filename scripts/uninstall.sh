@@ -23,7 +23,7 @@ MARKER_BEGIN="<!-- BEGIN:kurama -->"
 MARKER_END="<!-- END:kurama -->"
 
 # Agents install.sh can write skills for (project-local is opt-in via --agent).
-ALL_AGENTS="claude-code opencode gemini-cli codex vscode antigravity cursor"
+ALL_AGENTS="claude-code opencode gemini-cli codex vscode antigravity cursor pi omp"
 
 DRY_RUN=false
 SCOPE="global"       # global | project (O1: mirrors setup.sh)
@@ -125,6 +125,18 @@ get_tool_path() {
                 windows)  echo "$USERPROFILE/.pi/agent/skills" ;;
                 *)        echo "$HOME/.pi/agent/skills" ;;
             esac
+            ;;
+        omp)
+            # PI_CODING_AGENT_DIR relocates omp's user base; honor it so uninstall
+            # removes from the same place setup installed to.
+            if [ -n "${PI_CODING_AGENT_DIR:-}" ]; then
+                echo "$PI_CODING_AGENT_DIR/skills"
+            else
+                case "$OS" in
+                    windows)  echo "$USERPROFILE/.omp/agent/skills" ;;
+                    *)        echo "$HOME/.omp/agent/skills" ;;
+                esac
+            fi
             ;;
         project-local) echo "./skills" ;;
         *)  echo "" ;;
@@ -457,7 +469,7 @@ show_help() {
     echo "  --dry-run              Show what would be removed without deleting"
     echo "  -h, --help             Show this help"
     echo ""
-    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, project-local"
+    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, omp, project-local"
     echo ""
     echo "Only files recorded in each target's $INSTALL_MANIFEST_NAME are removed."
     echo "The recorded settings.json hooks block, the Engram MCP registration, and the"

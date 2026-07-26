@@ -1125,6 +1125,138 @@ test_with_tdd_uninstall_round_trip() {
 # into ~/.pi/agent/AGENTS.md (Pi's global context file, loaded natively).
 # ============================================================================
 
+test_install_omp() {
+    bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
+    assert_all_skills_installed "$HOME/.omp/agent/skills"
+}
+
+test_omp_skill_count() {
+    bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
+    local count
+    count=$(find "$HOME/.omp/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
+    assert_eq "24" "$count" "Expected exactly 24 skills for omp"
+}
+
+test_omp_writes_install_manifest() {
+    bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
+    local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q '"files"' "$manifest" || { echo "omp install manifest missing files array"; return 1; }
+    return 0
+}
+
+test_omp_honors_relocated_agent_base() {
+    # omp resolves its user base from PI_CODING_AGENT_DIR when set. Kurama must
+    # follow it, or a relocated install writes to a directory omp never reads.
+    local relocated="$TEST_TMPDIR/relocated-omp"
+    PI_CODING_AGENT_DIR="$relocated" bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
+    assert_dir_exists "$relocated/skills" || return 1
+    assert_file_exists "$relocated/skills/sdd-apply/SKILL.md" || return 1
+    # The default location must stay untouched when the variable redirects it.
+    if [ -d "$HOME/.omp/agent/skills" ]; then
+        echo "PI_CODING_AGENT_DIR was set but the default ~/.omp/agent/skills was written anyway"
+        return 1
+    fi
+    return 0
+}
+
+test_setup_omp_writes_orchestrator() {
+    bash "$SETUP_SCRIPT" --agent omp > /dev/null 2>&1
+    assert_all_skills_installed "$HOME/.omp/agent/skills" || return 1
+    local prompt="$HOME/.omp/agent/AGENTS.md"
+    assert_file_exists "$prompt" || return 1
+    grep -qF 'BEGIN:kurama' "$prompt" || { echo "omp orchestrator missing BEGIN:kurama marker"; return 1; }
+    grep -qF 'END:kurama' "$prompt" || { echo "omp orchestrator missing END:kurama marker"; return 1; }
+    return 0
+}
+
+test_omp_installs_native_agents() {
+    # omp DELIBERATELY skips cross-harness agent roots (.claude/agents, .codex/agents,
+    # …) because their frontmatter is not the omp task-agent contract. So omp needs its
+    # own set under .omp/agents or the phases silently degrade to inline execution.
+    bash "$SETUP_SCRIPT" --agent omp > /dev/null 2>&1
+    local agents_dir="$HOME/.omp/agent/agents"
+    assert_dir_exists "$agents_dir" || return 1
+    local agent
+    for agent in "${EXPECTED_AGENTS[@]}"; do
+        assert_file_exists "$agents_dir/$agent.md" || return 1
+        assert_file_not_empty "$agents_dir/$agent.md" || return 1
+    done
+    local count
+    count=$(find "$agents_dir" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+    assert_eq "17" "$count" "setup.sh --agent omp should install exactly 17 omp agents" || return 1
+    local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
+    grep -q '\.\./agents/review-risk.md' "$manifest" || {
+        echo "omp receipt missing ../agents/review-risk.md"; return 1; }
+    return 0
+}
+
+test_omp_agents_use_the_omp_contract() {
+    # The frontmatter contract is what makes these agents visible to omp at all.
+    # Pi fields (effort, memory_*) and Pi's `find` tool name would be silently
+    # wrong: omp reads thinkingLevel and names the tool glob.
+    local src="$REPO_DIR/examples/omp/agents"
+    assert_dir_exists "$src" || return 1
+    local f
+    for f in "$src"/*.md; do
+        grep -q '^name: ' "$f" || { echo "$f missing name (omp requires it)"; return 1; }
+        grep -q '^description: ' "$f" || { echo "$f missing description (omp requires it)"; return 1; }
+        grep -q '^spawns: ' "$f" || { echo "$f missing spawns — phases must never delegate"; return 1; }
+        if grep -q '^effort:' "$f"; then
+            echo "$f uses Pi's effort field; omp reads thinkingLevel"; return 1
+        fi
+        if grep -qE '^  - (find|memory_[a-z]+)$' "$f"; then
+            echo "$f references a Pi-only tool (find/memory_*); omp has glob and no mem tools"; return 1
+        fi
+    done
+    # The read-only review lenses must stay read-only: tools is exactly `read`.
+    for f in review-risk review-readability review-reliability review-resilience review-refuter jd-judge-a jd-judge-b; do
+        local tools
+        tools=$(awk '/^tools:/{f=1;next} /^[a-z-]+:/{f=0} f&&/^  - /{printf "%s,",$2}' "$src/$f.md")
+        assert_eq "read," "$tools" "$f must be read-only (tools: read)" || return 1
+    done
+    return 0
+}
+
+test_omp_installs_sticky_rules() {
+    # RULES.md is omp's always-apply primitive, re-attached near the current turn.
+    # Pi has no equivalent, so this asset is omp-only. It carries the invariants
+    # that must not decay across a long conversation.
+    bash "$SETUP_SCRIPT" --agent omp > /dev/null 2>&1
+    local rules="$HOME/.omp/agent/RULES.md"
+    assert_file_exists "$rules" || return 1
+    assert_file_not_empty "$rules" || return 1
+    grep -qi 'coordinator' "$rules" || { echo "RULES.md lost the delegate-only invariant"; return 1; }
+    grep -qi 'human' "$rules" || { echo "RULES.md lost the human merge gate"; return 1; }
+    # Recorded in the receipt so uninstall removes exactly it.
+    local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
+    grep -q '\.\./RULES.md' "$manifest" || { echo "omp receipt missing ../RULES.md"; return 1; }
+    return 0
+}
+
+test_omp_uninstall_round_trip() {
+    # A full install/uninstall cycle leaves nothing of Kurama's behind, and does
+    # not eat a pre-existing user AGENTS.md.
+    bash "$SETUP_SCRIPT" --agent omp > /dev/null 2>&1
+    assert_file_exists "$HOME/.omp/agent/RULES.md" || return 1
+    assert_dir_exists "$HOME/.omp/agent/agents" || return 1
+    bash "$UNINSTALL_SCRIPT" --agent omp > /dev/null 2>&1
+    if [ -f "$HOME/.omp/agent/RULES.md" ]; then
+        echo "uninstall left RULES.md behind"; return 1
+    fi
+    if [ -f "$HOME/.omp/agent/agents/sdd-apply.md" ]; then
+        echo "uninstall left the omp agents behind"; return 1
+    fi
+    if [ -f "$HOME/.omp/agent/skills/sdd-apply/SKILL.md" ]; then
+        echo "uninstall left the skills behind"; return 1
+    fi
+    # The orchestrator block is stripped surgically, so the file may survive empty.
+    if [ -f "$HOME/.omp/agent/AGENTS.md" ] && grep -qF 'BEGIN:kurama' "$HOME/.omp/agent/AGENTS.md"; then
+        echo "uninstall left the kurama orchestrator block in AGENTS.md"; return 1
+    fi
+    return 0
+}
+
 test_install_pi() {
     bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
     assert_all_skills_installed "$HOME/.pi/agent/skills"
@@ -2639,6 +2771,15 @@ run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_roun
 echo ""
 
 echo -e "${BOLD}Pi agent (P5 installer wiring)${NC}"
+run_test "install.sh --agent omp installs 24 skills" test_install_omp
+run_test "Exactly 24 SKILL.md files for omp" test_omp_skill_count
+run_test "omp install writes an install manifest" test_omp_writes_install_manifest
+run_test "omp honors PI_CODING_AGENT_DIR relocation" test_omp_honors_relocated_agent_base
+run_test "setup.sh --agent omp merges the orchestrator prompt" test_setup_omp_writes_orchestrator
+run_test "omp installs its 17 native agents" test_omp_installs_native_agents
+run_test "omp agents follow the omp task-agent contract" test_omp_agents_use_the_omp_contract
+run_test "omp installs RULES.md sticky rules" test_omp_installs_sticky_rules
+run_test "omp install/uninstall round-trip is clean" test_omp_uninstall_round_trip
 run_test "install.sh --agent pi installs 25 skills" test_install_pi
 run_test "Exactly 25 SKILL.md files for Pi" test_pi_skill_count
 run_test "Pi install writes an install manifest" test_pi_writes_install_manifest

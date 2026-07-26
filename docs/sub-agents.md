@@ -282,6 +282,64 @@ shipped with the `pi-subagents` extension. Kurama never writes `subagents.json`
 
 ---
 
+## Native omp Subagents (installed automatically)
+
+`setup.sh --agent omp` installs the **same 17-agent roster** in **omp's task-agent
+format** into `~/.omp/agent/agents/` (global) or `<repo>/.omp/agents/`
+(`--scope project`), recorded in the receipt. The files live in
+[`examples/omp/agents/`](../examples/omp/agents/).
+
+**This set is mandatory, not a convenience.** omp deliberately skips cross-harness
+agent roots: `.claude/agents`, `.codex/agents`, and `.gemini/agents` are filtered out
+because their frontmatter is not omp's task-agent contract. Kurama's Claude and Pi
+agents are therefore **invisible** to omp, and without this set the SDD cycle silently
+degrades to inline execution with no per-phase context isolation.
+
+omp's format differs from Pi's in four ways:
+
+- **`thinkingLevel`, not `effort`.** Same values (`low`/`medium`/`high`), different
+  field name. A stray `effort:` is ignored, so the reasoning hint would be silently lost.
+- **`glob`, not `find`.** Same capability, omp's name for the tool.
+- **No `memory_*` tools.** omp has no built-in mem tools: its own memory is an
+  autonomous pipeline read through `memory://` with the `read` tool, and Engram — when a
+  project uses it — arrives as MCP tools whose names depend on the registered server. So
+  the portable allowlist is the file tools plus `read`, and the `openspec` store is the
+  fully supported path with nothing extra to install.
+- **`spawns: ""` on every agent.** This makes "phases are executors and never delegate"
+  mechanical rather than prose. omp reinforces it a second time: at
+  `task.maxRecursionDepth` the `task` tool is stripped from child sessions entirely.
+
+The read-only lenses and `jd-fix-agent` also carry `read-summarize: false`: they
+adjudicate exact lines, and omp's default structural summaries would hide the very code
+they must judge.
+
+| Agent(s) | `tools` (omp) | `model` | `thinkingLevel` |
+|----------|---------------|---------|-----------------|
+| `sdd-apply` | `read`, `grep`, `glob`, `bash`, `write`, `edit` | `anthropic/claude-opus-4-8` | `high` |
+| `sdd-design` | `read`, `grep`, `glob`, `write`, `edit` (no `bash`) | `anthropic/claude-opus-4-8` | `high` |
+| Other 7 SDD phases | phase set; `bash` only on `sdd-init`/`sdd-explore`/`sdd-verify`/`sdd-archive` | `anthropic/claude-sonnet-4-5` | `low`–`medium` |
+| `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `read` | `anthropic/claude-sonnet-4-5` | `medium`–`high` |
+| `review-refuter`, `jd-judge-a`, `jd-judge-b` | `read` | `anthropic/claude-opus-4-8` | `high` |
+| `jd-fix-agent` | `read`, `bash` | `anthropic/claude-opus-4-8` | `high` |
+
+Model routing is per agent and overridable without editing these files, via
+`task.agentModelOverrides` in `~/.omp/agent/config.yml` (or a project `.omp/config.yml`),
+or interactively from `/agents`.
+
+**Skill loading uses `skill://`.** omp resolves skills by name, so each agent reads its
+phase contract as `skill://sdd-apply` rather than guessing a filesystem path. The
+`_shared` contracts are plain files, not skills, so those are read by path from
+`~/.omp/agent/skills/_shared/` (or `<repo>/.omp/skills/_shared/`).
+
+**`RULES.md` complements the agents.** omp is the only supported harness with an
+always-apply rule primitive, re-attached near the current turn. Kurama installs
+[`examples/omp/RULES.md`](../examples/omp/RULES.md) with the three invariants that must
+not decay across a long conversation — delegate-only orchestration, phases never
+delegating, and the human merge gate. See
+[installation.md](installation.md#rulesmd--omps-sticky-rules).
+
+---
+
 ## Agent Teams Mode (experimental, optional, off by default)
 
 For two specific parallel use cases — the two blind judges in

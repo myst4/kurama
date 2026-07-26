@@ -219,7 +219,11 @@ kurama/
 │   ├── codex/agents.md
 │   ├── vscode/copilot-instructions.md
 │   ├── antigravity/sdd-orchestrator.md
-│   └── cursor/.cursor/rules/sdd-orchestrator.mdc
+│   ├── cursor/.cursor/rules/sdd-orchestrator.mdc
+│   └── omp/
+│       ├── AGENTS.md                  ← GENERATED — omp orchestrator context (native provider, highest priority)
+│       ├── RULES.md                   ← omp-only sticky rules: always-apply, re-attached near the current turn
+│       └── agents/                    ← 17 omp task agents (thinkingLevel/glob/spawns:"" — NOT interchangeable with the Claude or Pi sets, which omp filters out)
 └── scripts/
     ├── setup.sh                       ← Full setup: detect + install + configure (Unix)
     ├── setup.ps1                      ← Full setup: detect + install + configure (Windows)
