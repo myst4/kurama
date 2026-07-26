@@ -5,6 +5,57 @@ stabilization work (Phases 1-8). For what changed and when, see
 [docs/changelog.md](changelog.md). For the persistence contract itself, see
 [docs/persistence.md](persistence.md).
 
+## Breaking change: project commands are asked, not detected
+
+`sdd-init` now ASKS for the project's test command, build command, and (when TDD is
+enabled) single-test command, instead of inferring them from a closed table of
+ecosystems.
+
+**Why it changed.** The table covered 8 ecosystems and sat on the PRIMARY resolution
+path, so any stack outside it dead-ended: `sdd-verify` found no runner and, in
+`behavioral` mode, turned every MUST scenario into UNTESTED → CRITICAL. A harness that
+claims to be stack-agnostic cannot carry a supported-language allowlist on its critical
+path. The inversion also restores consistency — `tdd.enabled`, `execution_mode`, and
+`kanban.enabled` were already explicit questions; the most project-specific value of
+all was the one being guessed.
+
+**What you will see.** `/sdd-init` asks for the commands, pre-filled with a suggestion
+when a familiar detection file is present. An empty answer is valid and means "this
+project has none" — it is recorded as empty, not re-guessed.
+
+**If a phase reports a missing command**, the fix is always the same: re-run
+`/sdd-init`, or set `rules.verify.test_command` / `rules.verify.build_command` (and
+`tdd.single_test_command`) directly. No phase guesses a command anymore — a guessed
+command fails opaquely or, worse, runs the wrong thing.
+
+**Existing projects need no action.** A config that already has these keys keeps
+working unchanged; the propagated-value precedence is untouched.
+
+## `go-testing` moved to the opt-in `lang` group
+
+The default install is now **24 skills** instead of 25. `go-testing` moved to a new
+`lang` manifest group that is **OFF by default**.
+
+**Why it moved.** It was the only language-specific skill shipped to every user of
+every language. The skill registry is already the agnostic extension point for
+per-language patterns, so the special case bought nothing and contradicted the
+stack-agnostic claim.
+
+**Nothing was deleted.** The skill file is unchanged and still ships in the repo.
+
+**If you rely on it**, add `--with lang`:
+
+```bash
+./scripts/install.sh --agent claude-code --with lang
+```
+
+```powershell
+.\scripts\install.ps1 -Agent claude-code -With lang
+```
+
+Otherwise place your own language skills anywhere the skill registry scans, and they
+reach sub-agents as compact rules the same way.
+
 ## Breaking change: the `none` artifact-store mode was removed
 
 The artifact-store enum is now `engram | openspec | hybrid`. `none` — persist no

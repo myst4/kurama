@@ -84,7 +84,30 @@ with no new findings (baseline 8 notes).
 - [x] 5.1 `scripts/validate_skills.sh` passes
 - [x] 5.2 `scripts/build-examples.sh` is idempotent (no diff on a second run)
 - [x] 5.3 Full `scripts/install_test.sh` green
-- [ ] 5.4 Walk `docs/smoke-test.md` with a real `small` change and record the result: 3
+- [x] 5.4 Walk `docs/smoke-test.md` with a real `small` change and record the result: 3
       artifacts instead of 6, `tasks` and `archive` both succeeding on collapsed inputs.
       This is what converts the S-collapse-* scenarios from UNTESTED to verified under
       `compliance_mode: behavioral`
+
+      **Result — VERIFIED.** Walked in a throwaway Node toy project (`node --test`
+      runner, `compliance_mode: behavioral`), driving `init → propose → tasks → apply →
+      verify → archive` with the spec and design collapsed into the proposal.
+
+      | Check | Outcome |
+      |---|---|
+      | Artifact count | **3** (`proposal.md`, `tasks.md`, `verify-report.md`) vs 6 on the standard path |
+      | No standalone spec/design existed | confirmed — `changes/add-sum/` held only `proposal.md` when `tasks` ran |
+      | `sdd-tasks` on collapsed inputs | SUCCESS — read `## Spec (inline)` + `## Design (inline)`, covered all 3 scenario IDs (S-sum-1..3) |
+      | `sdd-apply` | code written, 4/4 tests pass, all task boxes checked |
+      | `sdd-verify` | executed the CONFIGURED `npm test` (not detected); compliance matrix mapped all 3 MUST scenarios to passing tests; no UNTESTED, so `behavioral` raised no CRITICAL. Empty `build_command` reported as WARNING, not CRITICAL |
+      | Content Binding | `Tree-Hash` computed on a throwaway index; the real git index stayed unstaged |
+      | `sdd-archive` on the inline delta | SUCCESS — extracted `# Delta for arithmetic` (1 requirement, 3 scenarios) from the proposal and merged it into `openspec/specs/arithmetic/spec.md`; **the source of truth advanced**, which is the whole point the `none` mode failed |
+
+      Negative checks — the collapsed path does not weaken the gates:
+
+      - A `small` proposal whose inline spec carries **zero requirements** blocks with
+        `next_recommended: sdd-propose` instead of merging a partial delta (S-collapse
+        guard, `sdd-phase-common.md` resolution rule 3).
+      - A proposal with **no `## Change Size`** section resolves to `standard` and no
+        phase fails on the missing section (resolution rule 1) — pre-existing in-flight
+        changes keep the long path.

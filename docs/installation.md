@@ -60,11 +60,14 @@ Two flags control **where** it installs:
 | `--scope project` | install **everything into one git repo** to trial Kurama there — skills, native agents, hooks, and the orchestrator merge all land under the repo (see [Install scope](#install-scope-global-vs-project-trial-a-repo)). |
 | `--path <repo>` | the target repo for `--scope project` (default: current directory). |
 
-The default skill set installs **25 skills**, including two optional modules that
+The default skill set installs **24 skills**, including two optional modules that
 ship on disk but stay inert until you opt in per project: the TDD module
 (`skills/tdd`) and the GitHub Projects Kanban module (`skills/kanban-github`). Pass
-`--without tdd` to exclude the TDD module (24 skills), or `--without optional` to
-exclude the `optional` group — `go-testing` **and** `kanban-github` (23 skills).
+`--without tdd` to exclude the TDD module (23 skills), or `--without optional` to
+exclude the `optional` group — `kanban-github` (23 skills). Per-language pattern
+skills live in the opt-in `lang` group, OFF by default: add them with
+`--with lang` (25 skills). Kurama is stack-agnostic, so a default install ships
+no language-specific knowledge.
 Installing a module never activates it — activation is a separate explicit
 per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban-github.md)).
 
@@ -181,7 +184,7 @@ Codex's TOML), backup + atomic, leaving every other MCP server and key intact.
 **1. Copy skills:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ~/.claude/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.claude/skills/
 ```
 
 **2. Add orchestrator to `~/.claude/CLAUDE.md`:**
@@ -299,6 +302,23 @@ The format is `"provider/model-id"` — check your available models at `~/.cache
 
 Both modes install the `background-agents` plugin (`examples/opencode/plugins/background-agents.ts`), which enables async sub-agent delegation. Use `delegate` to run sub-agents in the background (non-blocking) while the orchestrator continues other work; use `task` to block until the sub-agent completes.
 
+#### Kurama startup logo (opt-in)
+
+`--with-logo` replaces OpenCode's default splash logo with the Kurama wordmark — the same art `scripts/banner.sh` prints:
+
+```bash
+./scripts/setup.sh --agent opencode --with-logo     # install it
+./scripts/setup.sh --agent opencode --without-logo  # keep OpenCode's logo (default)
+```
+
+Interactive setup asks for it after the profile question and defaults to **no**. It is purely cosmetic — nothing about how agents run changes. The same flag installs [Pi's startup header](#kurama-startup-logo-opt-in-1); a single `--all` run asks the question once and applies the answer to both.
+
+This is a **TUI plugin**, not a server plugin: it is copied to `~/.config/opencode/tui-plugins/kurama-logo.tsx` and registered in the `plugin[]` array of `~/.config/opencode/tui.json`, which is a **different list** from the server plugins OpenCode loads out of `~/.config/opencode/plugins/`. The merge is idempotent (`jq`): the file is created with its `$schema` when absent, your existing entries are preserved, and re-running setup never duplicates the entry. `scripts/uninstall.sh` removes the entry and the file again.
+
+The plugin registers the host's `home_logo` slot, which is declared `mode: "replace"` — so it substitutes the default logo rather than drawing below it. The host does **not** pick a single winner, though: if another plugin (for example gentle-ai's `gentle-logo`) also registers `home_logo`, both logos stack. Keep one logo plugin registered at a time.
+
+`examples/opencode/tui-plugins/kurama-logo.tsx` is a **generated file** — it is compiled from `assets/banner/wordmark.txt` by `scripts/gen-logo-plugin.mjs` (`--check` fails with exit code 3 when either committed artifact is stale). Edit the wordmark, re-run the generator, and commit the result; never hand-edit the art inside the `.tsx`.
+
 The setup script preserves your model choices across updates — re-running `setup.sh` will update agent prompts and tools but keep any `model` fields you configured.
 
 <details>
@@ -307,7 +327,7 @@ The setup script preserves your model choices across updates — re-running `set
 **1. Copy skills and commands:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ~/.config/opencode/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.config/opencode/skills/
 cp examples/opencode/commands/sdd-*.md ~/.config/opencode/commands/
 cp examples/opencode/AGENTS.md ~/.config/opencode/AGENTS.md
 ```
@@ -342,7 +362,7 @@ The `agent:` field in the five executor commands (`sdd-init.md`, `sdd-explore.md
 **1. Copy skills:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ~/.gemini/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.gemini/skills/
 ```
 
 **2. Add orchestrator to `~/.gemini/GEMINI.md`:**
@@ -379,7 +399,7 @@ gemini extensions install https://github.com/myst4/kurama
 **1. Copy skills:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ~/.codex/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.codex/skills/
 ```
 
 **2. Add orchestrator instructions:**
@@ -400,7 +420,7 @@ that project's `.agents/skills/` yourself:
 
 ```bash
 mkdir -p .agents/skills
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation .agents/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation .agents/skills/
 ```
 
 `setup.sh`/`install.sh` do not write to `.agents/skills/` — `~/.codex/skills`
@@ -419,7 +439,7 @@ alternative.
 **1. Copy skills:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ~/.copilot/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.copilot/skills/
 ```
 
 **2. Add orchestrator instructions:**
@@ -447,11 +467,11 @@ Prompt file paths:
 
 ```bash
 # Global (available across all projects)
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ~/.gemini/antigravity/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.gemini/antigravity/skills/
 
 # Workspace-specific (per project)
 mkdir -p .agent/skills
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation .agent/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation .agent/skills/
 ```
 
 **2. Add orchestrator instructions:**
@@ -483,10 +503,10 @@ Open Antigravity and type `/sdd-init` in the agent panel.
 
 ```bash
 # Global
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ~/.cursor/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.cursor/skills/
 
 # Or per-project
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/go-testing skills/skill-creator skills/branch-pr skills/issue-creation ./your-project/skills/
+cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ./your-project/skills/
 ```
 
 **2. Add the orchestrator rule:**
@@ -580,6 +600,21 @@ editing the files via `model_profiles` in `.pi/subagents.json` (project) or
 `~/.pi/agent/subagents.json` (global) — see the `subagents-configuration` skill
 shipped with the `pi-subagents` extension. Kurama does **not** write
 `subagents.json`; it is documented here as the recommended override surface.
+
+### Kurama startup logo (opt-in)
+
+The same `--with-logo` flag that replaces [OpenCode's splash logo](#kurama-startup-logo-opt-in) also gives Pi a startup header with the Kurama wordmark:
+
+```bash
+./scripts/setup.sh --agent pi --with-logo     # install it
+./scripts/setup.sh --agent pi --without-logo  # no header (default)
+```
+
+Pi needs **no registry entry**: it auto-discovers every extension in `~/.pi/agent/extensions/*.ts` (global) and `.pi/extensions/*.ts` (project scope), so setup only copies `examples/pi/extensions/kurama-logo.ts` into the matching directory — `settings.json` is never touched. Copying *is* the installation, which makes it idempotent by construction; the file is recorded in the install receipt, so `scripts/uninstall.sh` removes it again and leaves your own extensions alone.
+
+The extension hooks `session_start` and calls `ctx.ui.setHeader()`, whose contract is `render(width) => string[]` — plain strings carrying raw ANSI, so the art is pre-rendered with the same truecolor escapes `scripts/banner.sh` emits (there is no JSX here, unlike the OpenCode plugin). It returns nothing when `ctx.hasUI` is false, degrades to a one-line `✦ KURAMA ✦` on a narrow terminal, and draws nothing at all when even that does not fit.
+
+Like the OpenCode plugin, `examples/pi/extensions/kurama-logo.ts` is a **generated file** built from `assets/banner/wordmark.txt` by `scripts/gen-logo-plugin.mjs` — both artifacts come from that one wordmark, and `--check` verifies the pair.
 
 ### Optional Pi package stack
 

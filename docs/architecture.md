@@ -162,15 +162,17 @@ kurama/
 ├── .claude-plugin/                    ← Claude Code plugin packaging (alternative to manual copy)
 │   ├── plugin.json                    ← name/version (from VERSION)/description/skills path
 │   └── marketplace.json               ← Single-entry marketplace example for `/plugin marketplace add`
-├── skills/                            ← 19 skill files + shared conventions
-│   ├── manifest.json                  ← Declares every skill (group: sdd-core | quality | optional | tdd) + per-harness install targets; installers read this instead of a hardcoded list
+├── skills/                            ← 25 skill files (24 installed by default) + shared conventions
+│   ├── manifest.json                  ← Declares every skill (group: sdd-core | quality | review | optional | tdd | lang) + per-harness install targets; installers read this instead of a hardcoded list. `lang` is OFF by default — a default install carries no language-specific knowledge
 │   ├── _shared/                       ← Shared conventions (referenced by all skills)
-│   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: Sections A-D (skill loading, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
+│   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: the canonical DAG, change-size path, Phase I/O table, and Sections A-D (skill loading, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
+│   │   ├── orchestrator-sdd-protocol.md ← Orchestrator session protocol loaded on demand when a cycle starts: SDD Session Preflight, Entry Routing, Automatic Mode Gatekeeper. Extracted from the orchestrator prompt so a non-SDD session never pays for it
+│   │   ├── review-ledger-contract.md  ← Lens selection triage (the orchestrator's decision procedure) + the shared blocking/ledger rules every review lens obeys
 │   │   ├── persistence-contract.md    ← Mode resolution, sub-agent context protocol, skill loading
 │   │   ├── engram-convention.md       ← Supplementary: deterministic naming & recovery
 │   │   ├── openspec-convention.md     ← File paths, directory structure, config reference — Kurama's own convention, NOT the upstream OpenSpec CLI format
 │   │   ├── skill-resolver.md          ← Canonical orchestrator protocol for compact-rule injection
-│   │   └── test-runners.md            ← Per-runner detect → full-suite + single-test command table, used by the optional TDD module
+│   │   └── test-runners.md            ← Project commands (test / single-test / build), CONFIGURED at sdd-init rather than detected, plus a suggestion table of common-ecosystem defaults that carries no authority
 │   ├── sdd-init/SKILL.md             ← Bootstraps project + builds skill registry
 │   ├── sdd-new/SKILL.md              ← Meta-skill: starts a new SDD change (exploration + proposal)
 │   ├── sdd-continue/SKILL.md         ← Meta-skill: resumes a change from persisted state
@@ -185,7 +187,7 @@ kurama/
 │   ├── sdd-archive/SKILL.md
 │   ├── skill-registry/SKILL.md       ← Scans skills + conventions, writes .kurama/skill-registry.md
 │   ├── judgment-day/SKILL.md         ← Dual blind review + fix loop
-│   ├── go-testing/SKILL.md           ← Shared Go test patterns
+│   ├── go-testing/SKILL.md           ← Go test patterns (`lang` group, OFF by default — opt in with `--with lang`)
 │   ├── skill-creator/SKILL.md        ← Creates new skills from templates
 │   ├── tdd/SKILL.md                  ← RED-GREEN-REFACTOR module (`tdd` group, installed by default; activation stays opt-in per project — opt out with `--without tdd`)
 │   ├── issue-creation/SKILL.md       ← GitHub issue creation workflow

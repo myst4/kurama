@@ -148,6 +148,6 @@ Three independent AI reviewers evaluated the optimizations across three rounds.
 
 3. **Engram passes references, not content.** Each SDD artifact reference costs ~50T to pass; passing the content inline would cost 3,000–15,000T per artifact.
 
-4. **System prompt size is the dominant variable.** Compressing CLAUDE.md from 7,554T to even 4,000T would drop the crossover from ~8 files to ~5 files — making delegation viable for a much larger class of tasks.
+4. **System prompt size is the dominant variable — and this lever has now been pulled.** The orchestrator prompt went from 28.5KB (~8,100T) to 19.5KB (~5,570T) by moving four conditionally-relevant procedures into `_shared` reference files loaded on demand: the SDD session protocol (preflight, entry routing, auto gatekeeper), the review lens triage, the phase I/O table, and the Kanban module detail. Nothing was deleted — each block has exactly one canonical home, and an install test enforces both the pointers and a 24KB regression budget. By the crossover formula above, the drop moves delegation break-even from ~8 files toward ~6, widening the class of tasks where delegation wins.
 
 5. **The crossover shifts with each optimization.** As overhead decreases, more tasks benefit from delegation. Optimization is a multiplier, not a one-time fix.

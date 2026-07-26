@@ -20,7 +20,7 @@ Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI ass
 | **TDD Module** | `tdd/SKILL.md` | Optional RED-GREEN-REFACTOR cycle contract; loaded by `sdd-apply` when TDD resolves active, referenced by `sdd-tasks` and `sdd-verify`. Installed by default (`tdd` manifest group, `default: true`); activation stays opt-in per project — opt out of the module with `--without tdd` |
 | **Skill Registry** | `skill-registry/SKILL.md` | Scans user skills + project conventions, writes `.kurama/skill-registry.md` |
 | **Judgment Day** | `judgment-day/SKILL.md` | Runs dual adversarial review with two blind judges and a fix loop |
-| **Go Testing** | `go-testing/SKILL.md` | Shared conventions for Go tests, including Bubbletea and teatest patterns |
+| **Go Testing** | `go-testing/SKILL.md` | Go test conventions, including Bubbletea and teatest patterns. `lang` group, OFF by default — opt in with `--with lang` |
 | **Skill Creator** | `skill-creator/SKILL.md` | Creates new reusable skills following the project skill spec |
 | **Branch + PR** | `branch-pr/SKILL.md` | Branches changes and opens pull requests with repo conventions |
 | **Issue Creation** | `issue-creation/SKILL.md` | Creates GitHub issues with the repo's structured templates |

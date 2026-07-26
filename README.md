@@ -4,7 +4,7 @@
 
 **A lightweight, multi-harness Spec-Driven Development framework for AI coding agents.**
 
-25 pure-Markdown skills · 8 supported harnesses · zero runtime, zero dependencies
+24 pure-Markdown skills · 8 supported harnesses · zero runtime, zero dependencies
 
 </div>
 
@@ -13,7 +13,7 @@
 ## What it is
 
 Kurama turns any capable AI coding assistant into a disciplined
-**Spec-Driven Development (SDD)** team. It ships as **25 portable Markdown skills**
+**Spec-Driven Development (SDD)** team. It ships as **24 portable Markdown skills**
 (all installed by default — the optional `tdd` and `kanban-github` modules are included but
 removable with `--without tdd` / `--without optional`) plus a set of shared convention
 files, and a thin
@@ -124,11 +124,19 @@ skills, agents, hooks, and MCP registrations included.
 
 ## The skills
 
-All 25 skills, grouped by role. Every one is a single `SKILL.md` that any
-file-reading agent can load. All 25 install by default; the optional `tdd` and
-`kanban-github` modules ship installed too and can be excluded with `--without tdd` /
-`--without optional`. Installing either never activates it — both stay separate
-per-project switches.
+All 24 default skills, grouped by role. Every one is a single `SKILL.md` that any
+file-reading agent can load. The optional `tdd` and `kanban-github` modules ship
+installed and can be excluded with `--without tdd` / `--without optional`; installing
+either never activates it — both stay separate per-project switches.
+
+**No language knowledge is installed by default.** Kurama is stack-agnostic: it knows
+the shape of the workflow, never the values of a specific ecosystem. Per-language
+pattern skills live in the opt-in `lang` group (OFF by default; `--with lang` adds
+`go-testing`), and your own language skills reach sub-agents through the
+[skill registry](#the-skills) without touching the harness. The project's test and
+build commands are **asked at `/sdd-init`** and recorded in config — never guessed from
+a list of supported stacks, so any ecosystem works, including one Kurama has never
+heard of.
 
 ### Orchestration entry points
 
@@ -164,7 +172,6 @@ per-project switches.
 | Skill | Role |
 |-------|------|
 | `judgment-day` | Parallel adversarial review — two blind judges, synthesize, fix, re-judge. |
-| `go-testing` | Go testing patterns, including Bubbletea TUI testing with `teatest`. |
 | `branch-pr` | PR creation workflow following the issue-first enforcement system. |
 | `issue-creation` | GitHub issue workflow for bugs and feature requests. |
 
