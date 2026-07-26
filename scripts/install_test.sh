@@ -33,7 +33,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All 25 expected default skills (sdd-core + quality + review + optional + tdd).
+# All 24 expected default skills (sdd-core + quality + review + optional + tdd).
+# The `lang` group (per-language pattern skills, e.g. go-testing) is OFF by default:
+# Kurama is stack-agnostic and ships no language knowledge in a default install.
 # The tdd and kanban-github modules ship by default now; installing either does NOT
 # activate it (TDD stays opt-in per project; the kanban board stays opt-in via
 # kanban.enabled and requires a configured gh — never probed here).
@@ -57,7 +59,6 @@ EXPECTED_SKILLS=(
     review-reliability
     review-resilience
     review-refuter
-    go-testing
     kanban-github
     tdd
     skill-creator
@@ -211,7 +212,7 @@ test_claude_code_skill_count() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Claude Code"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Claude Code"
 }
 
 # ============================================================================
@@ -227,7 +228,7 @@ test_opencode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for OpenCode"
+    assert_eq "24" "$count" "Expected exactly 24 skills for OpenCode"
 }
 
 test_opencode_commands() {
@@ -261,7 +262,7 @@ test_gemini_cli_skill_count() {
     bash "$INSTALL_SCRIPT" --agent gemini-cli > /dev/null 2>&1
     local count
     count=$(find "$HOME/.gemini/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Gemini CLI"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Gemini CLI"
 }
 
 # ============================================================================
@@ -277,7 +278,7 @@ test_codex_skill_count() {
     bash "$INSTALL_SCRIPT" --agent codex > /dev/null 2>&1
     local count
     count=$(find "$HOME/.codex/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Codex"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Codex"
 }
 
 # ============================================================================
@@ -293,7 +294,7 @@ test_vscode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent vscode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.copilot/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for VS Code"
+    assert_eq "24" "$count" "Expected exactly 24 skills for VS Code"
 }
 
 # ============================================================================
@@ -309,7 +310,7 @@ test_antigravity_skill_count() {
     bash "$INSTALL_SCRIPT" --agent antigravity > /dev/null 2>&1
     local count
     count=$(find "$HOME/.gemini/antigravity/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Antigravity"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Antigravity"
 }
 
 # ============================================================================
@@ -325,7 +326,7 @@ test_cursor_skill_count() {
     bash "$INSTALL_SCRIPT" --agent cursor > /dev/null 2>&1
     local count
     count=$(find "$HOME/.cursor/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Cursor"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Cursor"
 }
 
 # ============================================================================
@@ -345,7 +346,7 @@ test_project_local_skill_count() {
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
     local count
     count=$(find "$project/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for project-local"
+    assert_eq "24" "$count" "Expected exactly 24 skills for project-local"
 }
 
 # ============================================================================
@@ -363,7 +364,7 @@ test_custom_path_skill_count() {
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     local count
     count=$(find "$custom" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for custom path"
+    assert_eq "24" "$count" "Expected exactly 24 skills for custom path"
 }
 
 # ============================================================================
@@ -386,7 +387,7 @@ test_all_global() {
 
 test_all_global_total_skill_count() {
     bash "$INSTALL_SCRIPT" --agent all-global > /dev/null 2>&1
-    # 5 targets x 25 skills = 125 SKILL.md files
+    # 5 targets x 24 skills = 120 SKILL.md files
     local total=0
     for dir in \
         "$HOME/.claude/skills" \
@@ -396,10 +397,10 @@ test_all_global_total_skill_count() {
         "$HOME/.cursor/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "25" "$count" "Expected 25 skills in $dir" || return 1
+        assert_eq "24" "$count" "Expected 24 skills in $dir" || return 1
         total=$((total + count))
     done
-    assert_eq "125" "$total" "Expected 125 total SKILL.md files across all targets"
+    assert_eq "120" "$total" "Expected 120 total SKILL.md files across all targets"
 }
 
 test_all_global_opencode_commands() {
@@ -421,7 +422,7 @@ test_idempotent_claude_code() {
     assert_all_skills_installed "$HOME/.claude/skills"
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills after double install"
+    assert_eq "24" "$count" "Expected exactly 24 skills after double install"
 }
 
 test_idempotent_opencode() {
@@ -430,7 +431,7 @@ test_idempotent_opencode() {
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
     local skill_count
     skill_count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$skill_count" "Expected exactly 25 skills after double install" || return 1
+    assert_eq "24" "$skill_count" "Expected exactly 24 skills after double install" || return 1
     local cmd_count
     cmd_count=$(find "$HOME/.config/opencode/commands" -name "sdd-*.md" | wc -l | tr -d ' ')
     assert_eq "9" "$cmd_count" "Expected exactly 9 commands after double install"
@@ -447,7 +448,7 @@ test_idempotent_all_global() {
         "$HOME/.cursor/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "25" "$count" "Expected 25 skills in $dir after double install" || return 1
+        assert_eq "24" "$count" "Expected 24 skills in $dir after double install" || return 1
     done
 }
 
@@ -514,8 +515,8 @@ test_output_shows_done_message() {
 test_output_shows_install_count() {
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "25 skills installed" || {
-        echo "Output missing '25 skills installed' message"
+    echo "$output" | grep -q "24 skills installed" || {
+        echo "Output missing '24 skills installed' message"
         return 1
     }
 }
@@ -675,7 +676,7 @@ test_setup_installs_default_skill_set() {
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "setup.sh should install the 25 default skills"
+    assert_eq "24" "$count" "setup.sh should install the 24 default skills"
 }
 
 test_setup_includes_tdd() {
@@ -864,18 +865,159 @@ test_opencode_profile_idempotent_preserves_model() {
     run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
         || { echo "first profile install failed"; return 1; }
     local cfg="$HOME/.config/opencode/opencode.json"
-    # Hand-edit one profile agent's model, then re-run the same install.
+    # Hand-edit one profile agent's model, then re-run WITHOUT a ":provider/model".
+    # No explicit model on the flag means "keep whatever is configured", so the
+    # hand-edit must survive. (Passing a model instead is an explicit choice for
+    # that run and deliberately wins — see the flag-overrides test below.)
     local edited
     edited=$(jq '.agent["sdd-apply-testp"].model = "HAND/EDITED"' "$cfg")
     printf '%s\n' "$edited" > "$cfg"
-    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+    run_setup_opencode --opencode-mode multi --opencode-profile testp \
         || { echo "second profile install failed"; return 1; }
     assert_eq "HAND/EDITED" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
         "re-run did not preserve the hand-edited model" || return 1
+    # The other profile agents keep the model the first run set, too.
+    assert_eq "prov/model" "$(jq -r '.agent["sdd-spec-testp"].model' "$cfg")" \
+        "re-run dropped a previously configured profile model" || return 1
     # No duplicate profile keys after the re-run.
     local n
     n=$(jq -r '[.agent | keys[] | select(endswith("-testp"))] | length' "$cfg")
     assert_eq "9" "$n" "Expected 9 profile agents after re-run (no duplicates)"
+}
+
+test_opencode_profile_flag_overrides_saved_model() {
+    # An explicit ":provider/model" is a choice made for THIS run, so re-running
+    # with a different one must actually move the agents. Restoring the previous
+    # snapshot on top of the flag would make --opencode-profile a no-op after the
+    # first install.
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "first profile install failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    assert_eq "prov/model" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
+        "precondition: first install did not apply the flag model" || return 1
+
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:other/model2 \
+        || { echo "second profile install failed"; return 1; }
+    assert_eq "other/model2" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
+        "re-run with a different flag model did not take effect" || return 1
+    # Every profile agent moved, the orchestrator included (9 subagents + 1).
+    local n
+    n=$(jq -r '[.agent | to_entries[]
+        | select(.key == "kurama-orchestrator" or (.key | endswith("-testp")))
+        | select(.value.model == "other/model2")] | length' "$cfg")
+    assert_eq "10" "$n" "Expected all 10 profile agents on the new flag model" || return 1
+    # Base agents are not a profile concern — the flag must not touch them.
+    if jq -e '.agent["sdd-apply"] | has("model")' "$cfg" > /dev/null 2>&1; then
+        echo "profile flag leaked a model onto the base sdd-apply agent"; return 1
+    fi
+    return 0
+}
+
+# ============================================================================
+# Tests — no unusable "model" ever reaches opencode.json
+#
+# OpenCode model IDs are "provider/model-id" (docs/installation.md). An agent
+# with no "model" key inherits the default model, which is the only safe
+# fallback — a pinned default would age out of the user's provider. Older Kurama
+# versions instead wrote the literal "<your-provider/your-model>", which no
+# provider can resolve.
+#
+# Mirrors OPENCODE_MODEL_RE in setup.sh. The looser "^[^/]+/.+" is NOT enough:
+# it matches "<your-provider/your-model>" ("<your-provider" holds no slash), so
+# it would fail to filter the very literal this guards against.
+# ============================================================================
+OPENCODE_MODEL_RE='^[^<>[:space:]/]+/[^<>[:space:]]+$'
+
+# Print "agent=model" for every agent carrying a "model" that OpenCode could not
+# resolve. Empty output means the config is clean.
+opencode_bad_models() {
+    jq -r --arg re "$OPENCODE_MODEL_RE" '
+        (.agent // {}) | to_entries[]
+        | select(.value.model != null)
+        | select(((.value.model | type) != "string")
+                 or ((.value.model | test($re)) | not))
+        | "\(.key)=\(.value.model)"
+    ' "$1"
+}
+
+# Assert opencode.json carries no unusable model. $2 labels the failing context.
+assert_no_unusable_models() {
+    local cfg="$1" what="$2" bad
+    jq -e . "$cfg" > /dev/null 2>&1 || { echo "opencode.json invalid JSON ($what)"; return 1; }
+    bad=$(opencode_bad_models "$cfg")
+    if [ -n "$bad" ]; then
+        echo "agents with a model OpenCode cannot resolve ($what):"
+        printf '%s\n' "$bad"
+        return 1
+    fi
+    return 0
+}
+
+test_opencode_install_writes_no_unusable_model() {
+    local cfg="$HOME/.config/opencode/opencode.json"
+
+    # A clean multi install: 10 agents, none of them pinned to anything.
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
+    assert_no_unusable_models "$cfg" "clean multi install" || return 1
+    local n
+    n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$cfg")
+    assert_eq "0" "$n" "a clean multi install must not pin any model" || return 1
+
+    # Same for single mode.
+    run_setup_opencode --opencode-mode single || { echo "setup opencode single failed"; return 1; }
+    assert_no_unusable_models "$cfg" "clean single install" || return 1
+    n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$cfg")
+    assert_eq "0" "$n" "a clean single install must not pin any model" || return 1
+
+    # And for a profile installed without a ":provider/model".
+    run_setup_opencode --opencode-mode multi --opencode-profile testp \
+        || { echo "setup opencode profile failed"; return 1; }
+    assert_no_unusable_models "$cfg" "profile install without a model" || return 1
+    n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$cfg")
+    assert_eq "0" "$n" "a profile install without a model must not pin any model" || return 1
+    return 0
+}
+
+test_opencode_rerun_scrubs_placeholder_model() {
+    # A config written by an older Kurama version carries the placeholder on every
+    # agent. The re-run snapshot must not treat it as a user choice — otherwise it
+    # is restored on top of the fresh template and the breakage becomes permanent.
+    run_setup_opencode --opencode-mode multi --opencode-profile testp \
+        || { echo "first install failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    local poisoned
+    poisoned=$(jq '
+        .agent |= with_entries(.value.model = "<your-provider/your-model>")
+        | .agent["sdd-spec"].model = "real/model-a"
+        | .agent["sdd-spec-testp"].model = "real/model-b"
+    ' "$cfg") || { echo "could not build the poisoned config"; return 1; }
+    printf '%s\n' "$poisoned" > "$cfg"
+
+    run_setup_opencode --opencode-mode multi --opencode-profile testp \
+        || { echo "re-run over the poisoned config failed"; return 1; }
+    assert_no_unusable_models "$cfg" "re-run over a placeholder config" || return 1
+    # The genuinely user-set models are still preserved — base and profile alike.
+    assert_eq "real/model-a" "$(jq -r '.agent["sdd-spec"].model' "$cfg")" \
+        "re-run dropped a real hand-edited model on a base agent" || return 1
+    assert_eq "real/model-b" "$(jq -r '.agent["sdd-spec-testp"].model' "$cfg")" \
+        "re-run dropped a real hand-edited model on a profile agent" || return 1
+    return 0
+}
+
+test_opencode_templates_pin_no_model() {
+    # The committed templates are the source of the base agents, which have no
+    # model-substitution path at all: whatever they ship with is what lands in
+    # opencode.json.
+    local f
+    for f in "$REPO_DIR/examples/opencode/opencode.single.json" \
+             "$REPO_DIR/examples/opencode/opencode.multi.json" \
+             "$REPO_DIR/examples/opencode/opencode.profile.template.json"; do
+        jq -e . "$f" > /dev/null 2>&1 || { echo "$f is not valid JSON"; return 1; }
+        local n
+        n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$f")
+        assert_eq "0" "$n" "$(basename "$f") must not ship a model field" || return 1
+    done
+    return 0
 }
 
 test_opencode_profile_rejects_bad_name() {
@@ -911,6 +1053,203 @@ test_opencode_base_rerun_prunes_orphan_orchestrator() {
     # Base multi agents are present and intact.
     jq -e '.agent["sdd-apply"]' "$cfg" > /dev/null 2>&1 || {
         echo "base sdd-apply missing after base-only re-run"; return 1; }
+    return 0
+}
+
+# ============================================================================
+# Tests — Kurama startup logo (opt-in, --with-logo)
+#
+# Two harnesses, two mechanisms. OpenCode registers the plugin in
+# ~/.config/opencode/tui.json's plugin[] array — a registry distinct from
+# opencode.json's server plugins — so its tests cover the three ways that merge
+# can go wrong: a missing tui.json, a second run, and a tui.json the user already
+# owns. Pi has no registry at all (it auto-discovers extensions/*.ts), so its
+# test only has to prove the file lands, matches the committed artifact, and is
+# reversed by uninstall.
+# ============================================================================
+
+# Absolute path the installer registers (and the file it copies).
+opencode_logo_dest() { echo "$HOME/.config/opencode/tui-plugins/kurama-logo.tsx"; }
+opencode_tui_json()  { echo "$HOME/.config/opencode/tui.json"; }
+
+test_opencode_logo_installs_into_missing_tui_json() {
+    run_setup_opencode --opencode-mode single --with-logo \
+        || { echo "setup opencode --with-logo failed"; return 1; }
+
+    local dest tui
+    dest="$(opencode_logo_dest)"
+    tui="$(opencode_tui_json)"
+    assert_file_exists "$dest" || return 1
+    # The installed plugin must be the committed artifact, byte for byte.
+    if ! diff -q "$REPO_DIR/examples/opencode/tui-plugins/kurama-logo.tsx" "$dest" > /dev/null 2>&1; then
+        echo "installed kurama-logo.tsx differs from the committed artifact"; return 1
+    fi
+
+    assert_file_exists "$tui" || return 1
+    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON"; return 1; }
+    assert_eq "https://opencode.ai/tui.json" "$(jq -r '."$schema"' "$tui")" \
+        "tui.json created without the opencode \$schema" || return 1
+    jq -e --arg p "$dest" '.plugin | index($p)' "$tui" > /dev/null 2>&1 || {
+        echo "plugin[] does not contain the kurama-logo path"; return 1; }
+
+    # The receipt records tui.json so uninstall can strip the entry back out.
+    local receipt
+    receipt="$HOME/.config/opencode/skills/.kurama-install-manifest.json"
+    assert_file_exists "$receipt" || return 1
+    jq -e '[.tui_plugins[] | select(endswith("tui.json"))] | length == 1' "$receipt" \
+        > /dev/null 2>&1 || { echo "receipt tui_plugins[] does not record tui.json"; return 1; }
+}
+
+test_opencode_logo_is_opt_in() {
+    # No flag, non-interactive → nothing about the logo is written.
+    run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
+    if [ -e "$(opencode_tui_json)" ]; then
+        echo "tui.json was created without --with-logo"; return 1
+    fi
+    if [ -e "$(opencode_logo_dest)" ]; then
+        echo "kurama-logo.tsx was installed without --with-logo"; return 1
+    fi
+    return 0
+}
+
+test_opencode_logo_idempotent() {
+    run_setup_opencode --opencode-mode single --with-logo \
+        || { echo "first logo install failed"; return 1; }
+    run_setup_opencode --opencode-mode single --with-logo \
+        || { echo "second logo install failed"; return 1; }
+
+    local tui n
+    tui="$(opencode_tui_json)"
+    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON after re-run"; return 1; }
+    n=$(jq -r --arg p "$(opencode_logo_dest)" '[.plugin[] | select(. == $p)] | length' "$tui")
+    assert_eq "1" "$n" "re-running setup duplicated the kurama-logo plugin entry"
+}
+
+test_opencode_logo_preserves_existing_tui_json() {
+    # A user tui.json with their own plugin and an unrelated key must survive.
+    mkdir -p "$HOME/.config/opencode"
+    cat > "$(opencode_tui_json)" <<'JSON'
+{
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": ["some-community-tui-plugin"],
+  "scroll_speed": 3
+}
+JSON
+    run_setup_opencode --opencode-mode single --with-logo \
+        || { echo "logo install over an existing tui.json failed"; return 1; }
+
+    local tui
+    tui="$(opencode_tui_json)"
+    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON"; return 1; }
+    jq -e '.plugin | index("some-community-tui-plugin")' "$tui" > /dev/null 2>&1 || {
+        echo "pre-existing plugin entry was dropped"; return 1; }
+    jq -e --arg p "$(opencode_logo_dest)" '.plugin | index($p)' "$tui" > /dev/null 2>&1 || {
+        echo "kurama-logo entry was not added"; return 1; }
+    assert_eq "3" "$(jq -r '.scroll_speed' "$tui")" "unrelated tui.json key was lost" || return 1
+    assert_eq "2" "$(jq -r '.plugin | length' "$tui")" "expected exactly 2 plugin entries"
+}
+
+test_opencode_logo_uninstall_removes_entry() {
+    mkdir -p "$HOME/.config/opencode"
+    cat > "$(opencode_tui_json)" <<'JSON'
+{
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": ["some-community-tui-plugin"]
+}
+JSON
+    run_setup_opencode --opencode-mode single --with-logo \
+        || { echo "logo install failed"; return 1; }
+
+    bash "$UNINSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
+
+    local tui
+    tui="$(opencode_tui_json)"
+    assert_file_exists "$tui" || return 1
+    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON after uninstall"; return 1; }
+    jq -e '.plugin | index("some-community-tui-plugin")' "$tui" > /dev/null 2>&1 || {
+        echo "uninstall dropped the user's own plugin entry"; return 1; }
+    local n
+    n=$(jq -r '[.plugin[] | select(endswith("kurama-logo.tsx"))] | length' "$tui")
+    assert_eq "0" "$n" "uninstall left the kurama-logo entry in plugin[]" || return 1
+    if [ -e "$(opencode_logo_dest)" ]; then
+        echo "uninstall left kurama-logo.tsx on disk"; return 1
+    fi
+    return 0
+}
+
+test_logo_plugin_artifact_matches_generator() {
+    # Both committed artifacts are build outputs of assets/banner/wordmark.txt;
+    # --check verifies the pair (one wordmark edit can staleify both).
+    if ! command -v node > /dev/null 2>&1; then
+        echo "node not available — skipping generator drift check"; return 0
+    fi
+    if ! node "$SCRIPT_DIR/gen-logo-plugin.mjs" --check > /dev/null 2>&1; then
+        echo "the committed logo artifacts are stale"
+        echo "run: node scripts/gen-logo-plugin.mjs"
+        return 1
+    fi
+    return 0
+}
+
+# ---- Pi: auto-discovered extension, no registry to merge ----
+
+pi_logo_dest() { echo "$HOME/.pi/agent/extensions/kurama-logo.ts"; }
+
+test_pi_logo_installs_extension() {
+    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
+        --non-interactive --with-logo > /dev/null 2>&1 \
+        || { echo "setup pi --with-logo failed"; return 1; }
+
+    local dest
+    dest="$(pi_logo_dest)"
+    assert_file_exists "$dest" || return 1
+    if ! diff -q "$REPO_DIR/examples/pi/extensions/kurama-logo.ts" "$dest" > /dev/null 2>&1; then
+        echo "installed kurama-logo.ts differs from the committed artifact"; return 1
+    fi
+    # The ANSI escapes must survive as backslash-u001b sequences TypeScript
+    # parses back into ESC; a literal backslash makes Pi print them as text.
+    grep -q '38;2;255;160;90m' "$dest" || { echo "solid colour escape missing"; return 1; }
+    grep -q '38;2;90;45;15m' "$dest" || { echo "shadow colour escape missing"; return 1; }
+    grep -q 'setHeader' "$dest" || { echo "extension does not call ctx.ui.setHeader"; return 1; }
+
+    # Recorded in the receipt (../extensions/... relative to the skills dir).
+    local receipt
+    receipt="$HOME/.pi/agent/skills/.kurama-install-manifest.json"
+    assert_file_exists "$receipt" || return 1
+    grep -q '\.\./extensions/kurama-logo.ts' "$receipt" || {
+        echo "Pi receipt missing ../extensions/kurama-logo.ts"; return 1; }
+    return 0
+}
+
+test_pi_logo_is_opt_in_and_idempotent() {
+    # Without the flag nothing is written…
+    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
+        --non-interactive > /dev/null 2>&1 || { echo "setup pi failed"; return 1; }
+    if [ -e "$(pi_logo_dest)" ]; then
+        echo "kurama-logo.ts was installed without --with-logo"; return 1
+    fi
+    # …and installing it twice leaves exactly one file (copy is the install).
+    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
+        --non-interactive --with-logo > /dev/null 2>&1 || { echo "first run failed"; return 1; }
+    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
+        --non-interactive --with-logo > /dev/null 2>&1 || { echo "second run failed"; return 1; }
+    local n
+    n=$(find "$HOME/.pi/agent/extensions" -maxdepth 1 -name 'kurama-logo*.ts' | wc -l | tr -d ' ')
+    assert_eq "1" "$n" "expected exactly one kurama-logo.ts after two runs"
+}
+
+test_pi_logo_uninstall_removes_extension() {
+    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
+        --non-interactive --with-logo > /dev/null 2>&1 || { echo "setup pi failed"; return 1; }
+    # A user extension living beside ours must survive the uninstall.
+    echo "// mine" > "$HOME/.pi/agent/extensions/my-extension.ts"
+
+    bash "$UNINSTALL_SCRIPT" --agent pi --without-pi-packages > /dev/null 2>&1
+
+    if [ -e "$(pi_logo_dest)" ]; then
+        echo "uninstall left kurama-logo.ts on disk"; return 1
+    fi
+    assert_file_exists "$HOME/.pi/agent/extensions/my-extension.ts" || return 1
     return 0
 }
 
@@ -963,19 +1302,21 @@ test_install_writes_install_manifest() {
 
 test_default_install_includes_optional_groups() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
-    assert_dir_exists "$HOME/.claude/skills/go-testing" || return 1
+    if [ -d "$HOME/.claude/skills/go-testing" ]; then
+        echo "go-testing is in the opt-in lang group and must NOT install by default"; return 1
+    fi
     assert_dir_exists "$HOME/.claude/skills/kanban-github" || return 1   # optional group ships kanban-github too
     assert_dir_exists "$HOME/.claude/skills/judgment-day" || return 1
     return 0
 }
 
 test_without_optional_excludes_go_testing() {
-    # The optional group now holds two skills — go-testing AND the kanban-github module —
-    # so --without optional drops both, landing the remaining 23 default skills.
+    # The optional group holds the kanban-github module; go-testing moved to the opt-in
+    # `lang` group, so --without optional drops one skill, landing 23.
     bash "$INSTALL_SCRIPT" --agent claude-code --without optional > /dev/null 2>&1
     local base="$HOME/.claude/skills"
-    if [ -d "$base/go-testing" ]; then
-        echo "go-testing should be excluded by --without optional"
+    if [ -d "$base/kanban-github" ]; then
+        echo "kanban-github should be excluded by --without optional"
         return 1
     fi
     if [ -d "$base/kanban-github" ]; then
@@ -986,7 +1327,7 @@ test_without_optional_excludes_go_testing() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected 23 skills with --without optional (25 default - go-testing - kanban-github)"
+    assert_eq "23" "$count" "Expected 23 skills with --without optional (24 default - kanban-github)"
 }
 
 test_without_quality_excludes_judgment_day() {
@@ -996,18 +1337,17 @@ test_without_quality_excludes_judgment_day() {
         echo "judgment-day should be excluded by --without quality"
         return 1
     fi
-    assert_dir_exists "$base/go-testing" || return 1
     assert_dir_exists "$base/kanban-github" || return 1         # optional group still on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected 24 skills with --without quality"
+    assert_eq "23" "$count" "Expected 23 skills with --without quality"
 }
 
 test_without_both_groups() {
     bash "$INSTALL_SCRIPT" --agent claude-code --without quality --without optional > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/judgment-day" ]; then echo "judgment-day should be excluded"; return 1; fi
-    if [ -d "$base/go-testing" ]; then echo "go-testing should be excluded"; return 1; fi
+    if [ -d "$base/kanban-github" ]; then echo "kanban-github should be excluded"; return 1; fi
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
     assert_eq "22" "$count" "Expected 22 skills with both optional groups excluded"
@@ -1027,7 +1367,7 @@ test_reject_without_required_group() {
 
 test_default_install_includes_tdd() {
     # The tdd group is now default-on: a plain install ships skills/tdd as part of
-    # the 25-skill default set. Installing the module does NOT activate TDD —
+    # the 24-skill default set. Installing the module does NOT activate TDD —
     # activation stays opt-in per project.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local base="$HOME/.claude/skills"
@@ -1036,12 +1376,12 @@ test_default_install_includes_tdd() {
     assert_file_not_empty "$base/tdd/SKILL.md" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Default install must include tdd (25 skills)"
+    assert_eq "24" "$count" "Default install must include tdd (24 skills)"
 }
 
 test_without_tdd_excludes_tdd() {
     # --without tdd opts the module out: skills/tdd is dropped, landing the
-    # remaining 24 default skills. The other default-on groups stay on.
+    # remaining 23 default skills. The other default-on groups stay on.
     bash "$INSTALL_SCRIPT" --agent claude-code --without tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/tdd" ]; then
@@ -1049,16 +1389,35 @@ test_without_tdd_excludes_tdd() {
         return 1
     fi
     assert_dir_exists "$base/judgment-day" || return 1   # quality group still on
-    assert_dir_exists "$base/go-testing" || return 1     # optional group still on
+    assert_dir_exists "$base/kanban-github" || return 1  # optional group still on
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected 24 skills with --without tdd"
+    assert_eq "23" "$count" "Expected 23 skills with --without tdd"
+}
+
+test_lang_group_is_opt_in() {
+    # Kurama ships no language knowledge by default: the `lang` group (go-testing)
+    # must be absent from a default install and present only with --with lang.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local base="$HOME/.claude/skills"
+    if [ -d "$base/go-testing" ]; then
+        echo "go-testing must NOT install by default (lang group is opt-in)"
+        return 1
+    fi
+    bash "$INSTALL_SCRIPT" --agent claude-code --with lang > /dev/null 2>&1
+    assert_dir_exists "$base/go-testing" || return 1
+    assert_file_not_empty "$base/go-testing/SKILL.md" || return 1
+    # sdd-core is untouched by the opt-in.
+    assert_dir_exists "$base/sdd-apply" || return 1
+    local count
+    count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
+    assert_eq "25" "$count" "Expected 25 skills with --with lang (24 default + go-testing)"
 }
 
 test_with_tdd_includes_tdd() {
     # tdd is default-on, so --with tdd is idempotent: skills/tdd ships and the
-    # count stays at the 25-skill default set.
+    # count stays at the 24-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --with tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     assert_dir_exists "$base/tdd" || return 1
@@ -1066,11 +1425,11 @@ test_with_tdd_includes_tdd() {
     assert_file_not_empty "$base/tdd/SKILL.md" || return 1
     # Default-on groups still present.
     assert_dir_exists "$base/judgment-day" || return 1
-    assert_dir_exists "$base/go-testing" || return 1
+    assert_dir_exists "$base/kanban-github" || return 1
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected 25 skills with --with tdd (default set already includes tdd)"
+    assert_eq "24" "$count" "Expected 24 skills with --with tdd (default set already includes tdd)"
 }
 
 test_with_tdd_uninstall_round_trip() {
@@ -1113,7 +1472,7 @@ test_pi_skill_count() {
     bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
     local count
     count=$(find "$HOME/.pi/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Pi"
+    assert_eq "24" "$count" "Expected exactly 24 skills for Pi"
 }
 
 test_pi_writes_install_manifest() {
@@ -1405,7 +1764,7 @@ test_without_review_excludes_lenses() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "20" "$count" "Expected 20 skills with --without review (25 default - 5 lenses)"
+    assert_eq "19" "$count" "Expected 19 skills with --without review (24 default - 5 lenses)"
 }
 
 # ============================================================================
@@ -1649,6 +2008,54 @@ test_kurama_state_survives_mode_removal() {
     grep -qi 'written in every mode' "$REPO_DIR/skills/sdd-init/SKILL.md" \
         || { echo "sdd-init must still write the registry in every mode"; return 1; }
     return 0
+}
+
+test_orchestrator_prompt_delegates_heavy_blocks() {
+    # The orchestrator prompt is reprocessed on EVERY turn of EVERY session, so its size is
+    # the dominant token cost in the whole system (docs/token-economics.md, insight 4).
+    # Four procedures that only matter conditionally were moved into _shared reference files
+    # the orchestrator loads on demand. This test protects both halves of that contract:
+    # every extracted block still has exactly one canonical home, and the prompt still
+    # carries the trigger that sends the orchestrator there.
+    local shared="$REPO_DIR/skills/_shared"
+    assert_file_exists "$shared/orchestrator-sdd-protocol.md" || return 1
+    assert_file_not_empty "$shared/orchestrator-sdd-protocol.md" || return 1
+
+    # Each extracted procedure lives in its owning shared file.
+    grep -q "SDD Session Preflight" "$shared/orchestrator-sdd-protocol.md" || {
+        echo "preflight procedure missing from orchestrator-sdd-protocol.md"; return 1; }
+    grep -q "Automatic Mode Gatekeeper" "$shared/orchestrator-sdd-protocol.md" || {
+        echo "auto gatekeeper missing from orchestrator-sdd-protocol.md"; return 1; }
+    grep -q "SDD Entry Routing" "$shared/orchestrator-sdd-protocol.md" || {
+        echo "entry routing missing from orchestrator-sdd-protocol.md"; return 1; }
+    grep -q "Lens selection triage" "$shared/review-ledger-contract.md" || {
+        echo "lens triage missing from review-ledger-contract.md"; return 1; }
+    grep -q "Phase I/O" "$shared/sdd-phase-common.md" || {
+        echo "phase I/O table missing from sdd-phase-common.md"; return 1; }
+
+    # Every generated orchestrator prompt still points at those homes, and stays lean.
+    local f flat bytes
+    for f in "$REPO_DIR/examples/claude-code/CLAUDE.md" \
+             "$REPO_DIR/examples/pi/AGENTS.md" \
+             "$REPO_DIR/examples/codex/agents.md" \
+             "$REPO_DIR/examples/opencode/AGENTS.md"; do
+        assert_file_exists "$f" || return 1
+        flat=$(tr '\n' ' ' < "$f")
+        case "$flat" in
+            *"orchestrator-sdd-protocol.md"*) ;;
+            *) echo "$f lost the pointer to orchestrator-sdd-protocol.md"; return 1 ;;
+        esac
+        case "$flat" in
+            *"review-ledger-contract.md"*) ;;
+            *) echo "$f lost the pointer to review-ledger-contract.md"; return 1 ;;
+        esac
+        # A regression budget, not a golden size: the pre-diet prompts were ~28.5KB.
+        bytes=$(wc -c < "$f" | tr -d ' ')
+        if [ "$bytes" -gt 24000 ]; then
+            echo "$f is ${bytes}B — orchestrator prompt regressed past its 24KB budget"
+            return 1
+        fi
+    done
 }
 
 test_change_size_absent_means_standard() {
@@ -2439,55 +2846,55 @@ run_test "Unknown option exits non-zero" test_invalid_option
 echo ""
 
 echo -e "${BOLD}Claude Code${NC}"
-run_test "Installs all 25 skills to ~/.claude/skills" test_install_claude_code
-run_test "Exactly 25 SKILL.md files" test_claude_code_skill_count
+run_test "Installs all 24 skills to ~/.claude/skills" test_install_claude_code
+run_test "Exactly 24 SKILL.md files" test_claude_code_skill_count
 echo ""
 
 echo -e "${BOLD}OpenCode${NC}"
-run_test "Installs all 25 skills to ~/.config/opencode/skills" test_install_opencode
-run_test "Exactly 25 SKILL.md files" test_opencode_skill_count
+run_test "Installs all 24 skills to ~/.config/opencode/skills" test_install_opencode
+run_test "Exactly 24 SKILL.md files" test_opencode_skill_count
 run_test "Installs 9 command files" test_opencode_commands
 echo ""
 
 echo -e "${BOLD}Gemini CLI${NC}"
-run_test "Installs all 25 skills to ~/.gemini/skills" test_install_gemini_cli
-run_test "Exactly 25 SKILL.md files" test_gemini_cli_skill_count
+run_test "Installs all 24 skills to ~/.gemini/skills" test_install_gemini_cli
+run_test "Exactly 24 SKILL.md files" test_gemini_cli_skill_count
 echo ""
 
 echo -e "${BOLD}Codex${NC}"
-run_test "Installs all 25 skills to ~/.codex/skills" test_install_codex
-run_test "Exactly 25 SKILL.md files" test_codex_skill_count
+run_test "Installs all 24 skills to ~/.codex/skills" test_install_codex
+run_test "Exactly 24 SKILL.md files" test_codex_skill_count
 echo ""
 
 echo -e "${BOLD}VS Code (Copilot)${NC}"
-run_test "Installs all 25 skills to ~/.copilot/skills" test_install_vscode
-run_test "Exactly 25 SKILL.md files" test_vscode_skill_count
+run_test "Installs all 24 skills to ~/.copilot/skills" test_install_vscode
+run_test "Exactly 24 SKILL.md files" test_vscode_skill_count
 echo ""
 
 echo -e "${BOLD}Antigravity${NC}"
-run_test "Installs all 25 skills to ~/.gemini/antigravity/skills/" test_install_antigravity
-run_test "Exactly 25 SKILL.md files" test_antigravity_skill_count
+run_test "Installs all 24 skills to ~/.gemini/antigravity/skills/" test_install_antigravity
+run_test "Exactly 24 SKILL.md files" test_antigravity_skill_count
 echo ""
 
 echo -e "${BOLD}Cursor${NC}"
-run_test "Installs all 25 skills to ~/.cursor/skills" test_install_cursor
-run_test "Exactly 25 SKILL.md files" test_cursor_skill_count
+run_test "Installs all 24 skills to ~/.cursor/skills" test_install_cursor
+run_test "Exactly 24 SKILL.md files" test_cursor_skill_count
 echo ""
 
 echo -e "${BOLD}Project-local${NC}"
-run_test "Installs all 25 skills to ./skills/" test_install_project_local
-run_test "Exactly 25 SKILL.md files" test_project_local_skill_count
+run_test "Installs all 24 skills to ./skills/" test_install_project_local
+run_test "Exactly 24 SKILL.md files" test_project_local_skill_count
 echo ""
 
 echo -e "${BOLD}Custom path${NC}"
 run_test "Installs to arbitrary custom path" test_custom_path
-run_test "Exactly 25 SKILL.md files" test_custom_path_skill_count
+run_test "Exactly 24 SKILL.md files" test_custom_path_skill_count
 run_test "Handles deeply nested custom path" test_nested_custom_path
 echo ""
 
 echo -e "${BOLD}All-global${NC}"
 run_test "Installs to all 5 global targets" test_all_global
-run_test "125 total SKILL.md files (5x25)" test_all_global_total_skill_count
+run_test "120 total SKILL.md files (5x24)" test_all_global_total_skill_count
 run_test "Also installs OpenCode commands" test_all_global_opencode_commands
 echo ""
 
@@ -2526,7 +2933,7 @@ run_test "Balanced marker updates in place + writes backup" test_setup_balanced_
 echo ""
 
 echo -e "${BOLD}setup.sh manifest-driven install + receipt${NC}"
-run_test "setup.sh installs the 25 default skills" test_setup_installs_default_skill_set
+run_test "setup.sh installs the 24 default skills" test_setup_installs_default_skill_set
 run_test "setup.sh includes the default tdd module" test_setup_includes_tdd
 run_test "setup.sh writes an install manifest (receipt)" test_setup_writes_install_manifest
 run_test "uninstall.sh cleans a setup.sh install" test_setup_uninstall_round_trip
@@ -2544,9 +2951,25 @@ run_test "shared SDD prompt files install (9)" test_opencode_shared_prompts_inst
 run_test "multi.json references shared prompt files (not inline)" test_opencode_multi_references_prompt_files
 run_test "profile splices kurama-orchestrator + 9 suffixed agents" test_opencode_profile_generates_agents
 run_test "profile re-run preserves hand-edited models" test_opencode_profile_idempotent_preserves_model
+run_test "explicit :provider/model wins over the saved snapshot" test_opencode_profile_flag_overrides_saved_model
+run_test "install never writes an unusable model" test_opencode_install_writes_no_unusable_model
+run_test "re-run scrubs the old placeholder, keeps real models" test_opencode_rerun_scrubs_placeholder_model
+run_test "committed templates ship no model field" test_opencode_templates_pin_no_model
 run_test "invalid profile name is rejected" test_opencode_profile_rejects_bad_name
 run_test "base-only re-run prunes orphaned kurama-orchestrator" test_opencode_base_rerun_prunes_orphan_orchestrator
 run_test "sdd-status command installs + routes to orchestrator" test_opencode_status_command_installed
+echo ""
+
+echo -e "${BOLD}Kurama startup logo (opt-in, --with-logo)${NC}"
+run_test "both committed artifacts match gen-logo-plugin.mjs" test_logo_plugin_artifact_matches_generator
+run_test "opencode: installs into a missing tui.json (+ receipt)" test_opencode_logo_installs_into_missing_tui_json
+run_test "opencode: nothing is written without --with-logo" test_opencode_logo_is_opt_in
+run_test "opencode: re-running setup does not duplicate the entry" test_opencode_logo_idempotent
+run_test "opencode: existing tui.json entries and keys survive" test_opencode_logo_preserves_existing_tui_json
+run_test "opencode: uninstall strips the entry, user plugin intact" test_opencode_logo_uninstall_removes_entry
+run_test "pi: extension lands with its ANSI escapes (+ receipt)" test_pi_logo_installs_extension
+run_test "pi: opt-in, and a second run adds no duplicate" test_pi_logo_is_opt_in_and_idempotent
+run_test "pi: uninstall removes it, user extension intact" test_pi_logo_uninstall_removes_extension
 echo ""
 
 echo -e "${BOLD}Manifest & versioning${NC}"
@@ -2555,8 +2978,8 @@ run_test "--version prints the version" test_version_flag
 run_test "--version exits with code 0" test_version_exits_zero
 run_test "Install writes an install manifest" test_install_writes_install_manifest
 run_test "Default install includes optional groups" test_default_install_includes_optional_groups
-run_test "--without optional excludes go-testing + kanban-github (23 skills)" test_without_optional_excludes_go_testing
-run_test "--without quality excludes judgment-day (24 skills)" test_without_quality_excludes_judgment_day
+run_test "--without optional excludes kanban-github (23 skills)" test_without_optional_excludes_go_testing
+run_test "--without quality excludes judgment-day (23 skills)" test_without_quality_excludes_judgment_day
 run_test "--without quality --without optional (22 skills)" test_without_both_groups
 run_test "--without sdd-core is rejected" test_reject_without_required_group
 echo ""
@@ -2564,7 +2987,8 @@ echo ""
 echo -e "${BOLD}TDD module (default-on group)${NC}"
 run_test "Default install includes tdd (25 skills)" test_default_install_includes_tdd
 run_test "--without tdd excludes tdd (24 skills)" test_without_tdd_excludes_tdd
-run_test "--with tdd is idempotent (25 skills)" test_with_tdd_includes_tdd
+run_test "lang group is opt-in (--with lang adds go-testing)" test_lang_group_is_opt_in
+run_test "--with tdd is idempotent (24 skills)" test_with_tdd_includes_tdd
 run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_round_trip
 echo ""
 
@@ -2625,6 +3049,7 @@ run_test "gemini-extension.json is valid JSON" test_gemini_extension_json_valid
 run_test "plugin.json version equals VERSION file" test_plugin_json_version_matches_version_file
 run_test "none artifact-store mode is fully removed" test_none_mode_fully_removed
 run_test ".kurama state survives the mode removal" test_kurama_state_survives_mode_removal
+run_test "orchestrator prompt delegates heavy blocks to _shared" test_orchestrator_prompt_delegates_heavy_blocks
 run_test "absent change size resolves to standard" test_change_size_absent_means_standard
 run_test "small change collapses spec/design, never omits" test_small_change_collapses_without_omitting
 run_test "sdd-design description marks spec optional" test_sdd_design_description_marks_spec_optional

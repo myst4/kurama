@@ -48,6 +48,26 @@ Resolution rules, binding on every orchestrator and phase:
   `next_recommended: sdd-propose` — a partial delta merged into the main specs is worse than
   no archive at all.
 
+## Phase I/O (which artifacts each phase reads and writes)
+
+The read/write contract per phase. The orchestrator passes artifact REFERENCES (topic keys
+or file paths), never content; a phase with required dependencies retrieves them itself from
+the active backend via Section B.
+
+| Phase | Reads | Writes |
+|-------|-------|--------|
+| `sdd-explore` | nothing | `explore` |
+| `sdd-propose` | exploration (optional) | `proposal` |
+| `sdd-spec` | proposal (required) | `spec` |
+| `sdd-design` | proposal (required) | `design` |
+| `sdd-tasks` | spec + design (required) | `tasks` |
+| `sdd-apply` | tasks + spec + design | `apply-progress` |
+| `sdd-verify` | spec + tasks | `verify-report` |
+| `sdd-archive` | all artifacts | `archive-report` |
+
+For a `small` change the spec and design arrive as inline sections of the proposal (see
+*Change size and the collapsed path* above); the dependency is satisfied, not skipped.
+
 ## A. Skill Loading
 
 1. Check if the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt. If yes, follow those rules — they are pre-digested compact rules from the skill registry. **Do NOT read any SKILL.md files.**

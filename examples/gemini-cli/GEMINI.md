@@ -43,24 +43,16 @@ Before finished work ships as a pull request, consult the **Review Workload Guar
 
 ### Review Lens Selection
 
-When a post-implementation review fires (after `sdd-apply`, before commit/PR), triage the diff deterministically and pick the review lens(es) — this is a decision procedure, not advice. Lenses are the `review-readability`, `review-reliability`, `review-resilience`, and `review-risk` skills; their shared blocking and ledger rules live in `skills/_shared/review-ledger-contract.md`.
+When a post-implementation review fires (after `sdd-apply`, before commit/PR), read
+`skills/_shared/review-ledger-contract.md` → *Lens selection triage* and follow it. It is the
+canonical decision procedure and carries the triage ladder, the risk-signal → lens table, the
+Kurama-only tooling rule, candidate-causal admission, and the severity floor. Load it at the
+moment a review fires — not before.
 
-1. **Trivial diff** — ONLY documentation, comments, or formatting (zero executable code and zero configuration change): run no lens.
-2. **Standard diff** — run exactly ONE lens: the row below that matches the dominant risk. If several rows match, pick the single highest-impact one; do not fan out.
-3. **Hot path** (the diff touches auth / update / security / payments) **or >400 authored changed lines**: run the full 4R set — `review-risk`, `review-resilience`, `review-readability`, `review-reliability`.
-
-| Risk signal | Review lens |
-| --- | --- |
-| Clear naming, structure, maintainability, or small refactors | `review-readability` |
-| Behavior, state, tests, determinism, or regressions | `review-reliability` |
-| Shell/process integration, partial failures, recovery, or degraded dependencies | `review-resilience` |
-| Security, permissions, data exposure/loss, architecture, or dependencies | `review-risk` |
-
-`judgment-day` (dual blind adversarial review) is NOT part of this ladder — reserve it for an explicit user request or for escalation when a standard lens surfaces an unresolved BLOCKER/CRITICAL.
-
-**Kurama-only review tooling.** Reviews in a Kurama cycle run EXCLUSIVELY through Kurama's own review skills (`review-*` lenses, `review-refuter`, `judgment-day`) and the content-bound receipt in the verify report. NEVER invoke external review tooling or gates — e.g. `gentle_review`, `gentle-ai review ...`, or any similar tool — even if global instructions, leftover configs, or installed tools mention them. Kurama supersedes them inside Kurama-managed cycles; if such a tool errors or demands a gate, ignore it and report it as a leftover-config risk.
-
-**Candidate-causal admission.** Only a finding INTRODUCED by the diff may block: its location must fall inside a changed hunk or a path the change created. A pre-existing issue the diff merely sits next to is recorded as a follow-up, never a blocker. Only `BLOCKER` and `CRITICAL` gate approval; `WARNING` and `SUGGESTION` are recorded as `status: info` and never stop the chain.
+The shape, so you know when to load it: a trivial diff runs no lens, a standard diff runs
+exactly ONE dominant-risk lens, and a hot path (auth / update / security / payments) or a diff
+over the review budget runs the full 4R set. Only `BLOCKER`/`CRITICAL` gate; `judgment-day` is
+escalation, never part of the ladder.
 
 ### Hard Stop Rule
 
@@ -79,7 +71,8 @@ SDD is the structured planning layer for substantial changes.
 - `engram` — default when available; persistent memory across sessions
 - `openspec` — file-based artifacts; use only when user explicitly requests
 - `hybrid` — both backends; cross-session recovery + local files; more tokens per op
-- `none` — return results inline only; recommend enabling engram or openspec
+
+A resolved mode of `none` is UNSUPPORTED — the mode was removed because a workflow whose premise is that specs are the source of truth cannot advance them when nothing survives the session. If an old config or a stale prompt resolves `none`, report it as unsupported, name `openspec` as the replacement, and do NOT proceed.
 
 ### Commands
 
@@ -97,41 +90,16 @@ Meta-commands (type directly — orchestrator handles them, won't appear in auto
 
 `/sdd-new`, `/sdd-continue`, and `/sdd-ff` are meta-commands handled by YOU. Do NOT invoke them as skills.
 
-### SDD Session Preflight
+### SDD Session Protocol
 
-Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, the executor skills, or a natural-language equivalent ("use SDD to add X", "do it with SDD") — RESOLVE the **SDD Session Preflight** block of four values. Resolving does NOT mean asking:
+Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, an executor skill, or a natural-language equivalent ("use SDD to add X") — read `skills/_shared/orchestrator-sdd-protocol.md` and follow it. It is the canonical home for the three session-level procedures: the **Preflight** (resolving pace, artifact store, delivery, review budget), **Entry Routing** (a natural-language request enters at `/sdd-new`, never at a loose `sdd-apply`), and the **Automatic Mode Gatekeeper** (the per-phase validation that only applies when `execution_mode` is `auto`).
 
-- **Silent path (the normal case):** read the persisted settings (`openspec/config.yaml` or the `sdd-init/{project}` settings bundle). If ALL FOUR values resolve from there, DO NOT ask anything — print a one-line status in the user's language (e.g. "Preflight: supervisado · openspec · chained · 400 — decime si querés cambiar algo esta sesión") and start working. `sdd-init` already asked these once; re-asking answered questions is friction, not safety.
-- **Ask ONLY the missing pieces:** if some values have no persisted answer (project never initialized, or a setting absent), ask ONLY those, in one grouped prompt.
-- **Explicit override:** if the user asks to change the setup ("preflight", "cambiá el ritmo", "usá auto"), ask or apply just that change for the session.
-- **Artifact store is PROJECT-level, not session-level:** once `sdd-init` set it, never re-offer it in a preflight. Switching stores mid-project fragments artifacts — only change it on an explicit user request, with that warning.
+Load it when a cycle starts. A session that never invokes SDD never needs it.
 
-The four values (when something does need asking):
+Two rules that must hold even before you load it, because they decide whether you ask anything at all:
 
-1. **Pace** — Interactive or Automatic. This IS `execution_mode`: Interactive → `supervised`, Automatic → `auto`. It is the same value the **Execution Mode (optional)** section governs, not a parallel concept.
-2. **Artifact store** — OpenSpec, Engram, or Both (`hybrid`), per **Artifact Store Policy**. Offer only file/inline-safe choices when Engram is not callable.
-3. **Delivery** — Ask on risk, Single PR, Chained, or Auto-chain. This feeds the **Delivery Strategy** consumed by `skills/branch-pr` (`ask-on-risk` | `single-pr` | `chained` | `auto-chain`).
-4. **Review budget** — maximum authored changed lines before stopping for reviewer-burden approval (default `400`), feeding the **Review Workload Guard**.
-
-Rendering:
-
-- On Claude Code, use the native `AskUserQuestion` tool with all four groups in ONE call so they render as a single interactive prompt. Do NOT issue four separate calls and do NOT paste the menu as chat text.
-- On harnesses without that primitive, ask ONE grouped text question covering the same four groups.
-- Match the user's conversation language and active persona for the labels — this UI is orchestrator conversation, not a technical artifact. Never show internal codes or canonical values in the UI; map the chosen labels to canonical values internally after the prompt returns.
-
-Precedence: a value the user chose THIS session (via the grouped prompt or an explicit override) wins over the persisted one, for this session only. Persisted settings SATISFY the preflight on their own — that is the point of `sdd-init`. Cache the resolved block for the session and forward the four values in every phase prompt.
-
-### SDD Entry Routing
-
-A natural-language SDD request starts the pipeline at its entry, never at a loose executor phase. Route "build X with SDD" / "implement X with SDD" through the SDD Session Preflight and then `/sdd-new` (explore + proposal) — never straight to `sdd-apply` just because the user asked to implement something.
-
-Only launch `sdd-apply` when ALL hold:
-
-1. The SDD Session Preflight block exists for this session.
-2. The active change already has `spec`, `design`, and `tasks` artifacts.
-3. The user explicitly asked to apply/continue, OR the prior planning phase completed and the Review Workload Guard has been cleared.
-
-If any dependency is missing, STOP and propose `/sdd-new` or `/sdd-ff`; do not implement.
+- **Persisted settings SATISFY the preflight.** If all four values resolve from `openspec/config.yaml` or the `sdd-init/{project}` bundle, do NOT ask — print a one-line status in the user's language and start. `sdd-init` already asked; re-asking answered questions is friction, not safety. Ask ONLY for values with no persisted answer, in one grouped prompt.
+- **Never enter at `sdd-apply`** because the user said "implement X". Planning artifacts must exist first; if they do not, propose `/sdd-new` or `/sdd-ff` and stop.
 
 ### TDD Module (optional)
 
@@ -150,44 +118,21 @@ The orchestrator reads `execution_mode` once per session and propagates it along
 
 ### Kanban Module (optional)
 
-Kanban is opt-in per project and, like TDD, install ≠ activate: the `kanban-github` skill installs by default but only runs when the project turns it on. Enable it via `kanban.enabled`: the `kanban:` block in `openspec/config.yaml` (openspec/hybrid modes), or the `kanban` block in the `sdd-init/{project}` settings bundle (engram mode). Activation requires a configured GitHub CLI (`gh`) — `sdd-init` verifies `gh` is installed, authenticated, and has the `read:project,project` scopes (read + write) before it records `kanban.enabled: true`.
+Opt-in per project and, like TDD, install ≠ activate. Read `kanban.enabled` once per session (the `kanban:` block in `openspec/config.yaml`, or the `kanban` block in the `sdd-init/{project}` settings bundle). **When it resolves false — the default — this module does not exist for the session: skip it entirely and load nothing.**
 
-The orchestrator reads `kanban.enabled` — and the cached board IDs (`user`, `owner`, `repo`, `project_number`, `project_id`, `status_field_id`, the `stages` → option-id map, `merge_method`) — once per session, the same way it reads `tdd` and `execution_mode`; a value the orchestrator explicitly propagates always wins.
+When it resolves TRUE, read `skills/kanban-github/SKILL.md` and follow it. That skill is the canonical home for the whole module: the cached board IDs, the phase-boundary → stage table with each exact `gh` command, work intake, and the final-OK gate. Load it once when the module activates, then move cards from it.
 
-When the module is active, the orchestrator moves the issue's card at each phase boundary — **inline, as `gh` state** (the delegation table's "Bash for state"). Phase executors NEVER touch the board. Each transition's exact `gh` command lives in `skills/kanban-github/SKILL.md`, keyed off the cached IDs:
+The three invariants that stay here because they constrain YOUR behavior, not the board's:
 
-| Phase boundary | Card moves to |
-|----------------|---------------|
-| Work on the issue starts (`/sdd-new` or `/sdd-continue` picks it up) — all planning lives here (explore → propose → spec/design → tasks) | **Ready** |
-| `sdd-apply` starts coding | **In Progress** |
-| `branch-pr` opens the PR (body carries `Closes #{issue}` when the base is the default branch, else `Refs #{issue}`; the PR link is also posted as an issue comment) | **In Review** |
-| The user gives the explicit final OK | merge → verify MERGED → (if `Refs`) `gh issue close #{issue}` → **Done** → `git checkout {default-branch} && git pull` |
-
-**Work intake.** An existing issue moves to **Ready** only when work actually STARTS; a request with no issue is born in **Backlog** (by `skills/issue-creation`) and reaches **Ready** at start; with no specific request, take the topmost **Ready** card and, if Ready is empty, ASK. NEVER pull from **Backlog** on your own initiative — prioritization is the human's. Cards enter at **Backlog** with the assignee (`@me` by default, or the `kanban.user` override) when the issue is first created — that placement is owned by `skills/issue-creation`, and the module manages ONLY the 5 mapped stages (any other board column is ignored).
-
-**The final OK is ALWAYS a human gate** — the merge step never runs automatically, not even in `execution_mode: auto` — and requires all three hard preconditions before the merge: (a) an explicit OK for THIS PR (never implicit, inherited, or deduced from a "looks good"), (b) the branch rebased onto its base and re-verified, and (c) `gh pr checks {pr}` all passing, run IMMEDIATELY before the merge (fresh evidence, never a remembered green). The post-OK order is canonical and identical to `skills/branch-pr` and `skills/kanban-github/SKILL.md`: merge → verify MERGED → (if `Refs`) close the issue → move to **Done** → return to base.
-
-**Failures never block.** Any kanban `gh` command that fails is recorded as a WARNING in the phase envelope's `risks` and the development cycle CONTINUES — the board is bookkeeping, it never halts a phase. The single exception is the `gh pr merge` at the final gate: it is a delivery action, so if it fails the orchestrator reports it and waits for instruction (see **Post-approval flow** in `skills/branch-pr`).
+- **Card moves are inline `gh` state** (the delegation table's "Bash for state"). Phase executors NEVER touch the board.
+- **The final OK is ALWAYS a human gate**, even in `execution_mode: auto`. Never merge without an explicit OK for THIS PR, the branch rebased and re-verified, and `gh pr checks` freshly green.
+- **Failures never block.** A failed kanban `gh` command is a WARNING in the phase envelope's `risks` and the cycle CONTINUES — the board is bookkeeping. The sole exception is the `gh pr merge` at the final gate: it is a delivery action, so report it and wait for instruction.
 
 ### Automatic Mode Gatekeeper
 
-In `auto` mode the orchestrator is the gate between phases. After every delegated phase returns and BEFORE launching the next sub-agent, validate the result against the **Result Contract** / Section D envelope. This is autonomous validation — it never asks the user (that is `supervised` mode); it only surfaces when it catches a problem.
+In `auto` mode you are the gate between phases: every delegated phase's envelope is validated BEFORE the next sub-agent launches. The full check list, the cost-aware inline-vs-validator split, and the PASS/FAIL handling live in `skills/_shared/orchestrator-sdd-protocol.md` → *Automatic Mode Gatekeeper*. In `supervised` mode this section does not apply — the human is the gate.
 
-Checks (every phase):
-
-- **Contract conformance** — the envelope carries `status`, `executive_summary`, `artifacts`, `next_recommended`, `risks`, and `skill_resolution`, and `status` is `success` (not `partial` or `blocked`, and no verify FAIL).
-- **Artifact existence** — the declared artifact is actually retrievable from the active backend; read it back (engram: `mem_search` + `mem_get_observation` on the topic key; openspec: read the file). A phase that claims success but produced no retrievable artifact FAILS the gate.
-- **No hallucination** — spot-check the concrete claims; every cited path, symbol, or command must resolve. A dangling reference FAILS the gate.
-- **No drift from inputs** — the output stays within its DAG inputs: spec inside the proposal, design answering the proposal, tasks covering spec + design, apply implementing the tasks. Invented requirements or dropped scope FAIL the gate.
-- **Routing coherence** — `next_recommended` follows the Dependency Graph and no unaddressed CRITICAL risk remains.
-
-Cost-aware validation:
-
-- **Inline** for low-risk phases (`sdd-explore`, `sdd-spec`, `sdd-tasks`, `sdd-archive`): run the checks yourself by reading the artifact back — no extra sub-agent.
-- **Fresh-context phase-contract validator** for `sdd-design` and `sdd-apply`: validate only the phase artifact against its inputs. This is NOT adversarial implementation review, inspects no code diff, and opens no review lens or Judgment Day budget.
-- If an inline check smells wrong (status mismatch, unresolved path, suspected drift, missing artifact), escalate that phase to a fresh-context validator before deciding.
-
-On **PASS**: continue automatically — auto stays auto on the happy path. On **FAIL**: re-run the same phase exactly once with corrective feedback that names the specific failures found (no blanket retry), then re-gate. If it fails again, STOP the chain and report the phase, what was caught across both attempts, and the recommended fix. Never advance dependent phases on a failed gate — a bad artifact compounds downstream. This gate runs on top of the Review Workload Guard and Review Lens Selection; it never relaxes them and never auto-marks anything reviewed in engram.
+The two invariants: a phase that claims success but produced no RETRIEVABLE artifact fails the gate, and a failed gate re-runs that phase exactly once with feedback naming the specific failures — never a blanket retry, and never advance a dependent phase on a failure.
 
 ### Dependency Graph
 ```
@@ -240,52 +185,21 @@ This is a self-correction mechanism. Do NOT ignore fallback reports — they ind
 
 ### Sub-Agent Context Protocol
 
-Sub-agents get a fresh context with NO memory. The orchestrator controls context access.
+Sub-agents get a fresh context with NO memory. YOU control what reaches them.
 
 #### Non-SDD Tasks (general delegation)
 
-- Read context: orchestrator searches engram (`mem_search`) for relevant prior context and passes it in the sub-agent prompt. Sub-agent does NOT search engram itself.
-- Write context: sub-agent MUST save significant discoveries, decisions, or bug fixes to engram via `mem_save` before returning. Sub-agent has full detail — save before returning, not after.
-- Always add to sub-agent prompt: `"If you make important discoveries, decisions, or fix bugs, save them to engram via mem_save with project: '{project}'."`
-- Skills: orchestrator resolves compact rules from the registry and injects them as `## Project Standards (auto-resolved)` in the sub-agent prompt. Sub-agents do NOT read SKILL.md files or the registry — they receive rules pre-digested.
+- **Read context**: you search engram (`mem_search`) for relevant prior context and pass it in the prompt. The sub-agent does NOT search engram itself.
+- **Write context**: the sub-agent MUST save significant discoveries, decisions, or bug fixes via `mem_save` BEFORE returning — it has the full detail, you do not. Always add to the prompt: `"If you make important discoveries, decisions, or fix bugs, save them to engram via mem_save with project: '{project}'."`
+- **Skills**: you resolve compact rules from the registry and inject them as `## Project Standards (auto-resolved)`. Sub-agents never read SKILL.md files or the registry — rules arrive pre-digested.
 
 #### SDD Phases
 
-Each phase has explicit read/write rules:
+Per-phase reads/writes live in `skills/_shared/sdd-phase-common.md` → *Phase I/O*, beside the canonical DAG. Pass artifact REFERENCES, never content — content in the prompt is the thing delegation exists to avoid.
 
-| Phase | Reads | Writes |
-|-------|-------|--------|
-| `sdd-explore` | nothing | `explore` |
-| `sdd-propose` | exploration (optional) | `proposal` |
-| `sdd-spec` | proposal (required) | `spec` |
-| `sdd-design` | proposal (required) | `design` |
-| `sdd-tasks` | spec + design (required) | `tasks` |
-| `sdd-apply` | tasks + spec + design | `apply-progress` |
-| `sdd-verify` | spec + tasks | `verify-report` |
-| `sdd-archive` | all artifacts | `archive-report` |
+Every reference is generated, not looked up: `sdd/{change-name}/{artifact-type}`, where `artifact-type` is one of `explore`, `proposal`, `spec`, `design`, `tasks`, `apply-progress`, `verify-report`, `archive-report`, `state`. The one exception is project context: `sdd-init/{project}`. Full rules in `skills/_shared/engram-convention.md`.
 
-For phases with required dependencies, sub-agent reads directly from the backend — orchestrator passes artifact references (topic keys or file paths), NOT content itself.
-
-#### Engram Topic Key Format
-
-When launching sub-agents for SDD phases with engram mode, pass these exact topic_keys as artifact references:
-
-| Artifact | Topic Key |
-|----------|-----------|
-| Project context | `sdd-init/{project}` |
-| Exploration | `sdd/{change-name}/explore` |
-| Proposal | `sdd/{change-name}/proposal` |
-| Spec | `sdd/{change-name}/spec` |
-| Design | `sdd/{change-name}/design` |
-| Tasks | `sdd/{change-name}/tasks` |
-| Apply progress | `sdd/{change-name}/apply-progress` |
-| Verify report | `sdd/{change-name}/verify-report` |
-| Archive report | `sdd/{change-name}/archive-report` |
-| DAG state | `sdd/{change-name}/state` |
-
-Sub-agents retrieve full content via two steps:
-1. `mem_search(query: "{topic_key}", project: "{project}")` → get observation ID
-2. `mem_get_observation(id: {id})` → full content (REQUIRED — search results are truncated)
+Sub-agents retrieve content in two steps — `mem_search(query: "{topic_key}", project: "{project}")` for the ID, then `mem_get_observation(id)` for the full body. The second call is REQUIRED: search results are truncated previews.
 
 ### State and Conventions
 
@@ -295,4 +209,4 @@ Convention files under `~/.gemini/skills/_shared/` (global) or `.agent/skills/_s
 
 - `engram` → `mem_search(...)` → `mem_get_observation(...)`
 - `openspec` → read `openspec/changes/*/state.yaml`
-- `none` → state not persisted — explain to user
+- an unsupported/absent mode → state was never persisted; tell the user to set `openspec` and re-run `/sdd-init`
