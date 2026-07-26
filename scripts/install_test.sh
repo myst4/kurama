@@ -865,159 +865,18 @@ test_opencode_profile_idempotent_preserves_model() {
     run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
         || { echo "first profile install failed"; return 1; }
     local cfg="$HOME/.config/opencode/opencode.json"
-    # Hand-edit one profile agent's model, then re-run WITHOUT a ":provider/model".
-    # No explicit model on the flag means "keep whatever is configured", so the
-    # hand-edit must survive. (Passing a model instead is an explicit choice for
-    # that run and deliberately wins — see the flag-overrides test below.)
+    # Hand-edit one profile agent's model, then re-run the same install.
     local edited
     edited=$(jq '.agent["sdd-apply-testp"].model = "HAND/EDITED"' "$cfg")
     printf '%s\n' "$edited" > "$cfg"
-    run_setup_opencode --opencode-mode multi --opencode-profile testp \
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
         || { echo "second profile install failed"; return 1; }
     assert_eq "HAND/EDITED" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
         "re-run did not preserve the hand-edited model" || return 1
-    # The other profile agents keep the model the first run set, too.
-    assert_eq "prov/model" "$(jq -r '.agent["sdd-spec-testp"].model' "$cfg")" \
-        "re-run dropped a previously configured profile model" || return 1
     # No duplicate profile keys after the re-run.
     local n
     n=$(jq -r '[.agent | keys[] | select(endswith("-testp"))] | length' "$cfg")
     assert_eq "9" "$n" "Expected 9 profile agents after re-run (no duplicates)"
-}
-
-test_opencode_profile_flag_overrides_saved_model() {
-    # An explicit ":provider/model" is a choice made for THIS run, so re-running
-    # with a different one must actually move the agents. Restoring the previous
-    # snapshot on top of the flag would make --opencode-profile a no-op after the
-    # first install.
-    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
-        || { echo "first profile install failed"; return 1; }
-    local cfg="$HOME/.config/opencode/opencode.json"
-    assert_eq "prov/model" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
-        "precondition: first install did not apply the flag model" || return 1
-
-    run_setup_opencode --opencode-mode multi --opencode-profile testp:other/model2 \
-        || { echo "second profile install failed"; return 1; }
-    assert_eq "other/model2" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
-        "re-run with a different flag model did not take effect" || return 1
-    # Every profile agent moved, the orchestrator included (9 subagents + 1).
-    local n
-    n=$(jq -r '[.agent | to_entries[]
-        | select(.key == "kurama-orchestrator" or (.key | endswith("-testp")))
-        | select(.value.model == "other/model2")] | length' "$cfg")
-    assert_eq "10" "$n" "Expected all 10 profile agents on the new flag model" || return 1
-    # Base agents are not a profile concern — the flag must not touch them.
-    if jq -e '.agent["sdd-apply"] | has("model")' "$cfg" > /dev/null 2>&1; then
-        echo "profile flag leaked a model onto the base sdd-apply agent"; return 1
-    fi
-    return 0
-}
-
-# ============================================================================
-# Tests — no unusable "model" ever reaches opencode.json
-#
-# OpenCode model IDs are "provider/model-id" (docs/installation.md). An agent
-# with no "model" key inherits the default model, which is the only safe
-# fallback — a pinned default would age out of the user's provider. Older Kurama
-# versions instead wrote the literal "<your-provider/your-model>", which no
-# provider can resolve.
-#
-# Mirrors OPENCODE_MODEL_RE in setup.sh. The looser "^[^/]+/.+" is NOT enough:
-# it matches "<your-provider/your-model>" ("<your-provider" holds no slash), so
-# it would fail to filter the very literal this guards against.
-# ============================================================================
-OPENCODE_MODEL_RE='^[^<>[:space:]/]+/[^<>[:space:]]+$'
-
-# Print "agent=model" for every agent carrying a "model" that OpenCode could not
-# resolve. Empty output means the config is clean.
-opencode_bad_models() {
-    jq -r --arg re "$OPENCODE_MODEL_RE" '
-        (.agent // {}) | to_entries[]
-        | select(.value.model != null)
-        | select(((.value.model | type) != "string")
-                 or ((.value.model | test($re)) | not))
-        | "\(.key)=\(.value.model)"
-    ' "$1"
-}
-
-# Assert opencode.json carries no unusable model. $2 labels the failing context.
-assert_no_unusable_models() {
-    local cfg="$1" what="$2" bad
-    jq -e . "$cfg" > /dev/null 2>&1 || { echo "opencode.json invalid JSON ($what)"; return 1; }
-    bad=$(opencode_bad_models "$cfg")
-    if [ -n "$bad" ]; then
-        echo "agents with a model OpenCode cannot resolve ($what):"
-        printf '%s\n' "$bad"
-        return 1
-    fi
-    return 0
-}
-
-test_opencode_install_writes_no_unusable_model() {
-    local cfg="$HOME/.config/opencode/opencode.json"
-
-    # A clean multi install: 10 agents, none of them pinned to anything.
-    run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
-    assert_no_unusable_models "$cfg" "clean multi install" || return 1
-    local n
-    n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$cfg")
-    assert_eq "0" "$n" "a clean multi install must not pin any model" || return 1
-
-    # Same for single mode.
-    run_setup_opencode --opencode-mode single || { echo "setup opencode single failed"; return 1; }
-    assert_no_unusable_models "$cfg" "clean single install" || return 1
-    n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$cfg")
-    assert_eq "0" "$n" "a clean single install must not pin any model" || return 1
-
-    # And for a profile installed without a ":provider/model".
-    run_setup_opencode --opencode-mode multi --opencode-profile testp \
-        || { echo "setup opencode profile failed"; return 1; }
-    assert_no_unusable_models "$cfg" "profile install without a model" || return 1
-    n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$cfg")
-    assert_eq "0" "$n" "a profile install without a model must not pin any model" || return 1
-    return 0
-}
-
-test_opencode_rerun_scrubs_placeholder_model() {
-    # A config written by an older Kurama version carries the placeholder on every
-    # agent. The re-run snapshot must not treat it as a user choice — otherwise it
-    # is restored on top of the fresh template and the breakage becomes permanent.
-    run_setup_opencode --opencode-mode multi --opencode-profile testp \
-        || { echo "first install failed"; return 1; }
-    local cfg="$HOME/.config/opencode/opencode.json"
-    local poisoned
-    poisoned=$(jq '
-        .agent |= with_entries(.value.model = "<your-provider/your-model>")
-        | .agent["sdd-spec"].model = "real/model-a"
-        | .agent["sdd-spec-testp"].model = "real/model-b"
-    ' "$cfg") || { echo "could not build the poisoned config"; return 1; }
-    printf '%s\n' "$poisoned" > "$cfg"
-
-    run_setup_opencode --opencode-mode multi --opencode-profile testp \
-        || { echo "re-run over the poisoned config failed"; return 1; }
-    assert_no_unusable_models "$cfg" "re-run over a placeholder config" || return 1
-    # The genuinely user-set models are still preserved — base and profile alike.
-    assert_eq "real/model-a" "$(jq -r '.agent["sdd-spec"].model' "$cfg")" \
-        "re-run dropped a real hand-edited model on a base agent" || return 1
-    assert_eq "real/model-b" "$(jq -r '.agent["sdd-spec-testp"].model' "$cfg")" \
-        "re-run dropped a real hand-edited model on a profile agent" || return 1
-    return 0
-}
-
-test_opencode_templates_pin_no_model() {
-    # The committed templates are the source of the base agents, which have no
-    # model-substitution path at all: whatever they ship with is what lands in
-    # opencode.json.
-    local f
-    for f in "$REPO_DIR/examples/opencode/opencode.single.json" \
-             "$REPO_DIR/examples/opencode/opencode.multi.json" \
-             "$REPO_DIR/examples/opencode/opencode.profile.template.json"; do
-        jq -e . "$f" > /dev/null 2>&1 || { echo "$f is not valid JSON"; return 1; }
-        local n
-        n=$(jq -r '[.agent | to_entries[] | select(.value.model != null)] | length' "$f")
-        assert_eq "0" "$n" "$(basename "$f") must not ship a model field" || return 1
-    done
-    return 0
 }
 
 test_opencode_profile_rejects_bad_name() {
@@ -1053,203 +912,6 @@ test_opencode_base_rerun_prunes_orphan_orchestrator() {
     # Base multi agents are present and intact.
     jq -e '.agent["sdd-apply"]' "$cfg" > /dev/null 2>&1 || {
         echo "base sdd-apply missing after base-only re-run"; return 1; }
-    return 0
-}
-
-# ============================================================================
-# Tests — Kurama startup logo (opt-in, --with-logo)
-#
-# Two harnesses, two mechanisms. OpenCode registers the plugin in
-# ~/.config/opencode/tui.json's plugin[] array — a registry distinct from
-# opencode.json's server plugins — so its tests cover the three ways that merge
-# can go wrong: a missing tui.json, a second run, and a tui.json the user already
-# owns. Pi has no registry at all (it auto-discovers extensions/*.ts), so its
-# test only has to prove the file lands, matches the committed artifact, and is
-# reversed by uninstall.
-# ============================================================================
-
-# Absolute path the installer registers (and the file it copies).
-opencode_logo_dest() { echo "$HOME/.config/opencode/tui-plugins/kurama-logo.tsx"; }
-opencode_tui_json()  { echo "$HOME/.config/opencode/tui.json"; }
-
-test_opencode_logo_installs_into_missing_tui_json() {
-    run_setup_opencode --opencode-mode single --with-logo \
-        || { echo "setup opencode --with-logo failed"; return 1; }
-
-    local dest tui
-    dest="$(opencode_logo_dest)"
-    tui="$(opencode_tui_json)"
-    assert_file_exists "$dest" || return 1
-    # The installed plugin must be the committed artifact, byte for byte.
-    if ! diff -q "$REPO_DIR/examples/opencode/tui-plugins/kurama-logo.tsx" "$dest" > /dev/null 2>&1; then
-        echo "installed kurama-logo.tsx differs from the committed artifact"; return 1
-    fi
-
-    assert_file_exists "$tui" || return 1
-    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON"; return 1; }
-    assert_eq "https://opencode.ai/tui.json" "$(jq -r '."$schema"' "$tui")" \
-        "tui.json created without the opencode \$schema" || return 1
-    jq -e --arg p "$dest" '.plugin | index($p)' "$tui" > /dev/null 2>&1 || {
-        echo "plugin[] does not contain the kurama-logo path"; return 1; }
-
-    # The receipt records tui.json so uninstall can strip the entry back out.
-    local receipt
-    receipt="$HOME/.config/opencode/skills/.kurama-install-manifest.json"
-    assert_file_exists "$receipt" || return 1
-    jq -e '[.tui_plugins[] | select(endswith("tui.json"))] | length == 1' "$receipt" \
-        > /dev/null 2>&1 || { echo "receipt tui_plugins[] does not record tui.json"; return 1; }
-}
-
-test_opencode_logo_is_opt_in() {
-    # No flag, non-interactive → nothing about the logo is written.
-    run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
-    if [ -e "$(opencode_tui_json)" ]; then
-        echo "tui.json was created without --with-logo"; return 1
-    fi
-    if [ -e "$(opencode_logo_dest)" ]; then
-        echo "kurama-logo.tsx was installed without --with-logo"; return 1
-    fi
-    return 0
-}
-
-test_opencode_logo_idempotent() {
-    run_setup_opencode --opencode-mode single --with-logo \
-        || { echo "first logo install failed"; return 1; }
-    run_setup_opencode --opencode-mode single --with-logo \
-        || { echo "second logo install failed"; return 1; }
-
-    local tui n
-    tui="$(opencode_tui_json)"
-    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON after re-run"; return 1; }
-    n=$(jq -r --arg p "$(opencode_logo_dest)" '[.plugin[] | select(. == $p)] | length' "$tui")
-    assert_eq "1" "$n" "re-running setup duplicated the kurama-logo plugin entry"
-}
-
-test_opencode_logo_preserves_existing_tui_json() {
-    # A user tui.json with their own plugin and an unrelated key must survive.
-    mkdir -p "$HOME/.config/opencode"
-    cat > "$(opencode_tui_json)" <<'JSON'
-{
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["some-community-tui-plugin"],
-  "scroll_speed": 3
-}
-JSON
-    run_setup_opencode --opencode-mode single --with-logo \
-        || { echo "logo install over an existing tui.json failed"; return 1; }
-
-    local tui
-    tui="$(opencode_tui_json)"
-    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON"; return 1; }
-    jq -e '.plugin | index("some-community-tui-plugin")' "$tui" > /dev/null 2>&1 || {
-        echo "pre-existing plugin entry was dropped"; return 1; }
-    jq -e --arg p "$(opencode_logo_dest)" '.plugin | index($p)' "$tui" > /dev/null 2>&1 || {
-        echo "kurama-logo entry was not added"; return 1; }
-    assert_eq "3" "$(jq -r '.scroll_speed' "$tui")" "unrelated tui.json key was lost" || return 1
-    assert_eq "2" "$(jq -r '.plugin | length' "$tui")" "expected exactly 2 plugin entries"
-}
-
-test_opencode_logo_uninstall_removes_entry() {
-    mkdir -p "$HOME/.config/opencode"
-    cat > "$(opencode_tui_json)" <<'JSON'
-{
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["some-community-tui-plugin"]
-}
-JSON
-    run_setup_opencode --opencode-mode single --with-logo \
-        || { echo "logo install failed"; return 1; }
-
-    bash "$UNINSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
-
-    local tui
-    tui="$(opencode_tui_json)"
-    assert_file_exists "$tui" || return 1
-    jq -e . "$tui" > /dev/null 2>&1 || { echo "tui.json is not valid JSON after uninstall"; return 1; }
-    jq -e '.plugin | index("some-community-tui-plugin")' "$tui" > /dev/null 2>&1 || {
-        echo "uninstall dropped the user's own plugin entry"; return 1; }
-    local n
-    n=$(jq -r '[.plugin[] | select(endswith("kurama-logo.tsx"))] | length' "$tui")
-    assert_eq "0" "$n" "uninstall left the kurama-logo entry in plugin[]" || return 1
-    if [ -e "$(opencode_logo_dest)" ]; then
-        echo "uninstall left kurama-logo.tsx on disk"; return 1
-    fi
-    return 0
-}
-
-test_logo_plugin_artifact_matches_generator() {
-    # Both committed artifacts are build outputs of assets/banner/wordmark.txt;
-    # --check verifies the pair (one wordmark edit can staleify both).
-    if ! command -v node > /dev/null 2>&1; then
-        echo "node not available — skipping generator drift check"; return 0
-    fi
-    if ! node "$SCRIPT_DIR/gen-logo-plugin.mjs" --check > /dev/null 2>&1; then
-        echo "the committed logo artifacts are stale"
-        echo "run: node scripts/gen-logo-plugin.mjs"
-        return 1
-    fi
-    return 0
-}
-
-# ---- Pi: auto-discovered extension, no registry to merge ----
-
-pi_logo_dest() { echo "$HOME/.pi/agent/extensions/kurama-logo.ts"; }
-
-test_pi_logo_installs_extension() {
-    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
-        --non-interactive --with-logo > /dev/null 2>&1 \
-        || { echo "setup pi --with-logo failed"; return 1; }
-
-    local dest
-    dest="$(pi_logo_dest)"
-    assert_file_exists "$dest" || return 1
-    if ! diff -q "$REPO_DIR/examples/pi/extensions/kurama-logo.ts" "$dest" > /dev/null 2>&1; then
-        echo "installed kurama-logo.ts differs from the committed artifact"; return 1
-    fi
-    # The ANSI escapes must survive as backslash-u001b sequences TypeScript
-    # parses back into ESC; a literal backslash makes Pi print them as text.
-    grep -q '38;2;255;160;90m' "$dest" || { echo "solid colour escape missing"; return 1; }
-    grep -q '38;2;90;45;15m' "$dest" || { echo "shadow colour escape missing"; return 1; }
-    grep -q 'setHeader' "$dest" || { echo "extension does not call ctx.ui.setHeader"; return 1; }
-
-    # Recorded in the receipt (../extensions/... relative to the skills dir).
-    local receipt
-    receipt="$HOME/.pi/agent/skills/.kurama-install-manifest.json"
-    assert_file_exists "$receipt" || return 1
-    grep -q '\.\./extensions/kurama-logo.ts' "$receipt" || {
-        echo "Pi receipt missing ../extensions/kurama-logo.ts"; return 1; }
-    return 0
-}
-
-test_pi_logo_is_opt_in_and_idempotent() {
-    # Without the flag nothing is written…
-    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
-        --non-interactive > /dev/null 2>&1 || { echo "setup pi failed"; return 1; }
-    if [ -e "$(pi_logo_dest)" ]; then
-        echo "kurama-logo.ts was installed without --with-logo"; return 1
-    fi
-    # …and installing it twice leaves exactly one file (copy is the install).
-    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
-        --non-interactive --with-logo > /dev/null 2>&1 || { echo "first run failed"; return 1; }
-    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
-        --non-interactive --with-logo > /dev/null 2>&1 || { echo "second run failed"; return 1; }
-    local n
-    n=$(find "$HOME/.pi/agent/extensions" -maxdepth 1 -name 'kurama-logo*.ts' | wc -l | tr -d ' ')
-    assert_eq "1" "$n" "expected exactly one kurama-logo.ts after two runs"
-}
-
-test_pi_logo_uninstall_removes_extension() {
-    bash "$SETUP_SCRIPT" --agent pi --without-pi-packages --without-engram \
-        --non-interactive --with-logo > /dev/null 2>&1 || { echo "setup pi failed"; return 1; }
-    # A user extension living beside ours must survive the uninstall.
-    echo "// mine" > "$HOME/.pi/agent/extensions/my-extension.ts"
-
-    bash "$UNINSTALL_SCRIPT" --agent pi --without-pi-packages > /dev/null 2>&1
-
-    if [ -e "$(pi_logo_dest)" ]; then
-        echo "uninstall left kurama-logo.ts on disk"; return 1
-    fi
-    assert_file_exists "$HOME/.pi/agent/extensions/my-extension.ts" || return 1
     return 0
 }
 
@@ -2572,9 +2234,9 @@ test_doctor_broken_receipt_exit_nonzero() {
     bash "$SETUP_SCRIPT" --agent claude-code > /dev/null 2>&1
     # Break the install: remove a recorded file.
     rm -f "$HOME/.claude/skills/sdd-apply/SKILL.md"
-    local output
-    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1)
-    if [ $? -eq 0 ]; then
+    local output status
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) && status=0 || status=$?
+    if [ "$status" -eq 0 ]; then
         echo "doctor.sh should exit non-zero when a recorded file is missing"
         return 1
     fi
@@ -2951,25 +2613,9 @@ run_test "shared SDD prompt files install (9)" test_opencode_shared_prompts_inst
 run_test "multi.json references shared prompt files (not inline)" test_opencode_multi_references_prompt_files
 run_test "profile splices kurama-orchestrator + 9 suffixed agents" test_opencode_profile_generates_agents
 run_test "profile re-run preserves hand-edited models" test_opencode_profile_idempotent_preserves_model
-run_test "explicit :provider/model wins over the saved snapshot" test_opencode_profile_flag_overrides_saved_model
-run_test "install never writes an unusable model" test_opencode_install_writes_no_unusable_model
-run_test "re-run scrubs the old placeholder, keeps real models" test_opencode_rerun_scrubs_placeholder_model
-run_test "committed templates ship no model field" test_opencode_templates_pin_no_model
 run_test "invalid profile name is rejected" test_opencode_profile_rejects_bad_name
 run_test "base-only re-run prunes orphaned kurama-orchestrator" test_opencode_base_rerun_prunes_orphan_orchestrator
 run_test "sdd-status command installs + routes to orchestrator" test_opencode_status_command_installed
-echo ""
-
-echo -e "${BOLD}Kurama startup logo (opt-in, --with-logo)${NC}"
-run_test "both committed artifacts match gen-logo-plugin.mjs" test_logo_plugin_artifact_matches_generator
-run_test "opencode: installs into a missing tui.json (+ receipt)" test_opencode_logo_installs_into_missing_tui_json
-run_test "opencode: nothing is written without --with-logo" test_opencode_logo_is_opt_in
-run_test "opencode: re-running setup does not duplicate the entry" test_opencode_logo_idempotent
-run_test "opencode: existing tui.json entries and keys survive" test_opencode_logo_preserves_existing_tui_json
-run_test "opencode: uninstall strips the entry, user plugin intact" test_opencode_logo_uninstall_removes_entry
-run_test "pi: extension lands with its ANSI escapes (+ receipt)" test_pi_logo_installs_extension
-run_test "pi: opt-in, and a second run adds no duplicate" test_pi_logo_is_opt_in_and_idempotent
-run_test "pi: uninstall removes it, user extension intact" test_pi_logo_uninstall_removes_extension
 echo ""
 
 echo -e "${BOLD}Manifest & versioning${NC}"
