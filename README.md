@@ -76,6 +76,18 @@ Windows PowerShell:
 .\scripts\setup.ps1 -All    # set up every detected agent
 ```
 
+**One specific agent.** Pass `--agent` to skip detection —
+`claude-code`, `opencode`, `omp`, `pi`, `gemini-cli`, `codex`, `cursor`, or `vscode`:
+
+```bash
+./scripts/setup.sh --agent omp          # skills + orchestrator + 17 task agents + RULES.md
+./scripts/setup.sh --agent claude-code  # skills + orchestrator + 17 agents + hooks
+```
+
+> **Running omp?** Use `--agent omp`, not `--agent pi`. They are different binaries with
+> different config roots, and `--agent pi` would install where omp never looks — the
+> failure is silent. See [omp](docs/installation.md#omp).
+
 **Trial it in one repo.** To evaluate Kurama in a single project without touching
 your global config, add `--scope project --path <repo>` — skills, native agents,
 hooks, and the orchestrator merge all land inside that repo, with one receipt at

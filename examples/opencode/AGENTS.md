@@ -89,9 +89,13 @@ A resolved mode of `none` is UNSUPPORTED — the mode was removed because a work
 
 ### Commands
 
-Skills (appear in autocomplete):
+Phase skills (appear in autocomplete). All 9 install; the 4 planning phases are normally reached through `/sdd-new` or `/sdd-ff` rather than invoked directly, but they exist as skills and you MAY delegate any of them individually when resuming or re-running one phase:
 - `/sdd-init` → initialize SDD context; detects stack, bootstraps persistence. **Runs ONCE per project.** If the project is already initialized (settings bundle / `openspec/config.yaml` exists), NEVER launch it implicitly — not from `/sdd-new`, not to "refresh" anything. Re-run it ONLY on an explicit user request to change configuration ("re-corré el init", "activá TDD", "cambiá el kanban"); it upserts existing settings, never duplicates. If the project is NOT initialized, propose `/sdd-init` and wait for the user.
 - `/sdd-explore <topic>` → investigate an idea; reads codebase, compares approaches; no files created
+- `/sdd-propose` → write the change proposal, and classify the change `small` or `standard`
+- `/sdd-spec` → write the delta spec (requirements + Given/When/Then scenarios)
+- `/sdd-design` → write the technical design; MAY run in parallel with `sdd-spec`
+- `/sdd-tasks` → break the change into an implementation checklist
 - `/sdd-apply [change]` → implement tasks in batches; checks off items as it goes
 - `/sdd-verify [change]` → validate implementation against specs; reports CRITICAL / WARNING / SUGGESTION
 - `/sdd-archive [change]` → close a change and persist final state in the active artifact store
