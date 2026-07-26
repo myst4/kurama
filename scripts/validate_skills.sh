@@ -214,8 +214,8 @@ check_manifest() {
         [ -n "$name" ] || continue
         listed="$listed $name"
         case "$group" in
-            sdd-core|quality|review|optional|tdd) ;;
-            *) fail "manifest: skill '$name' has invalid group '$group' (expected sdd-core|quality|review|optional|tdd)" ;;
+            sdd-core|quality|review|optional|tdd|lang) ;;
+            *) fail "manifest: skill '$name' has invalid group '$group' (expected sdd-core|quality|review|optional|tdd|lang)" ;;
         esac
         if [ ! -d "$SKILLS_SRC/$name" ]; then
             fail "manifest lists '$name' but skills/$name/ does not exist"

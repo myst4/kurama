@@ -377,7 +377,7 @@ function Install-Skills {
     if (-not (Test-Path $manifestFile)) {
         throw "Missing skills/manifest.json (the skill list source of truth)"
     }
-    $defaultGroups = @{ 'sdd-core' = $true; 'quality' = $true; 'review' = $true; 'optional' = $true; 'tdd' = $true }
+    $defaultGroups = @{ 'sdd-core' = $true; 'quality' = $true; 'review' = $true; 'optional' = $true; 'tdd' = $true; 'lang' = $false }
     $manifest = Get-Content -Path $manifestFile -Raw | ConvertFrom-Json
     $skillDirs = @()
     foreach ($entry in $manifest.skills) {
