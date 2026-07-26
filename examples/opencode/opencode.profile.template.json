@@ -2,7 +2,6 @@
   "$schema": "https://opencode.ai/config.json",
   "agent": {
     "kurama-orchestrator": {
-      "model": "<your-provider/your-model>",
       "mode": "primary",
       "description": "Kurama Orchestrator (kurama profile) - coordinates the kurama-suffixed per-phase sub-agents, never does work inline. Switch to it with Tab.",
       "prompt": "{file:./AGENTS.md}",
@@ -23,7 +22,6 @@
       }
     },
     "sdd-init-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Bootstrap SDD context and project configuration",
@@ -36,7 +34,6 @@
       }
     },
     "sdd-explore-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Investigate codebase and think through ideas",
@@ -49,7 +46,6 @@
       }
     },
     "sdd-propose-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Create change proposals from explorations",
@@ -62,7 +58,6 @@
       }
     },
     "sdd-spec-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Write detailed specifications from proposals",
@@ -75,7 +70,6 @@
       }
     },
     "sdd-design-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Create technical design from proposals",
@@ -88,7 +82,6 @@
       }
     },
     "sdd-tasks-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Break down specs and designs into implementation tasks",
@@ -101,7 +94,6 @@
       }
     },
     "sdd-apply-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Implement code changes from task definitions",
@@ -114,7 +106,6 @@
       }
     },
     "sdd-verify-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Validate implementation against specs",
@@ -127,7 +118,6 @@
       }
     },
     "sdd-archive-kurama": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Archive completed change artifacts",

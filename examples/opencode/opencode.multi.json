@@ -2,7 +2,6 @@
   "$schema": "https://opencode.ai/config.json",
   "agent": {
     "sdd-orchestrator": {
-      "model": "<your-provider/your-model>",
       "mode": "primary",
       "description": "Kurama Orchestrator (multi mode) - coordinates dedicated per-phase sub-agents, never does work inline",
       "prompt": "{file:./AGENTS.md}",
@@ -23,7 +22,6 @@
       }
     },
     "sdd-init": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Bootstrap SDD context and project configuration",
@@ -36,7 +34,6 @@
       }
     },
     "sdd-explore": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Investigate codebase and think through ideas",
@@ -49,7 +46,6 @@
       }
     },
     "sdd-propose": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Create change proposals from explorations",
@@ -62,7 +58,6 @@
       }
     },
     "sdd-spec": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Write detailed specifications from proposals",
@@ -75,7 +70,6 @@
       }
     },
     "sdd-design": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Create technical design from proposals",
@@ -88,7 +82,6 @@
       }
     },
     "sdd-tasks": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Break down specs and designs into implementation tasks",
@@ -101,7 +94,6 @@
       }
     },
     "sdd-apply": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Implement code changes from task definitions",
@@ -114,7 +106,6 @@
       }
     },
     "sdd-verify": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Validate implementation against specs",
@@ -127,7 +118,6 @@
       }
     },
     "sdd-archive": {
-      "model": "<your-provider/your-model>",
       "mode": "subagent",
       "hidden": true,
       "description": "Archive completed change artifacts",

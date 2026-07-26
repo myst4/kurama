@@ -270,6 +270,51 @@ remove_engram_from_config() {
     esac
 }
 
+# Strip the Kurama TUI logo plugin from an OpenCode tui.json recorded in the
+# receipt's tui_plugins[]. Mirrors gentle-ai's removeTUIPlugin: drop every
+# plugin[] entry pointing at tui-plugins/kurama-logo.tsx and leave the rest of
+# the file — $schema, other plugins, unrelated keys — exactly as it was. Matching
+# on the suffix (not the absolute path) keeps removal working when the receipt
+# was written under a different HOME. jq only (never sed on JSON); backup +
+# atomic. The plugin .tsx itself is recorded in files[] and removed with them.
+remove_tui_plugin_from_config() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+
+    if ! command -v jq >/dev/null 2>&1; then
+        print_warn "jq not found — cannot strip the Kurama logo entry from $file"
+        print_info "Manually remove the tui-plugins/kurama-logo.tsx entry from plugin[]"
+        return 0
+    fi
+    if ! jq -e . "$file" >/dev/null 2>&1; then
+        print_warn "$file is not valid JSON — leaving it untouched"
+        return 0
+    fi
+
+    # Nothing of ours registered → leave the file (and its mtime) alone.
+    jq -e '[(.plugin // [])[]
+        | select(if type == "string"
+                 then endswith("tui-plugins/kurama-logo.tsx") else false end)]
+        | length > 0' "$file" >/dev/null 2>&1 || return 0
+
+    if $DRY_RUN; then
+        print_info "would strip the Kurama logo plugin from: $file"
+        return 0
+    fi
+
+    local cleaned tmp
+    cleaned=$(jq '
+        .plugin = ((.plugin // []) | map(select(
+            (if type == "string"
+             then endswith("tui-plugins/kurama-logo.tsx") else false end) | not)))
+    ' "$file") || { print_warn "failed to clean $file"; return 0; }
+    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
+    cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+    printf '%s\n' "$cleaned" > "$tmp"
+    mv "$tmp" "$file"
+    print_ok "stripped the Kurama logo plugin from $file"
+}
+
 # Strip Kurama's orchestrator block (BEGIN:kurama … END:kurama) from a prompt file
 # recorded in the receipt's prompts[]. Only strips when BOTH markers are present —
 # an unbalanced pair is left untouched to avoid deleting user content. Everything
@@ -420,6 +465,20 @@ EOF
         esac
     done <<EOF
 $prompts
+EOF
+
+    # Strip the Kurama logo entry from every opencode tui.json the receipt
+    # recorded (tui_plugins[]). Same relative/absolute handling as above.
+    local tfile tui_files
+    tui_files="$(manifest_json_array "$manifest" "tui_plugins")"
+    while IFS= read -r tfile; do
+        [ -n "$tfile" ] || continue
+        case "$tfile" in
+            /*) remove_tui_plugin_from_config "$tfile" ;;
+            *)  remove_tui_plugin_from_config "$dir/$tfile" ;;
+        esac
+    done <<EOF
+$tui_files
 EOF
 
     offer_pi_uninstall "$manifest"

@@ -120,3 +120,8 @@ bash/`jq` equivalent:
 The `background-agents.ts` delegation plugin is retained (unchanged by profiles):
 its disk-persisted async `delegate` survives compaction, which is an advantage over
 the native `task` tool.
+
+gentle-ai's `home_logo` TUI plugin **is** ported, as the opt-in `--with-logo`
+flag (which also installs Pi's startup header) — it is orthogonal to profiles
+(purely cosmetic) and is documented in
+[installation.md](installation.md#kurama-startup-logo-opt-in).

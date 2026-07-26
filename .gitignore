@@ -14,3 +14,5 @@ node_modules/
 
 # Kurama harness state (registry, fallback SDD artifacts)
 .kurama/
+# Local Pi runtime state
+.atl/

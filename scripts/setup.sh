@@ -50,6 +50,7 @@ RECEIPT_SETTINGS=""      # newline list of settings.json paths (relative to RECE
 RECEIPT_PI_PACKAGES=""   # newline list of "npm:pkg@ver" specs installed via pi
 RECEIPT_ENGRAM_MCP=""    # O5: newline list of config files an Engram MCP server was written to
 RECEIPT_PROMPTS=""       # newline list of orchestrator prompt files carrying a removable BEGIN:kurama block
+RECEIPT_TUI_PLUGINS=""   # newline list of opencode tui.json files a Kurama TUI plugin was registered in
 
 # O5: Engram optional persistence engine. setup asks ONCE (or honors the
 # --with-engram/--without-engram flags) whether to wire Engram as the memory
@@ -530,10 +531,12 @@ _json_array() {
 # Extends install.sh's format with additive fields — "scope", "settings"
 # (settings.json files carrying a surgically-removable kurama hooks block),
 # "pi_packages" (packages installed via `pi install`), "engram_mcp" (client
-# config files an Engram MCP server was written into) and "prompts" (orchestrator
-# prompt files carrying a removable BEGIN:kurama block) — so uninstall/update/
-# doctor can reverse and re-sync exactly what setup wrote. Older receipts that
-# lack these fields still parse (the consumers treat them as global/empty).
+# config files an Engram MCP server was written into), "prompts" (orchestrator
+# prompt files carrying a removable BEGIN:kurama block) and "tui_plugins"
+# (opencode tui.json files carrying a removable kurama-logo entry) — so
+# uninstall/update/doctor can reverse and re-sync exactly what setup wrote. Older
+# receipts that lack these fields still parse (consumers treat them as
+# global/empty).
 finalize_receipt() {
     [ -n "$RECEIPT_DIR" ] || return 0
     local manifest_path="$RECEIPT_DIR/$INSTALL_MANIFEST_NAME"
@@ -565,6 +568,9 @@ finalize_receipt() {
         printf '  ],\n'
         printf '  "prompts": [\n'
         _json_array "$RECEIPT_PROMPTS"
+        printf '  ],\n'
+        printf '  "tui_plugins": [\n'
+        _json_array "$RECEIPT_TUI_PLUGINS"
         printf '  ]\n'
         printf '}\n'
     } > "$manifest_path"
@@ -993,6 +999,21 @@ $(receipt_rel "$prompt_path")"
 # OpenCode Special Handling
 # ============================================================================
 
+# Shape of a model ID OpenCode can actually resolve: "provider/model-id" (see
+# docs/installation.md — "The format is provider/model-id"). Used to decide which
+# existing "model" values are worth preserving across a re-run.
+#
+# The templates deliberately ship NO "model" key: an agent without one inherits
+# OpenCode's default model, which is the only safe fallback (a pinned default
+# would age out of the user's provider). Older Kurama versions wrote the literal
+# "<your-provider/your-model>" instead, which is not a resolvable ID; a plain
+# truthy check would preserve it on every re-run and make the breakage sticky.
+#
+# Note the pattern excludes "<", ">" and whitespace on purpose: the looser
+# "^[^/]+/.+" *matches* "<your-provider/your-model>" (the "<your-provider" part
+# contains no slash), so it would not filter the very literal this exists for.
+OPENCODE_MODEL_RE='^[^<>[:space:]/]+/[^<>[:space:]]+$'
+
 ask_opencode_mode() {
     # If already set via flag, skip
     [[ -n "$OPENCODE_MODE" ]] && return
@@ -1074,32 +1095,43 @@ install_opencode_profile() {
     fi
 
     # Derive the profile agents from the template: rename the "-kurama" suffix to
-    # "-NAME", set the model when one was supplied, and scope the orchestrator's
-    # task permission to this profile's own suffixed subagents.
+    # "-NAME" and scope the orchestrator's task permission to this profile's own
+    # suffixed subagents. The template carries no "model" key, so an agent nobody
+    # assigns a model to simply inherits OpenCode's default — the model from the
+    # flag is applied further down, AFTER the restore, so it can win.
     local profile_agents
-    profile_agents=$(jq --arg name "$name" --arg model "$model" '
+    profile_agents=$(jq --arg name "$name" '
         .agent
         | with_entries(
             if (.key|startswith("sdd-")) and (.key|endswith("-kurama"))
             then .key |= (.[:-7] + "-" + $name)
             else . end)
-        | (if $model != "" then with_entries(.value.model = $model) else . end)
         | .["kurama-orchestrator"].permission.task = {"*":"deny", ("sdd-*-"+$name):"allow"}
     ' "$template") || { warn "Failed to build profile agents"; return 0; }
 
     # $saved carries the profile agents' user-edited models captured BEFORE the
     # base merge (which strips every sdd-* key, this profile's subagents included).
     local merged
-    merged=$(jq --argjson prof "$profile_agents" --argjson saved "$saved" --arg name "$name" '
+    merged=$(jq --argjson prof "$profile_agents" --argjson saved "$saved" \
+        --arg name "$name" --arg model "$model" '
         def isprof(k): (k == "kurama-orchestrator")
             or ((k|startswith("sdd-")) and (k|endswith("-" + $name)));
 
         # 1. Drop any lingering profile keys, keep everything else, add the fresh profile.
         .agent = (((.agent // {}) | with_entries(select(isprof(.key) | not))) + $prof) |
 
-        # 2. Restore preserved model choices onto the new definitions.
+        # 2. Restore preserved model choices onto the new definitions. This is what
+        #    makes a plain re-run idempotent: models the user edited by hand survive.
         reduce ($saved | to_entries[]) as $m (.;
-            if .agent[$m.key] then .agent[$m.key].model = $m.value else . end)
+            if .agent[$m.key] then .agent[$m.key].model = $m.value else . end) |
+
+        # 3. An explicit --opencode-profile NAME:provider/model is an explicit choice
+        #    made for THIS run, so it overrides the restore above — otherwise
+        #    re-running with a different model would silently keep the old one. Omit
+        #    the ":provider/model" part to re-run without touching the configured models.
+        if $model != "" then
+            .agent |= with_entries(if isprof(.key) then .value.model = $model else . end)
+        else . end
     ' "$config_file") || { warn "Failed to splice profile into $config_file"; return 0; }
 
     make_backup "$config_file"
@@ -1124,14 +1156,17 @@ setup_opencode() {
     # "sdd-*" key — which includes a profile's suffixed subagents — so we must
     # capture their user-edited models here to restore them idempotently.
     ask_opencode_profile
+    # Ask the cosmetic question here too, so every prompt is answered up front.
+    ask_startup_logo
     local profile_saved="{}"
     if [ "$OPENCODE_PROFILE" != "no" ] && [ -n "$OPENCODE_PROFILE" ] \
         && command -v jq &>/dev/null && [ -f "$config_file" ]; then
-        profile_saved=$(jq -c --arg name "$OPENCODE_PROFILE" '
+        profile_saved=$(jq -c --arg name "$OPENCODE_PROFILE" --arg re "$OPENCODE_MODEL_RE" '
             def isprof(k): (k == "kurama-orchestrator")
                 or ((k|startswith("sdd-")) and (k|endswith("-" + $name)));
             reduce ((.agent // {}) | to_entries[]
-                | select(isprof(.key)) | select(.value.model)) as $e
+                | select(isprof(.key))
+                | select(.value.model | strings | test($re))) as $e
                 ({}; . + {($e.key): $e.value.model})
         ' "$config_file") || profile_saved="{}"
     fi
@@ -1176,10 +1211,16 @@ setup_opencode() {
             # opencode_profile re-adds a fresh orchestrator (its model is
             # snapshotted separately before this merge, see profile_saved).
             local merged
-            merged=$(jq --argjson new_agents "$example_agents" '
-                # 1. Capture existing model fields from sdd-* agents (user customization)
+            merged=$(jq --argjson new_agents "$example_agents" --arg re "$OPENCODE_MODEL_RE" '
+                # 1. Capture existing model fields from sdd-* agents (user customization).
+                #    Only real "provider/model-id" values are worth preserving — see
+                #    OPENCODE_MODEL_RE. Anything else (notably the old
+                #    "<your-provider/your-model>" literal) is dropped here so the agent
+                #    falls back to the template, which now carries no "model" key at all
+                #    and therefore inherits the OpenCode default model.
                 (reduce ((.agent // {}) | to_entries[] |
-                    select(.key | startswith("sdd-")) | select(.value.model)) as $e
+                    select(.key | startswith("sdd-")) |
+                    select(.value.model | strings | test($re))) as $e
                     ({}; . + {($e.key): $e.value.model})) as $saved_models |
 
                 # 2. Remove all sdd-* agents (and the profile orchestrator), keep
@@ -1260,6 +1301,11 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
         warn "Plugin source not found: $plugin_src (skipped)"
     fi
 
+    # Opt-in cosmetic: replace the TUI splash logo with the Kurama wordmark.
+    if [ "$STARTUP_LOGO" = "yes" ]; then
+        install_opencode_logo "$home"
+    fi
+
     # Install the plugin's npm dependency. Pin the exact version and disable
     # lifecycle scripts so a compromised release cannot execute code during setup.
     # Degrade gracefully (warn, don't abort) when npm is unavailable.
@@ -1271,6 +1317,138 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
         warn "npm not found — skipping unique-names-generator dependency"
         info "Install it manually: cd \"$home/.config/opencode\" && npm install --ignore-scripts unique-names-generator@$UNIQUE_NAMES_GENERATOR_VERSION"
     fi
+}
+
+# ============================================================================
+# Startup logo (opt-in, cross-harness)
+#
+# The Kurama wordmark — the same art scripts/banner.sh prints — drawn by the
+# agent itself at startup. Two harnesses can do it, through very different
+# mechanisms, so there is ONE consent question (asked once per run) and one
+# installer per harness:
+#
+#   opencode  a TUI plugin registering the host's `home_logo` slot, copied to
+#             ~/.config/opencode/tui-plugins/ and listed in tui.json's plugin[].
+#   pi        an extension exporting a session_start hook that calls
+#             ctx.ui.setHeader(), dropped into the auto-discovered extensions dir
+#             (no settings.json entry needed).
+#
+# Both artifacts are generated from assets/banner/wordmark.txt by
+# scripts/gen-logo-plugin.mjs and committed under examples/.
+# ============================================================================
+
+# Decide whether to install the Kurama startup logo (opt-in). Honors
+# --with-logo/--without-logo; asks interactively otherwise (default NO) and skips
+# when non-interactive. Asked at most once per run — a --all run that configures
+# both opencode and Pi answers for both. Sets STARTUP_LOGO to "yes" or "no".
+ask_startup_logo() {
+    # Already resolved via flag or an earlier agent in this run — keep it.
+    [[ -n "$STARTUP_LOGO" ]] && return
+
+    if $NON_INTERACTIVE; then
+        STARTUP_LOGO="no"
+        return
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Kurama startup logo (optional):${NC}"
+    echo "  Draws the Kurama wordmark where the agent shows its own logo"
+    echo "  (OpenCode's TUI splash, Pi's startup header)."
+    echo "  Cosmetic only — it changes nothing about how agents run."
+    echo ""
+    local ans
+    read -rp "  Install the logo? [y/N]: " ans || ans=""
+    case "${ans:-N}" in
+        [Yy]*) STARTUP_LOGO="yes" ;;
+        *)     STARTUP_LOGO="no" ;;
+    esac
+}
+
+# OpenCode: copy the committed .tsx into ~/.config/opencode/tui-plugins/ and
+# register its absolute path in tui.json's plugin[] array.
+#
+# tui.json is a DIFFERENT registry from opencode.json — the latter lists SERVER
+# plugins, while the TUI process reads only tui.json's plugin[] (npm names or
+# absolute .tsx paths). The merge mirrors gentle-ai's ensureTUIPlugin: create the
+# file with its $schema when absent, append our path only when missing, and
+# preserve every existing entry. jq-only (never sed on JSON), backup + atomic.
+install_opencode_logo() {
+    local home="$1"
+    local src="$EXAMPLES_DIR/opencode/tui-plugins/kurama-logo.tsx"
+    local plugin_dir="$home/.config/opencode/tui-plugins"
+    local dest="$plugin_dir/kurama-logo.tsx"
+    local tui_file="$home/.config/opencode/tui.json"
+
+    if [ ! -f "$src" ]; then
+        warn "TUI logo plugin source not found: $src (skipped)"
+        return 0
+    fi
+    if ! command -v jq &>/dev/null; then
+        warn "jq not found — cannot register the Kurama logo in tui.json"
+        info "Add \"$dest\" to the plugin[] array in $tui_file by hand"
+        return 0
+    fi
+
+    mkdir -p "$plugin_dir"
+    atomic_replace "$dest" < "$src"
+    RECEIPT_FILES="$RECEIPT_FILES
+$(receipt_rel "$dest")"
+
+    local merged
+    if [ -s "$tui_file" ]; then
+        # A tui.json we cannot parse is the user's file, not ours — refuse to
+        # overwrite it and say exactly what to add.
+        if ! jq -e . "$tui_file" >/dev/null 2>&1; then
+            warn "$tui_file is not valid JSON — leaving it untouched"
+            info "Add \"$dest\" to its plugin[] array by hand"
+            return 0
+        fi
+        merged=$(jq --arg p "$dest" '
+            .plugin = ((.plugin // []) | if index($p) then . else . + [$p] end)
+        ' "$tui_file") || { warn "Failed to merge $tui_file"; return 0; }
+        make_backup "$tui_file"
+    else
+        # Missing or empty: create it with the schema line opencode writes.
+        mkdir -p "$(dirname "$tui_file")"
+        merged=$(jq -n --arg p "$dest" \
+            '{"$schema": "https://opencode.ai/tui.json", "plugin": [$p]}') \
+            || { warn "Failed to create $tui_file"; return 0; }
+    fi
+
+    printf '%s\n' "$merged" | atomic_replace "$tui_file"
+    RECEIPT_TUI_PLUGINS="$RECEIPT_TUI_PLUGINS
+$(receipt_rel "$tui_file")"
+    ok "Kurama logo TUI plugin installed → $dest"
+    info "Registered in $tui_file (restart opencode to see it)"
+}
+
+# Pi: drop the committed extension into the auto-discovered extensions dir.
+# Pi loads every ~/.pi/agent/extensions/*.ts (global) and .pi/extensions/*.ts
+# (project-local), so there is no registry to merge and no settings.json to
+# touch — copying the file IS the installation, which also makes it idempotent
+# by construction. Recorded in the receipt so uninstall removes it again.
+install_pi_logo() {
+    local src="$EXAMPLES_DIR/pi/extensions/kurama-logo.ts"
+    local ext_dir dest
+
+    if [ ! -f "$src" ]; then
+        warn "Pi logo extension source not found: $src (skipped)"
+        return 0
+    fi
+
+    if [ "$SCOPE" = "project" ]; then
+        ext_dir="$TARGET_PATH/.pi/extensions"
+    else
+        ext_dir="$(home_dir)/.pi/agent/extensions"
+    fi
+    dest="$ext_dir/kurama-logo.ts"
+
+    mkdir -p "$ext_dir"
+    atomic_replace "$dest" < "$src"
+    RECEIPT_FILES="$RECEIPT_FILES
+$(receipt_rel "$dest")"
+    ok "Kurama logo extension installed → $dest"
+    info "Pi auto-discovers it (restart pi to see it)"
 }
 
 # ============================================================================
@@ -1621,6 +1799,7 @@ setup_agent() {
     RECEIPT_PI_PACKAGES=""
     RECEIPT_ENGRAM_MCP=""
     RECEIPT_PROMPTS=""
+    RECEIPT_TUI_PLUGINS=""
 
     install_skills "$agent"
 
@@ -1645,8 +1824,13 @@ setup_agent() {
         install_hooks
     fi
 
-    # N5: offer the Pi package stack only for the Pi target.
+    # N5: offer the Pi package stack only for the Pi target, plus the same opt-in
+    # startup logo the OpenCode flow offers (Pi draws it as its startup header).
     if [[ "$agent" == "pi" ]]; then
+        ask_startup_logo
+        if [ "$STARTUP_LOGO" = "yes" ]; then
+            install_pi_logo
+        fi
         setup_pi_packages
     fi
 
@@ -1771,6 +1955,7 @@ NON_INTERACTIVE=false
 OPENCODE_MODE=""  # "", "single", or "multi"
 OPENCODE_PROFILE=""        # "" = unset (ask); "no" = none; otherwise the profile NAME
 OPENCODE_PROFILE_MODEL=""  # optional provider/model applied to every profile agent
+STARTUP_LOGO=""            # "" = unset (ask once); "yes" = install the Kurama startup logo; "no" = skip
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
 ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
 
@@ -1812,16 +1997,21 @@ while [[ $# -gt 0 ]]; do
             OPENCODE_PROFILE_MODEL="$_prof_rest"
             shift 2
             ;;
+        --with-logo)    STARTUP_LOGO="yes"; shift ;;
+        --without-logo) STARTUP_LOGO="no"; shift ;;
         -h|--help)
             echo "Usage: setup.sh [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --all                  Auto-detect and install for all found agents"
-            echo "  --agent NAME           Install for a specific agent"
+            echo "  --agent NAME           Install for a specific agent: claude-code, opencode, gemini-cli,"
+            echo "                         codex, vscode, cursor, pi, omp"
             echo "  --scope SCOPE          Install scope: 'global' (default) or 'project'"
             echo "  --path DIR             Target repo for --scope project (default: cwd; must be a git repo)"
             echo "  --opencode-mode M      OpenCode agent mode: 'single' or 'multi' (per-phase models)"
             echo "  --opencode-profile P   Install a named model profile: NAME[:provider/model] (Tab-switchable)"
+            echo "  --with-logo            Draw the Kurama wordmark at agent startup (opencode TUI splash, Pi header)"
+            echo "  --without-logo         Keep each agent's own startup logo (default)"
             echo "  --with-pi-packages     Install the Pi package stack (--agent pi, non-interactive)"
             echo "  --without-pi-packages  Skip the Pi package stack (--agent pi, non-interactive)"
             echo "  --with-engram          Use Engram as the persistence engine (register its MCP)"

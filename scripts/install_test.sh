@@ -862,18 +862,31 @@ test_opencode_profile_generates_agents() {
 }
 
 test_opencode_profile_idempotent_preserves_model() {
+    # Two documented behaviors, opposite by design (install_opencode_profile steps
+    # 2 and 3). A bare `--opencode-profile NAME` re-run RESTORES hand-edited models;
+    # `NAME:provider/model` is an explicit choice for THIS run and deliberately
+    # overrides them, so re-running with a new model is not silently ignored.
     run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
         || { echo "first profile install failed"; return 1; }
     local cfg="$HOME/.config/opencode/opencode.json"
-    # Hand-edit one profile agent's model, then re-run the same install.
     local edited
     edited=$(jq '.agent["sdd-apply-testp"].model = "HAND/EDITED"' "$cfg")
     printf '%s\n' "$edited" > "$cfg"
-    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
-        || { echo "second profile install failed"; return 1; }
+
+    # 1. Bare re-run (no ":provider/model") must PRESERVE the hand edit.
+    run_setup_opencode --opencode-mode multi --opencode-profile testp \
+        || { echo "bare profile re-run failed"; return 1; }
     assert_eq "HAND/EDITED" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
-        "re-run did not preserve the hand-edited model" || return 1
-    # No duplicate profile keys after the re-run.
+        "a bare profile re-run must preserve the hand-edited model" || return 1
+
+    # 2. An explicit model must OVERRIDE it — otherwise changing the model by
+    #    re-running would silently do nothing.
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/other \
+        || { echo "explicit-model profile re-run failed"; return 1; }
+    assert_eq "prov/other" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
+        "an explicit :provider/model must override a hand-edited model" || return 1
+
+    # No duplicate profile keys after either re-run.
     local n
     n=$(jq -r '[.agent | keys[] | select(endswith("-testp"))] | length' "$cfg")
     assert_eq "9" "$n" "Expected 9 profile agents after re-run (no duplicates)"

@@ -168,6 +168,18 @@ manifest_files() {
         }' "$manifest"
 }
 
+# True when the receipt recorded the Kurama startup logo (the OpenCode .tsx or
+# the Pi .ts, both recorded in files[]). The re-sync below delegates to setup.sh,
+# where the logo is opt-in — without re-passing the flag the refreshed receipt
+# would forget a logo that is still installed, and uninstall could no longer
+# reverse it.
+manifest_has_startup_logo() {
+    local manifest="$1"
+    [ -f "$manifest" ] || return 1
+    manifest_files "$manifest" \
+        | awk '/kurama-logo\.tsx?$/ { found = 1 } END { exit(found ? 0 : 1) }'
+}
+
 # Portable content hash of a file ("" if missing).
 hash_file() {
     [ -f "$1" ] || { printf ''; return 0; }
@@ -268,6 +280,10 @@ EOF
     local -a args=(--agent "$slug" --non-interactive --without-pi-packages)
     if [ "$rscope" = "project" ]; then
         args+=(--scope project --path "$receipt_dir")
+    fi
+    # Carry an installed startup logo across the re-sync (opt-in in setup.sh).
+    if manifest_has_startup_logo "$manifest"; then
+        args+=(--with-logo)
     fi
     if ! bash "$SETUP_SCRIPT" "${args[@]}" >/dev/null 2>&1; then
         fail "Re-sync failed for $tool ($rscope)"

@@ -2,7 +2,6 @@
   "$schema": "https://opencode.ai/config.json",
   "agent": {
     "sdd-orchestrator": {
-      "model": "<your-provider/your-model>",
       "mode": "primary",
       "description": "Kurama Orchestrator (single mode) - the only agent; runs each SDD phase as a subtask",
       "prompt": "{file:./AGENTS.md}",
