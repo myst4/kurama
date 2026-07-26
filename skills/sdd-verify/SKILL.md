@@ -135,18 +135,18 @@ The two modes:
 
 ### Step 5b: Run Tests (Real Execution)
 
-Detect the project's test runner via `skills/_shared/test-runners.md` (the single runner
-table, shared with `sdd-apply` and `skills/tdd`) and execute the tests:
+Resolve the project's test command via `skills/_shared/test-runners.md` (the single home
+for project commands, shared with `sdd-apply` and `skills/tdd`) and execute it:
 
 ```
-Detect test runner (priority order):
-├── Propagated rules.verify.test_command / openspec/config.yaml → rules.verify.test_command (highest priority)
-├── Otherwise resolve the ecosystem → command from skills/_shared/test-runners.md
-│   (go.mod, package.json, pyproject.toml/pytest.ini, Cargo.toml, build.gradle, mix.exs, Makefile, …)
-└── Fallback: no runner detected —
-    · static mode    → skip execution; scenarios rest on static evidence (Step 3). Report as WARNING.
+Resolve test command (priority order):
+├── Propagated rules.verify.test_command (highest priority; the only source in engram mode)
+├── Otherwise openspec/config.yaml → rules.verify.test_command
+└── Neither is set — NEVER guess a command from the project's files:
+    · static mode     → skip execution; scenarios rest on static evidence (Step 3). Report as WARNING.
     · behavioral mode → no tests can run, so every MUST scenario becomes UNTESTED → CRITICAL.
-                        Report the missing runner as a CRITICAL blocker in the verdict. Do NOT
+                        Report it as a CRITICAL blocker naming the fix — re-run `/sdd-init`
+                        (or set rules.verify.test_command) to configure the command. Do NOT
                         bounce back to the orchestrator mid-run — the executor boundary forbids
                         it; report and let the orchestrator decide.
 
@@ -162,17 +162,20 @@ Flag: CRITICAL if exit code != 0 (any test failed)
 Flag: WARNING if skipped tests relate to changed areas
 ```
 
+An empty configured command is a deliberate "this project has none", not a gap: treat it
+the same as unset, and say so in the report rather than hunting for a runner yourself.
+
 ### Step 5c: Build & Type Check (Real Execution)
 
-Detect and run the build/type-check command:
+Resolve the build command the same way — configured, never detected:
 
 ```
-Detect build command from:
-├── Propagated rules.verify.build_command / openspec/config.yaml → rules.verify.build_command (highest priority; the propagated value is the only source in engram mode)
-├── package.json → scripts.build → also run tsc --noEmit if tsconfig.json exists
-├── pyproject.toml → python -m build or equivalent
-├── Makefile → make build
-└── Fallback: skip and report as WARNING (not CRITICAL)
+Resolve build command (priority order):
+├── Propagated rules.verify.build_command (highest priority; the only source in engram mode)
+├── Otherwise openspec/config.yaml → rules.verify.build_command
+└── Neither is set → skip and report as WARNING (never CRITICAL), naming `/sdd-init` as the
+    fix. Do NOT infer a build command from the project's manifests — a guessed build is
+    either a false green or a false failure.
 
 Execute: {build_command}
 Capture:
@@ -183,6 +186,10 @@ Capture:
 Flag: CRITICAL if build fails (exit code != 0)
 Flag: WARNING if there are type errors even with passing build
 ```
+
+A project with no build or type-check step is a normal case — many stacks have none. An
+empty configured command means exactly that; skip the step and report it as configured-empty,
+not as a missing capability.
 
 ### Step 5d: Coverage Validation (Real Execution — if threshold configured)
 

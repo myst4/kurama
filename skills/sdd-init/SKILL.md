@@ -44,13 +44,31 @@ You are an EXECUTOR for this phase, not the orchestrator. Do the initialization 
 ### Step 1: Detect Project Context
 
 Read the project to understand:
-- Tech stack (check package.json, go.mod, pyproject.toml, etc.)
+- Tech stack — ANY stack. Read whatever manifest, lockfile, or build descriptor the
+  project actually has. Kurama carries NO list of supported ecosystems: an unfamiliar
+  stack is a normal case, never a degraded one.
 - Existing conventions (linters, test frameworks, CI)
 - Architecture patterns in use
-- **Verify commands**: the test command, build command, and any coverage gate — these fill the `rules.verify` block.
-- **Test infrastructure**: whether a test runner, test files, or CI test jobs exist. This picks the `compliance_mode` default:
-  - test infra present → `behavioral` (a MUST scenario without a passing test is CRITICAL — the strict gate)
-  - no test infra → `static` (compliance may rest on static structural evidence; the cycle can close without test infrastructure)
+- **Project commands (explicit question — NEVER inferred silently)**: the test, build,
+  and single-test commands are the most project-specific values in the whole cycle and
+  the ones the harness cannot know. ASK for them, in the same manner as TDD and
+  `execution_mode` below. A guessed command fails opaquely — or worse, runs the wrong
+  thing — and a stack absent from any table would otherwise dead-end at `sdd-verify`.
+  **Pre-fill, then confirm**: consult the suggestion table in
+  `skills/_shared/test-runners.md` for a likely default when a detection file is
+  present, then ASK the user to confirm or correct:
+  **"Test command? Build/type-check command? (blank = none)"**
+  - Record the answers as `rules.verify.test_command` and `rules.verify.build_command`.
+  - An empty answer is a VALID answer meaning "this project has none" — record it as
+    empty; do not keep pressing and do not substitute a guess.
+  - The table is a courtesy for common stacks, NOT a supported-stack list. When no row
+    matches, ask with no default — that path is fully supported.
+  - Also ask for the coverage gate only if the project appears to enforce one; default
+    `coverage_threshold: 0` (disabled).
+- **Compliance mode**: derived from the ANSWER above, not from file sniffing:
+  - a test command was given → `behavioral` (a MUST scenario without a passing test is CRITICAL — the strict gate)
+  - no test command → `static` (compliance may rest on static structural evidence; the cycle can close without test infrastructure)
+  Offer the derived value and let the user override it.
 - **TDD preference (explicit question — NEVER inferred silently)**: The optional TDD module
   now installs by default (manifest group `tdd`), but it can still be absent — someone may
   have excluded it with `--without tdd` — so activation without the module on disk would
@@ -67,13 +85,14 @@ Read the project to understand:
     Surface this in the return envelope's `risks`.
   - **If `tdd/SKILL.md` IS resolvable**: ask the user directly:
     **"Enable TDD (RED → GREEN → REFACTOR) for this project?"** This is the ONLY switch that
-    activates the optional TDD module. Detected test infrastructure NEVER auto-enables TDD; it
-    only shapes the suggestion:
-    - test infra present → suggest enabling ("the codebase looks test-first — enable TDD?")
-    - no test infra → offer it, but lean toward disabled
+    activates the optional TDD module. The answer to the test-command question NEVER
+    auto-enables TDD; it only shapes the suggestion:
+    - a test command was given → suggest enabling ("the project already runs tests — enable TDD?")
+    - no test command → offer it, but lean toward disabled
     Record the answer as `tdd.enabled` (default `false` when the user does not opt in). When
-    the user enables TDD, also capture the fast single-test invocation for a quick RED cycle →
-    `tdd.single_test_command` (e.g. `npm test -- {file}`, `pytest {path}::{test}`, `go test -run {TestX} ./pkg`).
+    the user enables TDD, ASK for the fast single-test invocation for a quick RED cycle →
+    `tdd.single_test_command`, pre-filled from the suggestion table in
+    `skills/_shared/test-runners.md` when a row matches, asked with no default otherwise.
     The full-suite `test_command` stays in `rules.verify` regardless.
 - **Execution mode (explicit question — default `supervised`)**: Ask the user directly:
   **"Run SDD in `supervised` or `auto` mode?"** `supervised` (the default) stops the orchestrator
@@ -209,14 +228,14 @@ kanban:
 ```
 
 The `execution_mode`, `verify`, `tdd`, and `kanban` blocks above are the canonical schema from
-`skills/_shared/openspec-convention.md`. Fill `test_command`/`build_command`
-with the commands you detected in Step 1 (test runner, build script), or leave
-them empty when none exists; leave `coverage_threshold` at `0` unless the
-project enforces a coverage gate. Set `compliance_mode` to the default you chose
-in Step 1: `behavioral` when test infrastructure exists, `static` when it does
-not. Set `tdd.enabled` from the explicit question in Step 1 (default `false`); when
-the user opts in, fill `tdd.single_test_command` with the fast single-test
-invocation. Existing test files never flip `tdd.enabled` on their own. Set
+`skills/_shared/openspec-convention.md`. Fill `test_command`/`build_command` with the
+commands the USER GAVE in Step 1 — record an empty string when the user said the project
+has none, and never substitute a guess for a missing answer; leave `coverage_threshold`
+at `0` unless the user named a gate. Set `compliance_mode` to the value settled in
+Step 1: `behavioral` when a test command was given, `static` when it was not, unless the
+user overrode it. Set `tdd.enabled` from the explicit question in Step 1 (default
+`false`); when the user opts in, fill `tdd.single_test_command` with the invocation they
+gave. Existing test files never flip `tdd.enabled` on their own. Set
 `execution_mode` from the explicit question in Step 1 (default `supervised`).
 Set `kanban.enabled` from the explicit question in Step 1 (default `false`) — record
 `true` ONLY when the user opted in AND all three `gh` prerequisite checks passed; when

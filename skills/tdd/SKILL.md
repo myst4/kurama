@@ -19,10 +19,10 @@ evidence format. `sdd-apply`, `sdd-tasks`, and `sdd-verify` point here instead o
 carrying their own copies, so the cycle never drifts across phases.
 
 This module is opt-in and OFF by default. It only governs a change when TDD is
-resolved active (see **Activation** below). Per-runner commands live in
-`skills/_shared/test-runners.md`; per-language test *patterns* (e.g.
-`go-testing`) reach sub-agents as compact rules through the skill registry — this
-core never depends on a specific language.
+resolved active (see **Activation** below). Project commands live in
+`skills/_shared/test-runners.md` and are CONFIGURED at `sdd-init`, never detected;
+per-language test *patterns* reach sub-agents as compact rules through the skill
+registry — this core never depends on a specific language.
 
 ## Activation (single switch — zero silent heuristics)
 
@@ -56,7 +56,7 @@ needed with TDD off too) — the `tdd:` block never absorbs them:
 # openspec/config.yaml (top-level, sibling of `rules:`)
 tdd:
   enabled: false
-  single_test_command: ""   # how to run ONE test (see test-runners.md); "" → detect
+  single_test_command: ""   # how to run ONE test; asked at sdd-init (see test-runners.md)
 ```
 
 Because `sdd-tasks` and `sdd-apply` read the SAME resolved flag, a RED subtask
@@ -72,7 +72,7 @@ FOR EACH behavior (spec scenario S-{requirement-slug}-{n}, e.g. S-auth-1):
 
   1. RED — write ONE failing test first
      ├── Encode the scenario's expected behavior as a test (not the implementation shape).
-     ├── Run ONLY that test/suite (test-runners.md → single-test command) — for speed.
+     ├── Run ONLY that test/suite (the configured single_test_command) — for speed.
      ├── Confirm it FAILS for the RIGHT reason (assertion/missing behavior, not a
      │   compile error or typo).
      └── CAPTURE the failing output. RED evidence is MANDATORY. A test that passes

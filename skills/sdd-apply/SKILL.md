@@ -83,11 +83,12 @@ TDD"* — surface it in the return envelope's `risks`, then fall back to
 **Step 3b (Standard Workflow)** for this batch. Do not fabricate RED/GREEN/REFACTOR evidence
 you cannot produce without the module.
 
-Detect the test runner via `skills/_shared/test-runners.md` (the single runner table). Use
-`tdd.single_test_command` (or the runner's single-test invocation from that table) to run
-ONLY the relevant test for a fast RED cycle — never the whole suite. If any per-language
-coding skills are installed (e.g. `go-testing`, `pytest`, `vitest`), follow their patterns
-for writing the tests.
+Run ONLY the relevant test for a fast RED cycle — never the whole suite — using the
+configured `tdd.single_test_command` (propagated, else from the project config; see
+`skills/_shared/test-runners.md`, the single home for project commands). If it is not
+configured, report that the single-test command is missing and name `/sdd-init` as the
+fix; do NOT guess one from the project's files. If any per-language coding skills reach
+you as compact rules, follow their patterns for writing the tests.
 
 ### Step 3b: Implement Tasks (Standard Workflow)
 
@@ -168,4 +169,4 @@ Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Pop
 - Apply any `rules.apply` from `openspec/config.yaml`
 - Resolve `tdd.enabled` first (Step 3): propagated value wins, else `tdd.enabled` in `openspec/config.yaml`, else default off. NEVER infer TDD from existing test files or from a `tdd/SKILL.md` being installed
 - When `tdd.enabled` is true, follow `skills/tdd/SKILL.md` for the RED → GREEN → REFACTOR cycle — never skip RED (writing the failing test first)
-- Detect the test runner via `skills/_shared/test-runners.md`; run ONLY the relevant test (via `tdd.single_test_command` or the runner's single-test invocation), not the entire suite, for speed
+- Run ONLY the relevant test via the configured `tdd.single_test_command` (see `skills/_shared/test-runners.md`), not the entire suite, for speed; when it is not configured, report it instead of guessing a command
