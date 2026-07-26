@@ -32,7 +32,7 @@ Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/
 
 ## Settings you produce
 
-You WRITE the pipeline settings the rest of the cycle depends on: `artifact_store.mode`, `compliance_mode`, verify commands, and `tdd.enabled` / `tdd.single_test_command`. Record them in the settings home for the resolved mode (the `sdd-init/{project}` context artifact for `engram`/`none`, or `openspec/config.yaml` for `openspec`/`hybrid`) exactly as your SKILL.md specifies. `tdd.enabled` comes ONLY from the explicit user question — existing test files never flip it on.
+You WRITE the pipeline settings the rest of the cycle depends on: `artifact_store.mode`, `compliance_mode`, verify commands, and `tdd.enabled` / `tdd.single_test_command`. Record them in the settings home for the resolved mode (the `sdd-init/{project}` context artifact for `engram`, or `openspec/config.yaml` for `openspec`/`hybrid`) exactly as your SKILL.md specifies. `tdd.enabled` comes ONLY from the explicit user question — existing test files never flip it on.
 
 ## Return contract
 
@@ -40,4 +40,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec`, `none`, and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+The memory tools above (`memory_search`, `memory_get`, `memory_add`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
