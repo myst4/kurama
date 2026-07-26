@@ -113,17 +113,14 @@ function Write-NextStep {
 
 function Write-EngramNote {
     Write-Host ''
-    Write-Host 'Recommended persistence backend: ' -ForegroundColor Yellow -NoNewline
-    Write-Host 'Engram' -ForegroundColor White
-    Write-Host '  https://github.com/gentleman-programming/engram' -ForegroundColor Cyan
-    Write-Host '  If Engram is available, it will be used automatically (recommended)'
-    Write-Host '  If not, falls back to ' -NoNewline
-    Write-Host 'none' -ForegroundColor White -NoNewline
-    Write-Host ' - enable ' -NoNewline
-    Write-Host 'engram' -ForegroundColor White -NoNewline
-    Write-Host ' or ' -NoNewline
-    Write-Host 'openspec' -ForegroundColor White -NoNewline
-    Write-Host ' for better results'
+    Write-Host 'Persistence backend: ' -ForegroundColor Yellow -NoNewline
+    Write-Host 'artifacts default to the built-in markdown store'
+    Write-Host '  openspec' -ForegroundColor White -NoNewline
+    Write-Host ' - files under openspec/, version-controlled with the repo (default)'
+    Write-Host '  engram' -ForegroundColor White -NoNewline
+    Write-Host '   - cross-session memory: ' -NoNewline
+    Write-Host 'https://github.com/gentleman-programming/engram' -ForegroundColor Cyan
+    Write-Host '  Pick one at /sdd-init; setup.ps1 -WithEngram wires the Engram MCP for you'
 }
 
 function Show-Usage {

@@ -32,7 +32,7 @@ VERSION_FILE="$REPO_DIR/VERSION"
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
 # Every agent that can carry a global receipt (used when no --agent is given).
-ALL_AGENTS="claude-code opencode gemini-cli codex vscode cursor pi"
+ALL_AGENTS="claude-code opencode gemini-cli codex vscode cursor pi omp"
 
 SCOPE="global"
 AGENT=""
@@ -107,6 +107,7 @@ global_skills_path() {
         vscode)       echo "$home/.copilot/skills" ;;
         codex)        echo "$home/.codex/skills" ;;
         pi)           echo "$home/.pi/agent/skills" ;;
+        omp)          echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/skills" ;;
         *)            echo "" ;;
     esac
 }
@@ -128,6 +129,7 @@ tool_to_slug() {
         vscode|"VS Code (Copilot)")  echo "vscode" ;;
         cursor|"Cursor")             echo "cursor" ;;
         pi|"Pi")                     echo "pi" ;;
+        omp)                         echo "omp" ;;
         *)                           echo "" ;;
     esac
 }
