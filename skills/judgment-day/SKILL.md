@@ -170,7 +170,7 @@ judgment-day is harness-agnostic. It needs three primitives from the host: **lau
 | Host harness | Launch (parallel) | Read result | Notes |
 |--------------|-------------------|-------------|-------|
 | Claude Code | native `Task`/`Agent` (two in one turn) | returned inline | parallel by default |
-| OpenCode | `delegate()` (async) | `delegation_read()` | see example binding below |
+| OpenCode | native `task` (two in one turn) | returned inline | see example binding below |
 | Codex / Gemini CLI / Copilot / others | native sub-agent/subtask if present | inline | if no parallelism → sequential fallback |
 | No sub-agent mechanism at all | sequential fallback | inline | one judge at a time |
 
@@ -179,21 +179,24 @@ run Judge A to completion, then Judge B, then (if needed) the Refuter. Blindness
 
 ### Example binding: OpenCode
 
-```
-# Launch both judges asynchronously (parallel, blind):
-handle_a = delegate(prompt = judge_prompt_A)   # Correctness & Security lens
-handle_b = delegate(prompt = judge_prompt_B)   # Regressions & Resilience lens
+Use OpenCode's native `task` tool — Kurama no longer ships a delegation plugin.
+Issue both judge calls in the same turn so they run blind of each other; results
+come back inline.
 
-# Collect results once both finish:
-findings_a = delegation_read(handle_a)
-findings_b = delegation_read(handle_b)
+```
+# Launch both judges in one turn (blind — neither sees the other's prompt):
+findings_a = task(prompt = judge_prompt_A)   # Correctness & Security lens
+findings_b = task(prompt = judge_prompt_B)   # Regressions & Resilience lens
 
 # Refuter (only if blocking suspects/contradictions exist):
-handle_r = delegate(prompt = refuter_prompt)   # read-only
-verdicts  = delegation_read(handle_r)
+verdicts = task(prompt = refuter_prompt)     # read-only
 ```
 
-`delegate()` / `delegation_read()` are **one example binding**, not a requirement. Any harness's equivalent launch/read primitives satisfy the protocol.
+If your OpenCode build runs the two calls sequentially rather than in parallel,
+that is the sequential fallback above: blindness — and therefore correctness — is
+unaffected, only latency changes.
+
+The `task` binding above is **one example**, not a requirement. Any harness's equivalent launch/read primitives satisfy the protocol.
 
 ---
 
@@ -410,7 +413,7 @@ Recommend: human review of the remaining confirmed blocking issues above before 
 # No CLI commands — this is a pure orchestration protocol.
 # Execution happens via the host harness's native sub-agent mechanism
 # (launch two blind judges → collect results → optional read-only refuter → fix agent).
-# See "Portability — Native Sub-Agent Mechanism". OpenCode's delegate()/delegation_read()
+# See "Portability — Native Sub-Agent Mechanism". OpenCode's native task()
 # is one example binding, not a requirement; a sequential fallback covers harnesses
 # without parallel sub-agents.
 ```

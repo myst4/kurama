@@ -77,9 +77,8 @@ MARKER_END="<!-- END:kurama -->"
 GAI_MARKER_BEGIN="<!-- gentle-ai:sdd-orchestrator -->"
 GAI_MARKER_END="<!-- /gentle-ai:sdd-orchestrator -->"
 
-# Pinned npm dependency for the OpenCode background-agents plugin.
-# Version-locked and installed with --ignore-scripts to limit supply-chain risk.
-UNIQUE_NAMES_GENERATOR_VERSION="4.7.1"
+# (No pinned npm dependency: the background-agents plugin that required
+# `unique-names-generator` is no longer installed. See install_for_opencode.)
 
 # ----------------------------------------------------------------------------
 # N5: Pi package stack (opt-in). setup.sh --agent pi can install a curated set
@@ -1156,8 +1155,6 @@ setup_opencode() {
     # "sdd-*" key — which includes a profile's suffixed subagents — so we must
     # capture their user-edited models here to restore them idempotently.
     ask_opencode_profile
-    # Ask the cosmetic question here too, so every prompt is answered up front.
-    ask_startup_logo
     local profile_saved="{}"
     if [ "$OPENCODE_PROFILE" != "no" ] && [ -n "$OPENCODE_PROFILE" ] \
         && command -v jq &>/dev/null && [ -f "$config_file" ]; then
@@ -1290,33 +1287,35 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
         ok "AGENTS.md installed -> $agents_target"
     fi
 
-    # Install background-agents plugin
-    local plugins_dir="$home/.config/opencode/plugins"
-    local plugin_src="$SCRIPT_DIR/../examples/opencode/plugins/background-agents.ts"
-    mkdir -p "$plugins_dir"
-    if [ -f "$plugin_src" ]; then
-        cp "$plugin_src" "$plugins_dir/background-agents.ts"
-        ok "background-agents plugin installed → $plugins_dir"
-    else
-        warn "Plugin source not found: $plugin_src (skipped)"
+    # Remove the legacy background-agents.ts plugin if an earlier Kurama install
+    # left one behind. This is a migration, not a cleanup nicety: the plugin
+    # hangs the TUI, so leaving it in place keeps OpenCode unusable even after
+    # the user upgrades Kurama.
+    local legacy_plugin="$home/.config/opencode/plugins/background-agents.ts"
+    if [ -f "$legacy_plugin" ]; then
+        rm -f "$legacy_plugin"
+        ok "removed legacy background-agents plugin → $legacy_plugin"
     fi
+
+    # NOTE: the legacy background-agents.ts plugin is deliberately NOT installed.
+    # Delegation runs on OpenCode's native sub-agents via the `task` permission,
+    # which every SDD agent entry already carries. The plugin is third-party code
+    # (kdcokenny/opencode-background-agents, itself based on oh-my-opencode) that
+    # was observed hanging the OpenCode TUI at startup — a black screen with no
+    # error on stdout or stderr. Upstream gentle-ai dropped it for the same
+    # reason. Users who want background execution should use OpenCode's own
+    # experimental switch instead, exported in their shell:
+    #     export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
+    # See docs/sub-agents.md.
 
     # Opt-in cosmetic: replace the TUI splash logo with the Kurama wordmark.
     if [ "$STARTUP_LOGO" = "yes" ]; then
         install_opencode_logo "$home"
     fi
 
-    # Install the plugin's npm dependency. Pin the exact version and disable
-    # lifecycle scripts so a compromised release cannot execute code during setup.
-    # Degrade gracefully (warn, don't abort) when npm is unavailable.
-    if command -v npm &>/dev/null; then
-        info "Installing npm dependency: unique-names-generator@$UNIQUE_NAMES_GENERATOR_VERSION"
-        (cd "$home/.config/opencode" && npm install --ignore-scripts "unique-names-generator@$UNIQUE_NAMES_GENERATOR_VERSION")
-        ok "unique-names-generator@$UNIQUE_NAMES_GENERATOR_VERSION installed"
-    else
-        warn "npm not found — skipping unique-names-generator dependency"
-        info "Install it manually: cd \"$home/.config/opencode\" && npm install --ignore-scripts unique-names-generator@$UNIQUE_NAMES_GENERATOR_VERSION"
-    fi
+    # No npm dependency is installed here. `unique-names-generator` existed only
+    # to satisfy background-agents.ts; dropping the plugin also removes the need
+    # to mutate the user's own ~/.config/opencode/package.json and node_modules.
 }
 
 # ============================================================================
@@ -1337,32 +1336,6 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
 # scripts/gen-logo-plugin.mjs and committed under examples/.
 # ============================================================================
 
-# Decide whether to install the Kurama startup logo (opt-in). Honors
-# --with-logo/--without-logo; asks interactively otherwise (default NO) and skips
-# when non-interactive. Asked at most once per run — a --all run that configures
-# both opencode and Pi answers for both. Sets STARTUP_LOGO to "yes" or "no".
-ask_startup_logo() {
-    # Already resolved via flag or an earlier agent in this run — keep it.
-    [[ -n "$STARTUP_LOGO" ]] && return
-
-    if $NON_INTERACTIVE; then
-        STARTUP_LOGO="no"
-        return
-    fi
-
-    echo ""
-    echo -e "  ${BOLD}Kurama startup logo (optional):${NC}"
-    echo "  Draws the Kurama wordmark where the agent shows its own logo"
-    echo "  (OpenCode's TUI splash, Pi's startup header)."
-    echo "  Cosmetic only — it changes nothing about how agents run."
-    echo ""
-    local ans
-    read -rp "  Install the logo? [y/N]: " ans || ans=""
-    case "${ans:-N}" in
-        [Yy]*) STARTUP_LOGO="yes" ;;
-        *)     STARTUP_LOGO="no" ;;
-    esac
-}
 
 # OpenCode: copy the committed .tsx into ~/.config/opencode/tui-plugins/ and
 # register its absolute path in tui.json's plugin[] array.
@@ -1824,10 +1797,10 @@ setup_agent() {
         install_hooks
     fi
 
-    # N5: offer the Pi package stack only for the Pi target, plus the same opt-in
-    # startup logo the OpenCode flow offers (Pi draws it as its startup header).
+    # N5: offer the Pi package stack only for the Pi target, plus the same
+    # flag-gated startup logo the OpenCode flow installs (Pi draws it as its
+    # startup header).
     if [[ "$agent" == "pi" ]]; then
-        ask_startup_logo
         if [ "$STARTUP_LOGO" = "yes" ]; then
             install_pi_logo
         fi
@@ -1955,7 +1928,7 @@ NON_INTERACTIVE=false
 OPENCODE_MODE=""  # "", "single", or "multi"
 OPENCODE_PROFILE=""        # "" = unset (ask); "no" = none; otherwise the profile NAME
 OPENCODE_PROFILE_MODEL=""  # optional provider/model applied to every profile agent
-STARTUP_LOGO=""            # "" = unset (ask once); "yes" = install the Kurama startup logo; "no" = skip
+STARTUP_LOGO=""            # "yes" (via --with-logo) installs the Kurama startup logo; anything else skips it. Never prompted for — the default install stays clean.
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
 ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
 
@@ -2011,7 +1984,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --opencode-mode M      OpenCode agent mode: 'single' or 'multi' (per-phase models)"
             echo "  --opencode-profile P   Install a named model profile: NAME[:provider/model] (Tab-switchable)"
             echo "  --with-logo            Draw the Kurama wordmark at agent startup (opencode TUI splash, Pi header)"
-            echo "  --without-logo         Keep each agent's own startup logo (default)"
+            echo "  --without-logo         Keep each agent's own startup logo (this is the default; the logo is never installed unless --with-logo is passed)"
             echo "  --with-pi-packages     Install the Pi package stack (--agent pi, non-interactive)"
             echo "  --without-pi-packages  Skip the Pi package stack (--agent pi, non-interactive)"
             echo "  --with-engram          Use Engram as the persistence engine (register its MCP)"

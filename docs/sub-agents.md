@@ -140,7 +140,14 @@ Once the registry exists, resolving it and injecting compact rules into each del
 
 ## Per-Agent Model Routing
 
-`opencode.multi.json` gives each `sdd-<phase>` agent its own entry in `opencode.json`, and any of them can carry a `model` field to select which model it should use. When the orchestrator delegates via `delegate(prompt, agent)` or `Task`, the background-agents plugin passes the `model` through to `session.prompt()`, so the sub-agent runs on its configured model.
+`opencode.multi.json` gives each `sdd-<phase>` agent its own entry in `opencode.json`, and any of them can carry a `model` field to select which model it should use. When the orchestrator delegates with the native `task` tool, OpenCode runs the sub-agent under its own entry, so it uses that agent's configured model.
+
+> **Background execution.** Kurama no longer ships the `background-agents.ts` plugin — it is third-party code that was observed hanging the OpenCode TUI at startup, and OpenCode now covers the feature itself. To opt into background sub-agents, export OpenCode's own experimental switch in your shell before launching it:
+>
+> ```sh
+> export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
+> opencode
+> ```
 
 Per-agent model routing is a **multi**-mode feature only. `opencode.single.json` defines the orchestrator agent alone — each SDD phase runs as a subtask of the orchestrator and inherits its model, since there is no separate per-phase agent to attach a `model` field to.
 
@@ -161,7 +168,7 @@ Per-agent model routing is a **multi**-mode feature only. `opencode.single.json`
 }
 ```
 
-**Alternative: `@agent-name` text mentions.** OpenCode also supports routing via `@agent-name` mentions in the orchestrator's output, which triggers native agent routing. This is an alternative to `delegate()` but is NOT required — `delegate()` handles model routing correctly.
+**Alternative: `@agent-name` text mentions.** OpenCode also supports routing via `@agent-name` mentions in the orchestrator's output, which triggers native agent routing. This is an alternative to `task` but is NOT required — `task` handles model routing correctly.
 
 ---
 

@@ -29,7 +29,7 @@ Core principle: **does this inflate my context without need?** If yes → delega
 | Bash for state (git, gh) | ✅ | — |
 | Bash for execution (test, build, install) | — | ✅ |
 
-delegate (async) is the default for delegated work. Use task (sync) only when you need the result before your next action.
+task is the tool for delegated work — it is OpenCode's native sub-agent mechanism and needs no plugin. For background execution, start OpenCode with `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true` exported in your shell.
 
 Anti-patterns — these ALWAYS inflate context without need:
 - Reading 4+ files to "understand" the codebase inline → delegate an exploration

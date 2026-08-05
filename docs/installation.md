@@ -271,7 +271,7 @@ OpenCode ships two real modes, and they differ in agent structure, not just mode
 | **Agent structure** | Orchestrator agent only — every SDD phase runs as a subtask of the orchestrator | Orchestrator + one dedicated `sdd-<phase>` agent per SDD phase |
 | **Use case** | Ready to use as-is, one model for everything | Per-phase model customization |
 | **Models** | Orchestrator's model only; subtasks inherit it | Add `"model"` fields to each phase agent |
-| **delegate tool** | ✅ Included | ✅ Included |
+| **Delegation** | Native `task` tool | Native `task` tool |
 
 Executor slash commands (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`) route to `agent: sdd-<phase>` — never to `sdd-orchestrator` — so each phase runs in the agent (and, in multi mode, the model) configured for it. The three workflow commands (`sdd-new`, `sdd-continue`, `sdd-ff`) stay routed to `sdd-orchestrator`, since they coordinate multiple phases rather than executing one.
 
@@ -308,8 +308,11 @@ Both modes install the `background-agents` plugin (`examples/opencode/plugins/ba
 
 ```bash
 ./scripts/setup.sh --agent opencode --with-logo     # install it
-./scripts/setup.sh --agent opencode --without-logo  # keep OpenCode's logo (default)
+./scripts/setup.sh --agent opencode                 # default: OpenCode's own logo, untouched
 ```
+
+Setup never asks about the logo. Without `--with-logo` nothing is written to
+`tui.json` and no plugin file is copied, so the default install stays clean.
 
 Interactive setup asks for it after the profile question and defaults to **no**. It is purely cosmetic — nothing about how agents run changes. The same flag installs [Pi's startup header](#kurama-startup-logo-opt-in-1); a single `--all` run asks the question once and applies the answer to both.
 

@@ -481,6 +481,15 @@ EOF
 $tui_files
 EOF
 
+    # Remove the legacy background-agents.ts plugin. Older Kurama versions
+    # installed it unconditionally; it is no longer shipped (it hangs the
+    # OpenCode TUI), so uninstall must clear it even though no receipt lists it.
+    local legacy_plugin="$HOME/.config/opencode/plugins/background-agents.ts"
+    if [ -f "$legacy_plugin" ]; then
+        rm -f "$legacy_plugin"
+        print_ok "Removed legacy background-agents plugin: $legacy_plugin"
+    fi
+
     offer_pi_uninstall "$manifest"
 
     if $DRY_RUN; then

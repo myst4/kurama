@@ -781,10 +781,10 @@ test_opencode_template_files_exist() {
 # ============================================================================
 # Tests — Phase 11: OpenCode shared prompts + named model profiles (W1–W3, W9)
 #
-# setup.sh --agent opencode runs the global flow (installs the background-agents
-# npm dep). A fake `npm` shim on PATH intercepts that install so the tests never
-# touch the network; jq/python/git behind it stay reachable. --without-engram
-# keeps the O5 flow (brew/engram) out.
+# setup.sh --agent opencode runs the global flow. A fake `npm` shim on PATH keeps
+# any npm invocation off the network; jq/python/git behind it stay reachable.
+# --without-engram keeps the O5 flow (brew/engram) out. The shim is kept as a
+# guard even though the background-agents npm dependency is no longer installed.
 # ============================================================================
 
 # Fake npm that logs nothing and exits 0, so setup_opencode's dependency install
@@ -806,6 +806,30 @@ run_setup_opencode() {
     make_npm_shim "$shim"
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --without-engram \
         --non-interactive "$@" > /dev/null 2>&1
+}
+
+# The legacy background-agents.ts plugin hangs the OpenCode TUI, so setup must
+# neither install it nor leave one behind from an older Kurama version, and must
+# not add its npm dependency to the user's own package.json.
+test_opencode_background_agents_removed() {
+    local plugin="$HOME/.config/opencode/plugins/background-agents.ts"
+    mkdir -p "$(dirname "$plugin")"
+    printf '// stale plugin from an older Kurama install\n' > "$plugin"
+
+    run_setup_opencode --opencode-mode multi \
+        || { echo "setup opencode multi failed"; return 1; }
+
+    if [ -f "$plugin" ]; then
+        echo "setup left the legacy background-agents plugin behind: $plugin"
+        return 1
+    fi
+
+    local pkg="$HOME/.config/opencode/package.json"
+    if [ -f "$pkg" ] && grep -q "unique-names-generator" "$pkg"; then
+        echo "setup added unique-names-generator to $pkg"
+        return 1
+    fi
+    return 0
 }
 
 test_opencode_shared_prompts_installed() {
@@ -2754,6 +2778,7 @@ run_test "opencode.single/multi.json templates exist" test_opencode_template_fil
 echo ""
 
 echo -e "${BOLD}Phase 11 — OpenCode shared prompts + model profiles${NC}"
+run_test "legacy background-agents plugin is removed, never installed" test_opencode_background_agents_removed
 run_test "shared SDD prompt files install (9)" test_opencode_shared_prompts_installed
 run_test "multi.json references shared prompt files (not inline)" test_opencode_multi_references_prompt_files
 run_test "profile splices kurama-orchestrator + 9 suffixed agents" test_opencode_profile_generates_agents

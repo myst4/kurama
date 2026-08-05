@@ -15,10 +15,7 @@
         "read": true,
         "write": true,
         "edit": true,
-        "bash": true,
-        "delegate": true,
-        "delegation_read": true,
-        "delegation_list": true
+        "bash": true
       }
     },
     "sdd-init-kurama": {
