@@ -12,11 +12,7 @@ For manual installation or specific tools, see below.
 - [Engram (optional persistence engine)](#engram-optional-persistence-engine)
 - [Claude Code](#claude-code)
 - [OpenCode](#opencode)
-- [Gemini CLI](#gemini-cli)
 - [Codex](#codex)
-- [VS Code Copilot](#vs-code-copilot)
-- [Antigravity](#antigravity)
-- [Cursor](#cursor)
 - [Pi](#pi)
 - [Other Tools](#other-tools)
 - [Maintenance: update, doctor, uninstall](#maintenance-update-doctor-uninstall)
@@ -32,14 +28,11 @@ The recommended way to install is the **setup script** — it handles everything
 ./scripts/setup.sh --all  # Auto-detect + install all (no prompts)
 ```
 
-Windows PowerShell:
-```powershell
-.\scripts\setup.ps1       # Interactive
-.\scripts\setup.ps1 -All  # Auto-detect + install all
-```
+> **Platforms:** macOS and Linux. Every script is portable bash (3.2-compatible,
+> BSD and GNU userland). There is no PowerShell installer.
 
 The setup script:
-- Detects installed agents via PATH (`claude`, `opencode`, `gemini`, `cursor`, `code`, `codex`, `pi`)
+- Detects installed agents via PATH (`claude`, `opencode`, `codex`, `pi`, `omp`)
 - Copies skills to the correct directory (user-level by default; per-repo with `--scope project`)
 - Configures orchestrator prompts with idempotent markers (safe to re-run)
 - Installs native subagents where the harness supports them — **17 Claude Code
@@ -118,8 +111,7 @@ root** for project scope (in the skills dir for global scope), and records the
 scope, version, every installed file, the touched `settings.json`, any Pi
 packages, and any Engram MCP registrations — so `uninstall.sh`, `update.sh`,
 and `doctor.sh` (all of which accept the same `--scope`/`--path`) operate on
-exactly what was installed. `setup.ps1` mirrors this with `-Scope project`
-`-Path <repo>`.
+exactly what was installed.
 
 ---
 
@@ -132,8 +124,7 @@ engine that survives compaction and cross-session recovery.
 
 `setup.sh` asks **once per run** — `Use Engram as the persistence engine? [y/N]`
 — or you can decide non-interactively with `--with-engram` / `--without-engram`
-(non-interactive default is **no**). `setup.ps1` mirrors this with
-`-WithEngram` / `-WithoutEngram`.
+(non-interactive default is **no**).
 
 **With yes**, setup does two things:
 
@@ -155,9 +146,6 @@ engine that survives compaction and cross-session recovery.
 |--------|----------------------|-----------------------------|-------------|
 | Claude Code | `~/.claude.json` | `<repo>/.mcp.json` | `mcpServers.engram = { command, args: ["mcp","--tools=agent"] }` |
 | OpenCode | `~/.config/opencode/opencode.json` | `<repo>/opencode.json` | `mcp.engram = { command: [cmd,"mcp","--tools=agent"], type: "local" }` |
-| Cursor | `~/.cursor/mcp.json` | `<repo>/.cursor/mcp.json` | `mcpServers.engram` |
-| Gemini CLI | `~/.gemini/settings.json` | `<repo>/.gemini/settings.json` | `mcpServers.engram` |
-| VS Code | `~/Library/Application Support/Code/User/mcp.json` (macOS; `~/.config/Code/User/mcp.json` Linux; `%APPDATA%\Code\User\mcp.json` Windows) | `<repo>/.vscode/mcp.json` | `servers.engram` (VS Code uses `servers`, not `mcpServers`) |
 | Codex | `~/.codex/config.toml` | *(skipped — Codex has a single global MCP config; run with global scope)* | `[mcp_servers.engram]` (TOML) |
 | Pi | *(nothing extra)* | *(nothing extra)* | Engram on Pi is provided by the [Pi package stack](#optional-pi-package-stack) (`gentle-engram`) — no separate MCP registration |
 
@@ -355,43 +343,6 @@ The `agent:` field in the five executor commands (`sdd-init.md`, `sdd-explore.md
 
 ---
 
-## Gemini CLI
-
-> **Automatic:** `./scripts/setup.sh --agent gemini-cli` handles all steps below.
-
-<details>
-<summary>Manual installation</summary>
-
-**1. Copy skills:**
-
-```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.gemini/skills/
-```
-
-**2. Add orchestrator to `~/.gemini/GEMINI.md`:**
-
-Append the contents of [`examples/gemini-cli/GEMINI.md`](../examples/gemini-cli/GEMINI.md) to your Gemini system prompt file (create it if it doesn't exist).
-
-Make sure `GEMINI_SYSTEM_MD=1` is set in `~/.gemini/.env` so Gemini loads the system prompt.
-
-</details>
-
-**Verify:** Open Gemini CLI and type `/sdd-init`.
-
-> **Note:** Gemini CLI doesn't have a native Task tool for sub-agent delegation. The skills work as inline instructions. For the best sub-agent experience, use Claude Code or OpenCode.
-
-**Alternative: Gemini CLI extension.** This repo ships a
-[`gemini-extension.json`](../gemini-extension.json) manifest referencing the
-orchestrator context (`GEMINI.md`) and the skills directory, so Gemini's
-native extension installer can set both up in one step instead of the manual
-copy above:
-
-```
-gemini extensions install https://github.com/myst4/kurama
-```
-
----
-
 ## Codex
 
 > **Automatic:** `./scripts/setup.sh --agent codex` handles all steps below.
@@ -413,7 +364,7 @@ Append the contents of [`examples/codex/agents.md`](../examples/codex/agents.md)
 
 **Verify:** Open Codex and type `/sdd-init`.
 
-> **Note:** Like Gemini CLI, Codex runs skills inline rather than as true sub-agents. The planning phases still work well; implementation batching is handled by the orchestrator instructions.
+> **Note:** Codex runs skills inline rather than as true sub-agents. The planning phases still work well; implementation batching is handled by the orchestrator instructions.
 
 **Project-level convention (documented, not installed by default).** Codex CLI
 also scans a project-level `.agents/skills/` directory in addition to the
@@ -429,102 +380,6 @@ cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skil
 `setup.sh`/`install.sh` do not write to `.agents/skills/` — `~/.codex/skills`
 remains the supported installer target; this is a manual, project-local
 alternative.
-
----
-
-## VS Code (Copilot)
-
-> **Automatic:** `./scripts/setup.sh --agent vscode` handles all steps below.
-
-<details>
-<summary>Manual installation</summary>
-
-**1. Copy skills:**
-
-```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.copilot/skills/
-```
-
-**2. Add orchestrator instructions:**
-
-Create a VS Code `.instructions.md` file in the User prompts folder with the orchestrator from [`examples/vscode/copilot-instructions.md`](../examples/vscode/copilot-instructions.md).
-
-Prompt file paths:
-- macOS: `~/Library/Application Support/Code/User/prompts/kurama.instructions.md`
-- Linux: `~/.config/Code/User/prompts/kurama.instructions.md`
-- Windows: `%APPDATA%\Code\User\prompts\kurama.instructions.md`
-
-</details>
-
-**Verify:** Open VS Code, open the Chat panel (Ctrl+Cmd+I / Ctrl+Alt+I), and type `/sdd-init`.
-
-> **Note:** VS Code Copilot supports agent mode with tool use. For true sub-agent delegation with fresh context windows, use Claude Code or OpenCode.
-
----
-
-## Antigravity
-
-[Antigravity](https://antigravity.google) is Google's AI-first IDE with native skill support. Not yet supported by the setup script — manual installation required.
-
-**1. Copy skills:**
-
-```bash
-# Global (available across all projects)
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.gemini/antigravity/skills/
-
-# Workspace-specific (per project)
-mkdir -p .agent/skills
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation .agent/skills/
-```
-
-**2. Add orchestrator instructions:**
-
-Add the SDD orchestrator as a global rule in `~/.gemini/GEMINI.md`, or create a workspace rule in `.agent/rules/sdd-orchestrator.md`.
-
-See [`examples/antigravity/sdd-orchestrator.md`](../examples/antigravity/sdd-orchestrator.md) for the rule content.
-
-**3. Verify:**
-
-Open Antigravity and type `/sdd-init` in the agent panel.
-
-> **Note:** Antigravity uses `.agent/skills/` and `.agent/rules/` for workspace config, and `~/.gemini/antigravity/skills/` for global. It does NOT use `.vscode/` paths.
-
----
-
-## Cursor
-
-> **Automatic:** `./scripts/setup.sh --agent cursor` copies the skills and
-> writes a global rule to `~/.cursor/rules/kurama.mdc`, sourced
-> verbatim from the generated
-> `examples/cursor/.cursor/rules/sdd-orchestrator.mdc` (frontmatter-scoped
-> `.mdc` format; the legacy `.cursorrules` file has been removed).
-
-<details>
-<summary>Manual installation</summary>
-
-**1. Copy skills:**
-
-```bash
-# Global
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.cursor/skills/
-
-# Or per-project
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ./your-project/skills/
-```
-
-**2. Add the orchestrator rule:**
-
-Cursor's supported rule format is `.cursor/rules/*.mdc` (glob-scoped, with
-activation modes) — the older `.cursorrules` file is deprecated and no longer
-shipped. Copy
-[`examples/cursor/.cursor/rules/sdd-orchestrator.mdc`](../examples/cursor/.cursor/rules/sdd-orchestrator.mdc)
-into your project's `.cursor/rules/` directory for a per-project rule, or into
-`~/.cursor/rules/` for a global one (`setup.sh` does the global copy for you,
-verbatim, as `kurama.mdc`).
-
-</details>
-
-**Note:** Cursor doesn't have a Task tool for true sub-agent delegation. The skills still work — Cursor reads them as instructions — but the orchestrator runs inline. For the best sub-agent experience, use Claude Code or OpenCode.
 
 ---
 
@@ -567,7 +422,7 @@ and re-runnable.
 **Verify:** Start Pi in your project (`pi`) and type `/sdd-init`.
 
 > **Note:** Pi routes models per-agent, so no orchestrator-level model table is
-> injected. Like Gemini CLI and Codex, Pi reads the skills as inline instructions
+> injected. Like Codex, Pi reads the skills as inline instructions
 > rather than spawning true fresh-context sub-agents.
 
 <a id="native-pi-subagents-installed-automatically"></a>
@@ -630,7 +485,7 @@ runs decide with `--with-pi-packages` / `--without-pi-packages`. Failure handlin
 deliberately non-fatal — if `pi` is not on `PATH` the whole step is **skipped** with a
 clear message; if an individual `pi install` fails it is logged as a **warning** and
 the sequence continues (a failed package never aborts setup); and a final **summary**
-reports what installed and what did not. `setup.ps1` mirrors this on Windows.
+reports what installed and what did not.
 
 The packages install in this **exact order**, at **pinned** versions:
 
@@ -647,7 +502,7 @@ The packages install in this **exact order**, at **pinned** versions:
 
 That is **7 `pi install` packages plus the one-time `pi-engram init`** (step 3, which
 reuses `gentle-engram` rather than being an eighth package). The pins are **hardcoded**
-in `setup.sh` (and mirrored in `setup.ps1`); to refresh one, run
+in `setup.sh`; to refresh one, run
 `npm view <package> version` and update the pin in the script.
 
 > **`gentle-pi` is deliberately excluded.** The stack **never** installs `gentle-pi`.
@@ -816,10 +671,9 @@ would be removed.
 ./scripts/uninstall.sh --agent pi --with-pi-packages  # also revert the Pi package stack
 ```
 
-> `setup.ps1` mirrors `-Scope`/`-Path`, the always-on hooks, and Engram on
-> Windows. The maintenance scripts (`update.sh`/`doctor.sh`/`uninstall.sh`) and
-> the test shims are **bash-only** — the PowerShell parity gap is unchanged from
-> earlier phases.
+> Every script in the lifecycle — setup, install, update, doctor, uninstall, and
+> the test shims — is portable bash. There is no second implementation to keep in
+> parity.
 
 ---
 
@@ -834,10 +688,9 @@ verify at each gate. See [docs/smoke-test.md](smoke-test.md).
 
 ## Editing the Generated Example Orchestrators
 
-The eight per-harness orchestrator files under `examples/` — `claude-code/CLAUDE.md`,
-`codex/agents.md`, `gemini-cli/GEMINI.md`, `opencode/AGENTS.md`,
-`antigravity/sdd-orchestrator.md`, `vscode/copilot-instructions.md`,
-`cursor/.cursor/rules/sdd-orchestrator.mdc`, and `pi/AGENTS.md` — are **generated**, not
+The five per-harness orchestrator files under `examples/` — `claude-code/CLAUDE.md`,
+`codex/agents.md`, `opencode/AGENTS.md`, `pi/AGENTS.md`, and
+`omp/AGENTS.md` — are **generated**, not
 hand-written. `examples/_templates/core.md` holds the shared orchestrator
 body (delegation rules, the TDD section, the canonical Result Contract), and
 one `{harness}.md` overlay per harness holds only that harness's deltas.

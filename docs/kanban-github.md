@@ -216,8 +216,8 @@ not retry blindly.
 Two independent things, easy to conflate:
 
 - **Installing the module** puts `skills/kanban-github/SKILL.md` on disk. It ships in the
-  `optional` manifest group, **installed by default** — `setup.sh`/`install.sh` (and
-  their PowerShell equivalents) include it in the default set. Remove it with
+  `optional` manifest group, **installed by default** — `setup.sh`/`install.sh`
+  include it in the default set. Remove it with
   `--without optional` if you never want the module on disk (this also removes the
   it is now the only member of the group — `go-testing` moved to the opt-in `lang` group).
 - **Activating the board** turns board sync on for a *specific project* via the
@@ -226,11 +226,7 @@ Two independent things, easy to conflate:
   ever flips it on.
 
 ```bash
-./scripts/install.sh --without optional   # bash — exclude the kanban module from disk
-```
-
-```powershell
-.\scripts\install.ps1 -Without optional   # Windows PowerShell
+./scripts/install.sh --without optional   # exclude the kanban module from disk
 ```
 
 If you excluded the group earlier, reinstall **without** the flag to put the module

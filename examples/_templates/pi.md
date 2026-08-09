@@ -19,7 +19,7 @@ system prompt, not the right place for a large orchestrator doc.
 
 Pi routes models per-agent (each Pi agent carries its own model in frontmatter),
 not via an orchestrator-passed Agent `model` param, so the MODEL_ASSIGNMENTS
-token is omitted and renders empty (like codex/gemini-cli).
+token is omitted and renders empty (like codex).
 -->
 
 <!-- @@HEADER@@ -->

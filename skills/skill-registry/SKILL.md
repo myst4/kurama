@@ -41,11 +41,9 @@ This is the foundation of the **Skill Resolver Protocol** (see `_shared/skill-re
    **User-level (global skills):**
    - `~/.claude/skills/` — Claude Code
    - `~/.config/opencode/skills/` — OpenCode
-   - `~/.gemini/skills/` — Gemini CLI
    - `~/.codex/skills/` — Codex
-   - `~/.cursor/skills/` — Cursor
-   - `~/.copilot/skills/` — VS Code Copilot
-   - `~/.gemini/antigravity/skills/` — Antigravity
+   - `~/.pi/agent/skills/` — Pi
+   - `~/.omp/agent/skills/` — omp
    - **The parent directory of this skill file** — the catch-all: Kurama's own skills are
      co-located wherever it was installed, so scanning the parent dir picks up the active
      harness target even if it is not in the explicit list above. The named paths are the
@@ -54,11 +52,9 @@ This is the foundation of the **Skill Resolver Protocol** (see `_shared/skill-re
    **Project-level (workspace skills):**
    - `{project-root}/.claude/skills/` — Claude Code
    - `{project-root}/.config/opencode/skills/` — OpenCode
-   - `{project-root}/.gemini/skills/` — Gemini CLI
    - `{project-root}/.codex/skills/` — Codex
-   - `{project-root}/.cursor/skills/` — Cursor
-   - `{project-root}/.copilot/skills/` — VS Code Copilot
-   - `{project-root}/.gemini/antigravity/skills/` — Antigravity (workspace)
+   - `{project-root}/.pi/skills/` — Pi
+   - `{project-root}/.omp/skills/` — omp
    - `{project-root}/skills/` — Generic (project-local)
 
 2. **SKIP `sdd-*` and `_shared`** — those are SDD workflow skills, not coding/task skills
@@ -109,11 +105,8 @@ Format per skill:
 1. Check the project root for convention files. Look for:
    - `agents.md` or `AGENTS.md`
    - `CLAUDE.md` (only project-level, not `~/.claude/CLAUDE.md`)
-   - `.cursorrules`
-   - `GEMINI.md`
-   - `copilot-instructions.md`
 2. **If an index file is found** (e.g., `agents.md`, `AGENTS.md`): READ its contents and extract all referenced file paths. These index files typically list project conventions with paths — extract every referenced path and include it in the registry table alongside the index file itself.
-3. For non-index files (`.cursorrules`, `CLAUDE.md`, etc.): record the file directly.
+3. For non-index files (`CLAUDE.md`, etc.): record the file directly.
 4. The final table should include the index file AND all paths it references — zero extra hops for sub-agents.
 
 ### Step 3: Write the Registry

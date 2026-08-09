@@ -29,18 +29,14 @@ MARKER="<!-- GENERATED FILE — edit examples/_templates/, then run scripts/buil
 TOKENS="HEADER DELEGATION_MECHANISM NATIVE_NOTES MODEL_ASSIGNMENTS_SECTION STATE_CONVENTIONS"
 
 # Every harness the build emits.
-HARNESSES="claude-code codex gemini-cli opencode antigravity vscode cursor pi omp"
+HARNESSES="claude-code codex opencode pi omp"
 
 # Map a harness id to its committed output path (repo-relative).
 out_path() {
   case "$1" in
     claude-code) echo "examples/claude-code/CLAUDE.md" ;;
     codex)       echo "examples/codex/agents.md" ;;
-    gemini-cli)  echo "examples/gemini-cli/GEMINI.md" ;;
     opencode)    echo "examples/opencode/AGENTS.md" ;;
-    antigravity) echo "examples/antigravity/sdd-orchestrator.md" ;;
-    vscode)      echo "examples/vscode/copilot-instructions.md" ;;
-    cursor)      echo "examples/cursor/.cursor/rules/sdd-orchestrator.mdc" ;;
     pi)          echo "examples/pi/AGENTS.md" ;;
     omp)         echo "examples/omp/AGENTS.md" ;;
     *)           echo "" ;;

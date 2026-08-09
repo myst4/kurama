@@ -132,7 +132,7 @@ Once the registry exists, resolving it and injecting compact rules into each del
 **What it contains:**
 - User skills table: trigger → skill name → path (e.g., "React components" → `react-19` → `~/.claude/skills/react-19/SKILL.md`)
 - Compact rules blocks: short, pre-digested instructions that delegators paste directly into sub-agent prompts
-- Project conventions found: `agents.md`, `CLAUDE.md`, `.cursorrules`, etc.
+- Project conventions found: `agents.md`, `AGENTS.md`, `CLAUDE.md`, etc.
 
 **When to update:** Run `/skill-registry` after installing or removing skills.
 

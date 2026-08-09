@@ -20,7 +20,7 @@ set -uo pipefail
 #   5. Fenced ```yaml blocks in skills/_shared/openspec-convention.md
 #      parse (requires python3 + PyYAML; soft-skips otherwise).         [FATAL]
 #   6. Packaging manifests (.claude-plugin/plugin.json,
-#      .claude-plugin/marketplace.json, gemini-extension.json) parse as
+#      .claude-plugin/marketplace.json) parse as
 #      JSON (jq/python3; soft-skips if neither), and plugin.json "version"
 #      equals the VERSION file.                                         [FATAL]
 # ============================================================================
@@ -368,11 +368,10 @@ check_packaging_manifests() {
     local before=$FAIL
     local plugin="$REPO_DIR/.claude-plugin/plugin.json"
     local marketplace="$REPO_DIR/.claude-plugin/marketplace.json"
-    local gemini="$REPO_DIR/gemini-extension.json"
     local version_file="$REPO_DIR/VERSION"
     local no_parser=0 f rc
 
-    for f in "$plugin" "$marketplace" "$gemini"; do
+    for f in "$plugin" "$marketplace"; do
         local label
         label="$(basename "$f")"
         if [ ! -f "$f" ]; then
@@ -404,7 +403,7 @@ check_packaging_manifests() {
         fi
     fi
 
-    [ "$FAIL" -eq "$before" ] && pass "plugin.json/marketplace.json/gemini-extension.json parse; plugin.json version matches VERSION"
+    [ "$FAIL" -eq "$before" ] && pass "plugin.json/marketplace.json parse; plugin.json version matches VERSION"
 }
 
 # ----------------------------------------------------------------------------

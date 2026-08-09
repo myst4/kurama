@@ -75,13 +75,13 @@ Read the project to understand:
   leave `sdd-apply`/`sdd-tasks`/`sdd-verify` pointing at a missing file.
   **Preflight — is the module installed?** Resolve `tdd/SKILL.md` across the same
   skill-resolution paths Step 4 scans (user-level `~/.claude/skills/`,
-  `~/.config/opencode/skills/`, `~/.gemini/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`,
-  `~/.copilot/skills/`, `~/.gemini/antigravity/skills/`, the parent directory of this skill
-  file, and the project-level equivalents).
+  `~/.config/opencode/skills/`, `~/.codex/skills/`, `~/.pi/agent/skills/`,
+  `~/.omp/agent/skills/`, the parent directory of this skill file, and the project-level
+  equivalents).
   - **If `tdd/SKILL.md` is NOT resolvable**: do NOT ask the enable question and do NOT record
     `tdd.enabled=true`. Record `tdd.enabled=false` and tell the user: *"The TDD module is
     missing (default installs include it; it was excluded with `--without tdd`) — reinstall
-    with `scripts/install.sh` (or `install.ps1`), then re-run `/sdd-init` to enable it."*
+    with `scripts/install.sh`, then re-run `/sdd-init` to enable it."*
     Surface this in the return envelope's `risks`.
   - **If `tdd/SKILL.md` IS resolvable**: ask the user directly:
     **"Enable TDD (RED → GREEN → REFACTOR) for this project?"** This is the ONLY switch that
@@ -251,8 +251,8 @@ on its own.
 
 Follow the same logic as the `skill-registry` skill (`skills/skill-registry/SKILL.md`):
 
-1. Scan user skills: glob `*/SKILL.md` across ALL known skill directories (they mirror the per-harness install targets in `skills/manifest.json`). **User-level**: `~/.claude/skills/`, `~/.config/opencode/skills/`, `~/.gemini/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`, `~/.copilot/skills/`, `~/.gemini/antigravity/skills/`, and the parent directory of this skill file (the catch-all — Kurama's own skills are co-located wherever it was installed, so this always covers the active harness target even if it is not in the explicit list). **Project-level**: `.claude/skills/`, `.config/opencode/skills/`, `.gemini/skills/`, `.codex/skills/`, `.cursor/skills/`, `.copilot/skills/`, `.gemini/antigravity/skills/`, `skills/`. Skip `sdd-*`, `_shared`, `skill-registry`. Deduplicate by name (project-level wins). Read frontmatter triggers.
-2. Scan project conventions: check for `agents.md`, `AGENTS.md`, `CLAUDE.md` (project-level), `.cursorrules`, `GEMINI.md`, `copilot-instructions.md` in the project root. If an index file is found (e.g., `agents.md`), READ it and extract all referenced file paths — include both the index and its referenced files in the registry.
+1. Scan user skills: glob `*/SKILL.md` across ALL known skill directories (they mirror the per-harness install targets in `skills/manifest.json`). **User-level**: `~/.claude/skills/`, `~/.config/opencode/skills/`, `~/.codex/skills/`, `~/.pi/agent/skills/`, `~/.omp/agent/skills/`, and the parent directory of this skill file (the catch-all — Kurama's own skills are co-located wherever it was installed, so this always covers the active harness target even if it is not in the explicit list). **Project-level**: `.claude/skills/`, `.config/opencode/skills/`, `.codex/skills/`, `.pi/skills/`, `.omp/skills/`, `skills/`. Skip `sdd-*`, `_shared`, `skill-registry`. Deduplicate by name (project-level wins). Read frontmatter triggers.
+2. Scan project conventions: check for `agents.md`, `AGENTS.md`, `CLAUDE.md` (project-level) in the project root. If an index file is found (e.g., `agents.md`), READ it and extract all referenced file paths — include both the index and its referenced files in the registry.
 3. **ALWAYS write `.kurama/skill-registry.md`** in the project root (create `.kurama/` if needed). This file is harness infrastructure, NOT an SDD project artifact, so it is written in EVERY mode. The persistence-mode gates that suppress project files (e.g. `openspec/`) never apply to `.kurama/`.
 4. If engram is available, **ALSO save to engram**: `mem_save(title: "skill-registry", topic_key: "skill-registry", type: "config", project: "{project}", capture_prompt: false, content: "{registry markdown}")` (`capture_prompt: false` — automated build output, not a human decision)
 

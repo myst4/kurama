@@ -9,8 +9,8 @@ context: |
   contracts as SKILL.md files, scripts/ holds the installer lifecycle
   (setup/install/update/doctor/uninstall), examples/ holds per-harness generated
   configuration.
-  Architecture: a multi-harness SDD workflow across 9 harnesses (claude-code,
-  opencode, omp, gemini-cli, codex, cursor, vscode, antigravity, pi). Nine phase
+  Architecture: a multi-harness SDD workflow across 5 harnesses (claude-code,
+  opencode, omp, codex, pi). Nine phase
   skills form a DAG (explore -> propose -> (spec || design) -> tasks -> apply ->
   verify -> archive) declared once in skills/_shared/sdd-phase-common.md, which
   also owns the Phase I/O table and the size-aware collapsed path. Phases are
