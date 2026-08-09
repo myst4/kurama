@@ -100,7 +100,12 @@ make_writable() {
 # Print the fox banner instead of the plain ASCII title box. TTY-only, so piped
 # runs (CI, the install test suite) keep byte-identical output. Non-zero means
 # nothing was printed and the caller should fall back to the box.
+#
+# KURAMA_NO_BANNER=1 suppresses BOTH the banner and the fallback box, for a
+# front-end that already drew it. Same contract as setup.sh.
 print_banner() {
+    # Full if, not `[ … ] && return 0` — see the note in setup.sh.
+    if [ "${KURAMA_NO_BANNER:-0}" = "1" ]; then return 0; fi
     [ -t 1 ] || return 1
     bash "$SCRIPT_DIR/banner.sh" --no-anim 2>/dev/null
 }

@@ -73,28 +73,41 @@ heading() {
     gum style --foreground "$ACCENT" --bold --margin "1 0 0 0" "$1"
 }
 
+# The nine-tailed fox + KURAMA wordmark, same art setup.sh and install.sh print.
+# The fade-in is kept here (setup.sh passes --no-anim): this front-end only runs
+# on a TTY with a human watching it start, which is the one place it earns its
+# 30ms/frame. banner.sh is best-effort and always exits 0, so a terminal too
+# small or without truecolor degrades on its own — falling back to a plain
+# heading keeps the screen from opening empty.
+print_banner() {
+    [ -t 1 ] || return 1
+    bash "$SCRIPT_DIR/banner.sh" 2>/dev/null
+}
+
 hint() {
     gum style --foreground "$DIM" "$1"
 }
+
+# --- 0. open the screen ------------------------------------------------------
+
+print_banner || heading "Kurama — setup"
+
+# The banner is drawn once, here. Each setup.sh below would otherwise paint it
+# again — four foxes for a three-harness install.
+export KURAMA_NO_BANNER=1
 
 # --- 1. which harnesses ------------------------------------------------------
 # Detected ones are offered pre-selected: a user who installed opencode almost
 # certainly wants it wired. Undetected ones stay selectable on purpose — you may
 # be provisioning a machine before installing the agent itself.
 
-heading "Kurama — setup"
-
 detected=""
-missing=""
 for a in $AGENTS; do
     if command -v "$(agent_binary "$a")" >/dev/null 2>&1; then
         detected="$detected $a"
-    else
-        missing="$missing $a"
     fi
 done
 detected="${detected# }"
-missing="${missing# }"
 
 if [ -n "$detected" ]; then
     hint "Detected in PATH: $(echo "$detected" | tr ' ' ',' | sed 's/,/, /g')"

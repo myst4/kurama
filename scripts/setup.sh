@@ -149,7 +149,16 @@ header() { echo -e "\n${CYAN}${BOLD}$1${NC}"; }
 # Print the fox banner instead of the plain ASCII title box. TTY-only, so piped
 # runs (CI, the install test suite) keep byte-identical output. Non-zero means
 # nothing was printed and the caller should fall back to the box.
+#
+# KURAMA_NO_BANNER=1 suppresses BOTH the banner and the fallback box. It exists
+# for a front-end that already drew the banner itself: setup-tui.sh runs one
+# setup.sh per selected harness, so without this a three-harness install would
+# paint the fox four times.
 print_banner() {
+    # Written as a full if, not `[ … ] && return 0`: under `set -e` a failing
+    # AND-list is only safe because every caller wraps this in `if !`, and that
+    # is not a property a helper should depend on.
+    if [ "${KURAMA_NO_BANNER:-0}" = "1" ]; then return 0; fi
     [ -t 1 ] || return 1
     bash "$SCRIPT_DIR/banner.sh" --no-anim 2>/dev/null
 }
