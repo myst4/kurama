@@ -3,7 +3,6 @@
 Thumbs.db
 
 # Editors
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -12,7 +11,24 @@ Thumbs.db
 # Node (in case anyone adds tooling later)
 node_modules/
 
-# Kurama harness state (registry, fallback SDD artifacts)
+# Kurama harness state (registry, fallback SDD artifacts).
+# openspec/ is deliberately NOT ignored — the specs are the source of truth and
+# are meant to be version-controlled with the repo.
 .kurama/
+
+# Install receipt: setup.sh/install.sh write it at the target root (repo root in
+# --scope project) to record exactly what was installed. Machine-local, and it
+# carries absolute paths.
+.kurama-install-manifest.json
+
+# Timestamped backups setup.sh/uninstall.sh leave beside any file they merge into
+# (prompt files, settings.json, MCP configs).
+*.bak.[0-9]*
+
+# Per-machine agent config. The harness dirs themselves may be committed when a
+# repo ships its own agents/hooks, but the local settings never are.
+.claude/settings.local.json
+.vscode/
+
 # Local Pi runtime state
 .atl/
