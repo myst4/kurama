@@ -154,7 +154,7 @@ Two independent things, easy to conflate:
 
 - **Installing the module** puts `skills/tdd/SKILL.md` on disk. The `tdd` group in
   [skills/manifest.json](../skills/manifest.json) is now **installed by default** —
-  `setup.sh`/`setup.ps1` and `install.sh`/`install.ps1` all include it in the
+  `setup.sh` and `install.sh` both include it in the
   default set. Remove it with `--without tdd` if you never want the module on disk.
   (The language-pattern plugins like `go-testing` live in the separate opt-in `lang`
   group.)
@@ -164,11 +164,7 @@ Two independent things, easy to conflate:
   flip it on.
 
 ```bash
-./scripts/install.sh --without tdd     # bash — exclude the module from disk
-```
-
-```powershell
-.\scripts\install.ps1 -Without tdd     # Windows PowerShell
+./scripts/install.sh --without tdd     # exclude the module from disk
 ```
 
 If you excluded the module earlier, reinstall **without** the flag (`install.sh` /

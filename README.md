@@ -23,8 +23,8 @@ specify, design, implement, and verify a change.
 
 Everything is plain Markdown following the open
 [Agent Skills](https://agentskills.io) format, so the same skill set installs
-across **9 harnesses**: Claude Code, OpenCode, omp, Gemini CLI, Codex, Cursor,
-VS Code Copilot, Antigravity, and Pi. There is no binary to install and nothing to
+across **5 harnesses**: Claude Code, OpenCode, omp, Codex, and Pi. There is no
+binary to install and nothing to
 compile — copy the skills, wire the orchestrator prompt, and run `/sdd-init`.
 
 ## Why
@@ -69,15 +69,8 @@ the orchestrator prompt with idempotent markers (safe to re-run):
 ./scripts/setup.sh --all    # non-interactive — set up every detected agent
 ```
 
-Windows PowerShell:
-
-```powershell
-.\scripts\setup.ps1         # interactive
-.\scripts\setup.ps1 -All    # set up every detected agent
-```
-
 **One specific agent.** Pass `--agent` to skip detection —
-`claude-code`, `opencode`, `omp`, `pi`, `gemini-cli`, `codex`, `cursor`, or `vscode`:
+`claude-code`, `opencode`, `omp`, `pi`, or `codex`:
 
 ```bash
 ./scripts/setup.sh --agent omp          # skills + orchestrator + 17 task agents + RULES.md
@@ -110,10 +103,6 @@ yourself, use the installer scripts and then append the orchestrator prompt from
 
 ```bash
 ./scripts/install.sh        # interactive menu, or: --agent <name>
-```
-
-```powershell
-.\scripts\install.ps1       # Windows equivalent
 ```
 
 Then, inside your project:
@@ -246,11 +235,7 @@ exposes. "Full" means true sub-agents with isolated, fresh context windows.
 |---------|:-----------------:|-------|
 | Claude Code | Full (Task tool, fresh-context sub-agents) | `setup.sh --agent claude-code` |
 | OpenCode | Full (native phase agents + async `delegate`) | `setup.sh --agent opencode` |
-| Gemini CLI | Inline (skills load as instructions) | `setup.sh --agent gemini-cli` |
 | Codex | Inline (skills load as instructions) | `setup.sh --agent codex` |
-| Cursor | Inline (skills load as instructions) | `setup.sh --agent cursor` |
-| VS Code Copilot | Inline (agent mode with tool use) | `setup.sh --agent vscode` |
-| Antigravity | Single-agent | Manual (see installation guide) |
 | Pi | Inline (skills load as instructions) | `setup.sh --agent pi` (global `~/.pi/agent/AGENTS.md`; see installation guide) |
 | omp | Full (native task agents, isolated per-phase contexts) | `setup.sh --agent omp` (global `~/.omp/agent/`; see installation guide) |
 

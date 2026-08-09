@@ -5,7 +5,7 @@ set -euo pipefail
 # Kurama — Full Setup Script
 # Detects installed agents, copies skills, and configures orchestrator prompts.
 # Idempotent: safe to run multiple times (uses markers to avoid duplication).
-# Cross-platform: macOS, Linux, Windows (Git Bash / WSL)
+# Supported platforms: macOS and Linux
 #
 # Usage:
 #   ./setup.sh                    # Interactive: detect + let user choose
@@ -114,45 +114,30 @@ ORCHESTRATOR_HEADINGS=(
 # OS Detection
 # ============================================================================
 
+# Kurama supports macOS and Linux only. The distinction that remains is real:
+# Homebrew is offered for the Engram binary on macOS and nowhere else.
 detect_os() {
     case "$(uname -s)" in
         Darwin)  OS="macos" ;;
-        Linux)
-            if grep -qi microsoft /proc/version 2>/dev/null; then
-                OS="wsl"
-            else
-                OS="linux"
-            fi
-            ;;
-        MINGW*|MSYS*|CYGWIN*)  OS="windows" ;;
-        *)  OS="unknown" ;;
+        Linux)   OS="linux" ;;
+        *)       OS="unknown" ;;
     esac
 }
 
-home_dir() {
-    if [[ "$OS" == "windows" ]]; then
-        echo "${USERPROFILE:-$HOME}"
-    else
-        echo "$HOME"
-    fi
-}
+home_dir() { echo "$HOME"; }
 
 # ============================================================================
 # Colors
 # ============================================================================
 
 setup_colors() {
-    if [[ "$OS" == "windows" ]] && [[ -z "${WT_SESSION:-}" ]] && [[ -z "${TERM_PROGRAM:-}" ]]; then
-        RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-    else
-        RED='\033[0;31m'
-        GREEN='\033[0;32m'
-        YELLOW='\033[1;33m'
-        BLUE='\033[0;34m'
-        CYAN='\033[0;36m'
-        BOLD='\033[1m'
-        NC='\033[0m'
-    fi
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
 }
 
 ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
@@ -180,9 +165,6 @@ detect_agents() {
 
     check_agent "claude-code" "claude"
     check_agent "opencode"    "opencode"
-    check_agent "gemini-cli"  "gemini"
-    check_agent "cursor"      "cursor"
-    check_agent "vscode"      "code"
     check_agent "codex"       "codex"
     check_agent "pi"          "pi"
     check_agent "omp"         "omp"
@@ -218,9 +200,6 @@ get_skills_path() {
     case "$agent" in
         claude-code)  echo "$home/.claude/skills" ;;
         opencode)     echo "$home/.config/opencode/skills" ;;
-        gemini-cli)   echo "$home/.gemini/skills" ;;
-        cursor)       echo "$home/.cursor/skills" ;;
-        vscode)       echo "$home/.copilot/skills" ;;
         codex)        echo "$home/.codex/skills" ;;
         pi)           echo "$home/.pi/agent/skills" ;;
         omp)          echo "$(omp_agent_base)/skills" ;;
@@ -246,17 +225,6 @@ get_prompt_path() {
     case "$agent" in
         claude-code)  echo "$home/.claude/CLAUDE.md" ;;
         opencode)     echo "$home/.config/opencode/AGENTS.md" ;;
-        gemini-cli)   echo "$home/.gemini/GEMINI.md" ;;
-        cursor)       echo "$home/.cursor/rules/kurama.mdc" ;;
-        vscode)
-            if [[ "$OS" == "windows" ]]; then
-                echo "${APPDATA:-$home/AppData/Roaming}/Code/User/prompts/kurama.instructions.md"
-            elif [[ "$OS" == "macos" ]]; then
-                echo "$home/Library/Application Support/Code/User/prompts/kurama.instructions.md"
-            else
-                echo "$home/.config/Code/User/prompts/kurama.instructions.md"
-            fi
-            ;;
         codex)        echo "$home/.codex/agents.md" ;;
         pi)           echo "$home/.pi/agent/AGENTS.md" ;;
         omp)          echo "$(omp_agent_base)/AGENTS.md" ;;
@@ -268,9 +236,6 @@ get_example_file() {
     case "$agent" in
         claude-code)  echo "$EXAMPLES_DIR/claude-code/CLAUDE.md" ;;
         opencode)     echo "" ;; # OpenCode has special handling
-        gemini-cli)   echo "$EXAMPLES_DIR/gemini-cli/GEMINI.md" ;;
-        cursor)       echo "$EXAMPLES_DIR/cursor/.cursor/rules/sdd-orchestrator.mdc" ;;
-        vscode)       echo "$EXAMPLES_DIR/vscode/copilot-instructions.md" ;;
         codex)        echo "$EXAMPLES_DIR/codex/agents.md" ;;
         pi)           echo "$EXAMPLES_DIR/pi/AGENTS.md" ;;
         omp)          echo "$EXAMPLES_DIR/omp/AGENTS.md" ;;
@@ -471,9 +436,7 @@ read_commit() {
 }
 
 make_writable() {
-    if [[ "$OS" != "windows" ]]; then
-        chmod u+w "$1" 2>/dev/null || true
-    fi
+    chmod u+w "$1" 2>/dev/null || true
 }
 
 # Emit "<name> <group>" for every skill declared in skills/manifest.json. Uses jq
@@ -877,20 +840,9 @@ setup_orchestrator() {
     prompt_dir="$(dirname "$prompt_path")"
     mkdir -p "$prompt_dir"
 
-    # Cursor's target is a dedicated .mdc file owned by this tool, and .mdc YAML
-    # frontmatter must start at byte 0 — marker wrapping would break it. Copy the
-    # generated rule verbatim (with backup) instead of marker-merging.
-    if [ "$agent_name" = "cursor" ]; then
-        make_backup "$prompt_path"
-        atomic_replace "$prompt_path" < "$example_file"
-        info "Wrote $prompt_path (verbatim .mdc copy)"
-        return 0
-    fi
-
     # Record this prompt so uninstall.sh can surgically strip Kurama's orchestrator
     # block (BEGIN:kurama … END:kurama) on removal, preserving the user's own
-    # content in a shared prompt file. (Cursor is exempt above — its dedicated
-    # .mdc is a verbatim copy with no markers.)
+    # content in a shared prompt file.
     RECEIPT_PROMPTS="$RECEIPT_PROMPTS
 $(receipt_rel "$prompt_path")"
 
@@ -1708,33 +1660,6 @@ register_engram_mcp() {
                 '.mcp = (.mcp // {}) | .mcp.engram = {command: [$cmd, "mcp", "--tools=agent"], type: "local"}' \
                 "$cmd"
             ;;
-        cursor)
-            if [ "$SCOPE" = "project" ]; then file="$TARGET_PATH/.cursor/mcp.json"; else file="$home/.cursor/mcp.json"; fi
-            engram_merge_json "$file" \
-                '.mcpServers = (.mcpServers // {}) | .mcpServers.engram = {command: $cmd, args: ["mcp", "--tools=agent"]}' \
-                "$cmd"
-            ;;
-        gemini-cli)
-            if [ "$SCOPE" = "project" ]; then file="$TARGET_PATH/.gemini/settings.json"; else file="$home/.gemini/settings.json"; fi
-            engram_merge_json "$file" \
-                '.mcpServers = (.mcpServers // {}) | .mcpServers.engram = {command: $cmd, args: ["mcp", "--tools=agent"]}' \
-                "$cmd"
-            ;;
-        vscode)
-            if [ "$SCOPE" = "project" ]; then
-                file="$TARGET_PATH/.vscode/mcp.json"
-            else
-                case "$OS" in
-                    macos)   file="$home/Library/Application Support/Code/User/mcp.json" ;;
-                    windows) file="${APPDATA:-$home/AppData/Roaming}/Code/User/mcp.json" ;;
-                    *)       file="$home/.config/Code/User/mcp.json" ;;
-                esac
-            fi
-            # VS Code uses a fixed "servers" key rather than "mcpServers".
-            engram_merge_json "$file" \
-                '.servers = (.servers // {}) | .servers.engram = {command: $cmd, args: ["mcp", "--tools=agent"]}' \
-                "$cmd"
-            ;;
         codex)
             if [ "$SCOPE" = "project" ]; then
                 info "Codex uses a single global MCP config; skipping Engram registration for project scope."
@@ -1934,7 +1859,21 @@ ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --agent)          AGENT="$2"; shift 2 ;;
+        --agent)
+            # Validate against the supported set. Without this an unknown slug
+            # falls through every path-resolution case, yielding an empty target
+            # and a bare `mkdir: : No such file or directory` — which is exactly
+            # what a stale `--agent gemini-cli|cursor|vscode|antigravity` in a
+            # script or CI job now produces. Fail here, by name, instead.
+            case "$2" in
+                claude-code|opencode|codex|pi|omp) AGENT="$2"; shift 2 ;;
+                *)
+                    echo "Unknown agent: $2"
+                    echo "Supported: claude-code, opencode, codex, pi, omp"
+                    exit 1
+                    ;;
+            esac
+            ;;
         --all)            ALL=true; shift ;;
         --non-interactive) NON_INTERACTIVE=true; ALL=true; shift ;;
         --scope)
@@ -1977,8 +1916,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --all                  Auto-detect and install for all found agents"
-            echo "  --agent NAME           Install for a specific agent: claude-code, opencode, gemini-cli,"
-            echo "                         codex, vscode, cursor, pi, omp"
+            echo "  --agent NAME           Install for a specific agent: claude-code, opencode, codex, pi, omp"
             echo "  --scope SCOPE          Install scope: 'global' (default) or 'project'"
             echo "  --path DIR             Target repo for --scope project (default: cwd; must be a git repo)"
             echo "  --opencode-mode M      OpenCode agent mode: 'single' or 'multi' (per-phase models)"
@@ -1992,7 +1930,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --non-interactive      No prompts (for external installers)"
             echo "  -h, --help             Show this help"
             echo ""
-            echo "Agents: claude-code, opencode, gemini-cli, cursor, vscode, codex, pi"
+            echo "Agents: claude-code, opencode, codex, pi, omp"
             echo ""
             echo "Scope:"
             echo "  global   Install to the per-user agent config dirs (~/.claude, ~/.pi, …)."

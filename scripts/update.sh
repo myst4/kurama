@@ -32,7 +32,7 @@ VERSION_FILE="$REPO_DIR/VERSION"
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
 # Every agent that can carry a global receipt (used when no --agent is given).
-ALL_AGENTS="claude-code opencode gemini-cli codex vscode cursor pi omp"
+ALL_AGENTS="claude-code opencode codex pi omp"
 
 SCOPE="global"
 AGENT=""
@@ -43,24 +43,18 @@ DRY_RUN=false
 # OS detection + colors (mirrors setup.sh so paths resolve identically)
 # ============================================================================
 
+# macOS and Linux only.
 detect_os() {
     case "$(uname -s)" in
         Darwin)  OS="macos" ;;
-        Linux)
-            if grep -qi microsoft /proc/version 2>/dev/null; then OS="wsl"; else OS="linux"; fi
-            ;;
-        MINGW*|MSYS*|CYGWIN*)  OS="windows" ;;
-        *)  OS="unknown" ;;
+        Linux)   OS="linux" ;;
+        *)       OS="unknown" ;;
     esac
 }
 
 setup_colors() {
-    if [[ "$OS" == "windows" ]] && [[ -z "${WT_SESSION:-}" ]] && [[ -z "${TERM_PROGRAM:-}" ]]; then
-        RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
-    else
-        RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-        CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-    fi
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 }
 
 ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
@@ -69,7 +63,7 @@ fail() { echo -e "  ${RED}✗${NC} $1"; }
 info() { echo -e "  ${CYAN}→${NC} $1"; }
 header() { echo -e "\n${CYAN}${BOLD}$1${NC}"; }
 
-home_dir() { if [[ "$OS" == "windows" ]]; then echo "${USERPROFILE:-$HOME}"; else echo "$HOME"; fi; }
+home_dir() { echo "$HOME"; }
 
 # ============================================================================
 # Receipt helpers
@@ -102,9 +96,6 @@ global_skills_path() {
     case "$agent" in
         claude-code)  echo "$home/.claude/skills" ;;
         opencode)     echo "$home/.config/opencode/skills" ;;
-        gemini-cli)   echo "$home/.gemini/skills" ;;
-        cursor)       echo "$home/.cursor/skills" ;;
-        vscode)       echo "$home/.copilot/skills" ;;
         codex)        echo "$home/.codex/skills" ;;
         pi)           echo "$home/.pi/agent/skills" ;;
         omp)          echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/skills" ;;
@@ -114,20 +105,18 @@ global_skills_path() {
 
 # Map a receipt "tool" value to the canonical agent slug setup.sh accepts.
 # setup.sh-written receipts already store the slug (e.g. "claude-code"), but
-# install.sh-written receipts store the human DISPLAY name (e.g. "Claude Code",
-# "Gemini CLI", "VS Code (Copilot)"). Those embedded spaces would otherwise
-# word-split the re-sync command into a bogus --agent token (setup.sh: "Unknown
-# option: Code"), aborting the update and leaving the receipt un-re-stamped.
-# Recognized slugs pass through unchanged; an unknown value yields the empty
-# string so the caller fails loudly instead of mis-invoking setup.sh.
+# install.sh-written receipts store the human DISPLAY name (e.g. "Claude Code").
+# Those embedded spaces would otherwise word-split the re-sync command into a
+# bogus --agent token (setup.sh: "Unknown option: Code"), aborting the update and
+# leaving the receipt un-re-stamped. Recognized slugs pass through unchanged; an
+# unknown value yields the empty string so the caller fails loudly instead of
+# mis-invoking setup.sh. Receipts from dropped harnesses (gemini-cli, cursor,
+# vscode, antigravity) land here too and correctly fail loudly.
 tool_to_slug() {
     case "$1" in
         claude-code|"Claude Code")   echo "claude-code" ;;
         opencode|"OpenCode")         echo "opencode" ;;
-        gemini-cli|"Gemini CLI")     echo "gemini-cli" ;;
         codex|"Codex")               echo "codex" ;;
-        vscode|"VS Code (Copilot)")  echo "vscode" ;;
-        cursor|"Cursor")             echo "cursor" ;;
         pi|"Pi")                     echo "pi" ;;
         omp)                         echo "omp" ;;
         *)                           echo "" ;;

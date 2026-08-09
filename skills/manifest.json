@@ -144,20 +144,8 @@
       "skills": ".config/opencode/skills",
       "commands": ".config/opencode/commands"
     },
-    "gemini-cli": {
-      "skills": ".gemini/skills"
-    },
     "codex": {
       "skills": ".codex/skills"
-    },
-    "vscode": {
-      "skills": ".copilot/skills"
-    },
-    "antigravity": {
-      "skills": ".gemini/antigravity/skills"
-    },
-    "cursor": {
-      "skills": ".cursor/skills"
     },
     "pi": {
       "skills": ".pi/agent/skills"

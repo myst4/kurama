@@ -74,10 +74,6 @@ setup() {
     TEST_TMPDIR="$(mktemp -d)"
     export HOME="$TEST_TMPDIR/home"
     mkdir -p "$HOME"
-    # Fake Windows-style env vars for cross-platform path tests
-    export USERPROFILE="$TEST_TMPDIR/home"
-    export APPDATA="$TEST_TMPDIR/appdata"
-    mkdir -p "$APPDATA"
 }
 
 teardown() {
@@ -250,22 +246,6 @@ test_opencode_commands() {
 }
 
 # ============================================================================
-# Tests — Gemini CLI
-# ============================================================================
-
-test_install_gemini_cli() {
-    bash "$INSTALL_SCRIPT" --agent gemini-cli > /dev/null 2>&1
-    assert_all_skills_installed "$HOME/.gemini/skills"
-}
-
-test_gemini_cli_skill_count() {
-    bash "$INSTALL_SCRIPT" --agent gemini-cli > /dev/null 2>&1
-    local count
-    count=$(find "$HOME/.gemini/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for Gemini CLI"
-}
-
-# ============================================================================
 # Tests — Codex
 # ============================================================================
 
@@ -279,54 +259,6 @@ test_codex_skill_count() {
     local count
     count=$(find "$HOME/.codex/skills" -name "SKILL.md" | wc -l | tr -d ' ')
     assert_eq "24" "$count" "Expected exactly 24 skills for Codex"
-}
-
-# ============================================================================
-# Tests — VS Code (Copilot, global ~/.copilot/skills)
-# ============================================================================
-
-test_install_vscode() {
-    bash "$INSTALL_SCRIPT" --agent vscode > /dev/null 2>&1
-    assert_all_skills_installed "$HOME/.copilot/skills"
-}
-
-test_vscode_skill_count() {
-    bash "$INSTALL_SCRIPT" --agent vscode > /dev/null 2>&1
-    local count
-    count=$(find "$HOME/.copilot/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for VS Code"
-}
-
-# ============================================================================
-# Tests — Antigravity (~/.gemini/antigravity/skills/)
-# ============================================================================
-
-test_install_antigravity() {
-    bash "$INSTALL_SCRIPT" --agent antigravity > /dev/null 2>&1
-    assert_all_skills_installed "$HOME/.gemini/antigravity/skills"
-}
-
-test_antigravity_skill_count() {
-    bash "$INSTALL_SCRIPT" --agent antigravity > /dev/null 2>&1
-    local count
-    count=$(find "$HOME/.gemini/antigravity/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for Antigravity"
-}
-
-# ============================================================================
-# Tests — Cursor
-# ============================================================================
-
-test_install_cursor() {
-    bash "$INSTALL_SCRIPT" --agent cursor > /dev/null 2>&1
-    assert_all_skills_installed "$HOME/.cursor/skills"
-}
-
-test_cursor_skill_count() {
-    bash "$INSTALL_SCRIPT" --agent cursor > /dev/null 2>&1
-    local count
-    count=$(find "$HOME/.cursor/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for Cursor"
 }
 
 # ============================================================================
@@ -377,12 +309,12 @@ test_all_global() {
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
     # OpenCode
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
-    # Gemini CLI
-    assert_all_skills_installed "$HOME/.gemini/skills" || return 1
     # Codex
     assert_all_skills_installed "$HOME/.codex/skills" || return 1
-    # Cursor
-    assert_all_skills_installed "$HOME/.cursor/skills" || return 1
+    # Pi
+    assert_all_skills_installed "$HOME/.pi/agent/skills" || return 1
+    # omp
+    assert_all_skills_installed "$HOME/.omp/agent/skills" || return 1
 }
 
 test_all_global_total_skill_count() {
@@ -392,9 +324,9 @@ test_all_global_total_skill_count() {
     for dir in \
         "$HOME/.claude/skills" \
         "$HOME/.config/opencode/skills" \
-        "$HOME/.gemini/skills" \
         "$HOME/.codex/skills" \
-        "$HOME/.cursor/skills"; do
+        "$HOME/.pi/agent/skills" \
+        "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
         assert_eq "24" "$count" "Expected 24 skills in $dir" || return 1
@@ -443,9 +375,9 @@ test_idempotent_all_global() {
     for dir in \
         "$HOME/.claude/skills" \
         "$HOME/.config/opencode/skills" \
-        "$HOME/.gemini/skills" \
         "$HOME/.codex/skills" \
-        "$HOME/.cursor/skills"; do
+        "$HOME/.pi/agent/skills" \
+        "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
         assert_eq "24" "$count" "Expected 24 skills in $dir after double install" || return 1
@@ -749,7 +681,7 @@ test_no_broken_opencode_json_reference() {
     # opencode.single.json / opencode.multi.json. Neither installer may point at
     # the nonexistent template path.
     if grep -E 'examples[/\\]opencode[/\\]opencode\.json' \
-        "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/install.ps1" > /dev/null 2>&1; then
+        "$SCRIPT_DIR/install.sh" > /dev/null 2>&1; then
         echo "Found reference to the nonexistent examples/opencode/opencode.json"
         return 1
     fi
@@ -759,10 +691,6 @@ test_no_broken_opencode_json_reference() {
 test_opencode_json_reference_fixed() {
     grep -qE 'opencode\.single\.json' "$SCRIPT_DIR/install.sh" || {
         echo "install.sh missing opencode.single.json reference"
-        return 1
-    }
-    grep -qE 'opencode\.single\.json' "$SCRIPT_DIR/install.ps1" || {
-        echo "install.ps1 missing opencode.single.json reference"
         return 1
     }
     return 0
@@ -1421,10 +1349,10 @@ test_pi_installs_native_agents() {
 }
 
 test_non_target_agents_have_no_native_agents() {
-    # Targets other than claude-code and pi ship NO native agents.
-    bash "$SETUP_SCRIPT" --agent gemini-cli > /dev/null 2>&1
-    if [ -d "$HOME/.gemini/agents" ]; then
-        echo "gemini-cli unexpectedly grew a native agents directory"
+    # Targets other than claude-code, pi and omp ship NO native agents.
+    bash "$SETUP_SCRIPT" --agent codex > /dev/null 2>&1
+    if [ -d "$HOME/.codex/agents" ]; then
+        echo "codex unexpectedly grew a native agents directory"
         return 1
     fi
     return 0
@@ -1764,7 +1692,7 @@ test_meta_skills_installed_by_default() {
 
 # ============================================================================
 # Tests — Packaging manifests (M5): plugin.json / marketplace.json /
-# gemini-extension.json parse as JSON and plugin.json version == VERSION
+# parse as JSON and plugin.json version == VERSION
 # ============================================================================
 
 # Parse a JSON file: jq preferred, python3 fallback, soft-pass if neither exists.
@@ -1790,13 +1718,6 @@ test_marketplace_json_valid() {
     local f="$REPO_DIR/.claude-plugin/marketplace.json"
     assert_file_exists "$f" || return 1
     json_file_parses "$f" || { echo "marketplace.json is not valid JSON"; return 1; }
-    return 0
-}
-
-test_gemini_extension_json_valid() {
-    local f="$REPO_DIR/gemini-extension.json"
-    assert_file_exists "$f" || return 1
-    json_file_parses "$f" || { echo "gemini-extension.json is not valid JSON"; return 1; }
     return 0
 }
 
@@ -1826,6 +1747,66 @@ test_none_mode_fully_removed() {
     # And the removal must be explained where someone hitting an old config would look.
     grep -qi 'report it as unsupported' "$REPO_DIR/skills/_shared/persistence-contract.md" \
         || { echo "persistence-contract.md must say what to do when a config still says none"; return 1; }
+    return 0
+}
+
+test_dropped_harnesses_rejected_by_name() {
+    # The four dropped harnesses (gemini-cli, cursor, vscode, antigravity) were valid
+    # --agent values, so stale scripts and CI jobs still pass them. setup.sh never
+    # validated the slug: an unknown one fell through every path-resolution case and
+    # produced an empty target plus a bare `mkdir: : No such file or directory`. The
+    # failure must name the agent and the supported set instead.
+    local a out
+    for a in gemini-cli cursor vscode antigravity bogus; do
+        out=$(bash "$SETUP_SCRIPT" --agent "$a" 2>&1)
+        # shellcheck disable=SC2181  # the exit code of the command above is what is under test
+        if [ $? -eq 0 ]; then
+            echo "--agent $a was accepted; it must fail"
+            return 1
+        fi
+        case "$out" in
+            *"Unknown agent: $a"*) ;;
+            *) echo "--agent $a failed without naming the agent: $out"; return 1 ;;
+        esac
+        case "$out" in
+            *"claude-code, opencode, codex, pi, omp"*) ;;
+            *) echo "--agent $a did not name the supported set"; return 1 ;;
+        esac
+    done
+    # And the supported five must still be accepted by the same validator.
+    for a in claude-code opencode codex pi omp; do
+        out=$(bash "$SETUP_SCRIPT" --agent "$a" --non-interactive 2>&1)
+        case "$out" in
+            *"Unknown agent"*) echo "--agent $a was rejected; it is supported"; return 1 ;;
+        esac
+    done
+    return 0
+}
+
+test_dropped_harness_artifacts_are_gone() {
+    # Removing a harness from the installers is not enough: a leftover template keeps
+    # build-examples.sh emitting its orchestrator, and a leftover manifest target keeps
+    # install.sh writing skills where nothing reads them.
+    local p
+    for p in \
+        "$REPO_DIR/examples/gemini-cli" "$REPO_DIR/examples/cursor" \
+        "$REPO_DIR/examples/vscode" "$REPO_DIR/examples/antigravity" \
+        "$REPO_DIR/examples/_templates/gemini-cli.md" "$REPO_DIR/examples/_templates/cursor.md" \
+        "$REPO_DIR/examples/_templates/vscode.md" "$REPO_DIR/examples/_templates/antigravity.md" \
+        "$REPO_DIR/gemini-extension.json"; do
+        if [ -e "$p" ]; then
+            echo "dropped-harness artifact still present: $p"
+            return 1
+        fi
+    done
+    if command -v jq > /dev/null 2>&1; then
+        local targets
+        targets=$(jq -r '.targets | keys | join(" ")' "$REPO_DIR/skills/manifest.json")
+        case "$targets" in
+            *gemini*|*cursor*|*vscode*|*antigravity*)
+                echo "manifest.json still declares a dropped target: $targets"; return 1 ;;
+        esac
+    fi
     return 0
 }
 
@@ -2543,24 +2524,6 @@ test_engram_opencode_project_shape() {
     return 0
 }
 
-test_engram_vscode_servers_key() {
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent vscode --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "vscode engram setup non-zero"; return 1; }
-    # VS Code uses the "servers" key (not mcpServers). Resolve the OS-specific path.
-    local mcp
-    case "$(uname -s)" in
-        Darwin) mcp="$HOME/Library/Application Support/Code/User/mcp.json" ;;
-        MINGW*|MSYS*|CYGWIN*) mcp="${APPDATA:-$HOME/AppData/Roaming}/Code/User/mcp.json" ;;
-        *) mcp="$HOME/.config/Code/User/mcp.json" ;;
-    esac
-    assert_file_exists "$mcp" || return 1
-    jq -e '.servers.engram' "$mcp" > /dev/null || { echo "servers.engram missing in vscode mcp.json"; return 1; }
-    if jq -e '.mcpServers' "$mcp" > /dev/null 2>&1; then echo "vscode must use servers, not mcpServers"; return 1; fi
-    return 0
-}
-
 test_engram_codex_toml_upsert() {
     local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
     make_engram_shims "$bindir" "$log"
@@ -2687,29 +2650,9 @@ run_test "Exactly 24 SKILL.md files" test_opencode_skill_count
 run_test "Installs 9 command files" test_opencode_commands
 echo ""
 
-echo -e "${BOLD}Gemini CLI${NC}"
-run_test "Installs all 24 skills to ~/.gemini/skills" test_install_gemini_cli
-run_test "Exactly 24 SKILL.md files" test_gemini_cli_skill_count
-echo ""
-
 echo -e "${BOLD}Codex${NC}"
 run_test "Installs all 24 skills to ~/.codex/skills" test_install_codex
 run_test "Exactly 24 SKILL.md files" test_codex_skill_count
-echo ""
-
-echo -e "${BOLD}VS Code (Copilot)${NC}"
-run_test "Installs all 24 skills to ~/.copilot/skills" test_install_vscode
-run_test "Exactly 24 SKILL.md files" test_vscode_skill_count
-echo ""
-
-echo -e "${BOLD}Antigravity${NC}"
-run_test "Installs all 24 skills to ~/.gemini/antigravity/skills/" test_install_antigravity
-run_test "Exactly 24 SKILL.md files" test_antigravity_skill_count
-echo ""
-
-echo -e "${BOLD}Cursor${NC}"
-run_test "Installs all 24 skills to ~/.cursor/skills" test_install_cursor
-run_test "Exactly 24 SKILL.md files" test_cursor_skill_count
 echo ""
 
 echo -e "${BOLD}Project-local${NC}"
@@ -2870,9 +2813,10 @@ echo ""
 echo -e "${BOLD}Packaging manifests (M5)${NC}"
 run_test "plugin.json is valid JSON" test_plugin_json_valid
 run_test "marketplace.json is valid JSON" test_marketplace_json_valid
-run_test "gemini-extension.json is valid JSON" test_gemini_extension_json_valid
 run_test "plugin.json version equals VERSION file" test_plugin_json_version_matches_version_file
 run_test "none artifact-store mode is fully removed" test_none_mode_fully_removed
+run_test "dropped harnesses are rejected by name" test_dropped_harnesses_rejected_by_name
+run_test "dropped harness artifacts are gone" test_dropped_harness_artifacts_are_gone
 run_test ".kurama state survives the mode removal" test_kurama_state_survives_mode_removal
 run_test "orchestrator prompt delegates heavy blocks to _shared" test_orchestrator_prompt_delegates_heavy_blocks
 run_test "absent change size resolves to standard" test_change_size_absent_means_standard
@@ -2925,7 +2869,6 @@ echo -e "${BOLD}Phase 10b — Engram persistence engine (O5, fake engram/brew/cl
 run_test "--without-engram writes zero Engram config" test_engram_without_flag_no_changes
 run_test "registers generic mcpServers.engram (claude global)" test_engram_registers_claude_global
 run_test "opencode uses command-array + type:local (project)" test_engram_opencode_project_shape
-run_test "vscode uses the servers key (not mcpServers)" test_engram_vscode_servers_key
 run_test "codex TOML block upsert is idempotent, preserves config" test_engram_codex_toml_upsert
 run_test "project scope writes .mcp.json inside the repo" test_engram_project_scope_claude
 run_test "non-interactive never invokes brew (guide only)" test_engram_brew_not_invoked_noninteractive

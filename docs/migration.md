@@ -5,6 +5,56 @@ stabilization work (Phases 1-8). For what changed and when, see
 [docs/changelog.md](changelog.md). For the persistence contract itself, see
 [docs/persistence.md](persistence.md).
 
+## Breaking change: Windows is no longer supported
+
+Kurama runs on **macOS and Linux**. `scripts/setup.ps1` and `scripts/install.ps1`
+are gone.
+
+**Why it changed.** The PowerShell scripts were a second implementation of the
+installer kept in parity by hand, and it had already drifted — `setup.ps1` never
+supported `omp`. The rest of the lifecycle (`update.sh`, `doctor.sh`,
+`uninstall.sh`, the test suite) was always bash-only, so a Windows install had no
+maintenance path: nothing to update it, check it, or remove it cleanly.
+
+**What you will see.** `.\scripts\setup.ps1` no longer exists. The bash scripts no
+longer resolve `USERPROFILE`/`APPDATA` or detect Git Bash / MSYS / Cygwin.
+
+**If you are on Windows**, use **WSL** and run the bash scripts there — they
+install to the WSL-side `$HOME`, which is where an agent running inside WSL looks.
+This is the same thing the old `wsl` branch did, minus the Git-Bash path. A native
+Windows install is no longer supported.
+
+## Breaking change: Gemini CLI, Cursor, VS Code Copilot and Antigravity are no longer supported
+
+The supported harnesses are now **Claude Code, OpenCode, Codex, Pi, and omp**.
+
+**Why it changed.** Kurama's premise is delegation to sub-agents with isolated,
+fresh context windows. Of the four dropped hosts, none provides that primitive —
+the orchestrator ran inline on all of them, which is the context-flywheel the
+harness exists to break. Each still cost six edit points across the two setup
+scripts plus its own template, generated example, tests, and docs; Cursor also
+forced the prompt writer's only special case (a verbatim `.mdc` copy that
+`uninstall.sh` could not surgically strip).
+
+**What you will see.** `setup.sh --agent gemini-cli|cursor|vscode|antigravity`
+now exits with `Unknown option`. `--all` no longer detects the `gemini`, `cursor`
+or `code` binaries. `gemini-extension.json` and the corresponding `examples/`
+directories are gone, so `gemini extensions install` no longer works.
+
+**If you have an existing install on one of these**, nothing is deleted from your
+machine — but it is no longer managed. `update.sh` fails loudly on those receipts
+instead of re-syncing (their slug no longer resolves), and `uninstall.sh --all`
+no longer visits their paths. To clean up, remove the skills directory
+(`~/.gemini/skills`, `~/.cursor/skills`, `~/.copilot/skills`,
+`~/.gemini/antigravity/skills`) and strip the `BEGIN:kurama … END:kurama` block
+from the corresponding prompt file by hand. Cursor's rule file
+(`~/.cursor/rules/kurama.mdc`) is entirely Kurama's and can be deleted outright.
+
+**If you want to keep using one of them**, the skills are plain Markdown in the
+open [Agent Skills](https://agentskills.io) format — copy `skills/` wherever that
+host reads skills and paste `examples/_templates/core.md` as your orchestrator
+prompt. That is the manual path the installer used to automate.
+
 ## Breaking change: project commands are asked, not detected
 
 `sdd-init` now ASKS for the project's test command, build command, and (when TDD is

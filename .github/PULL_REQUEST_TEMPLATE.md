@@ -53,7 +53,7 @@ Closes #
 
 - [ ] Scripts run without errors: `shellcheck scripts/*.sh`
 - [ ] Manually tested the affected functionality
-- [ ] Skills load correctly in target agent (Claude Code / Gemini CLI / etc.)
+- [ ] Skills load correctly in target agent (Claude Code / OpenCode / etc.)
 
 <!-- Describe any manual testing steps: -->
 

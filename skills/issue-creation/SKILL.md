@@ -59,7 +59,7 @@ Auto-labels: `bug`, `status:needs-review`
 | **Expected Behavior** | What should have happened |
 | **Actual Behavior** | What happened instead (include errors/logs) |
 | **Operating System** | Dropdown: macOS, Linux variants, Windows, WSL |
-| **Agent / Client** | Dropdown: Claude Code, OpenCode, Gemini CLI, Cursor, Windsurf, Codex, Other |
+| **Agent / Client** | Dropdown: Claude Code, OpenCode, Codex, Pi, omp, Other |
 | **Shell** | Dropdown: bash, zsh, fish, Other |
 
 #### Optional Fields
@@ -147,7 +147,7 @@ gh issue create \
 - [x] I understand this issue needs status:approved before a PR can be opened
 
 ### Problem Description
-The setup script only configures Claude Code, Gemini CLI, and OpenCode. Codex users have to manually copy skills.
+The setup script only configures Claude Code and OpenCode. Codex users have to manually copy skills.
 
 ### Proposed Solution
 Add a Codex option to setup.sh that links skills to the .codex/ directory.

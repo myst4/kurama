@@ -33,7 +33,7 @@ INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 EXAMPLES_DIR="$REPO_DIR/examples"
 SKILLS_SRC="$REPO_DIR/skills"
 
-ALL_AGENTS="claude-code opencode gemini-cli codex vscode cursor pi omp"
+ALL_AGENTS="claude-code opencode codex pi omp"
 
 SCOPE="global"
 AGENT=""
@@ -46,21 +46,17 @@ WARNS=0
 # OS + colors
 # ============================================================================
 
+# macOS and Linux only.
 detect_os() {
     case "$(uname -s)" in
         Darwin)  OS="macos" ;;
-        Linux)   if grep -qi microsoft /proc/version 2>/dev/null; then OS="wsl"; else OS="linux"; fi ;;
-        MINGW*|MSYS*|CYGWIN*)  OS="windows" ;;
-        *)  OS="unknown" ;;
+        Linux)   OS="linux" ;;
+        *)       OS="unknown" ;;
     esac
 }
 setup_colors() {
-    if [[ "$OS" == "windows" ]] && [[ -z "${WT_SESSION:-}" ]] && [[ -z "${TERM_PROGRAM:-}" ]]; then
-        RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
-    else
-        RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-        CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-    fi
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 }
 pass() { echo -e "  ${GREEN}✓${NC} $1"; }
 bad()  { echo -e "  ${RED}✗${NC} $1"; FAILS=$((FAILS + 1)); }
@@ -68,7 +64,7 @@ soft() { echo -e "  ${YELLOW}!${NC} $1"; WARNS=$((WARNS + 1)); }
 note() { echo -e "  ${CYAN}→${NC} $1"; }
 header() { echo -e "\n${CYAN}${BOLD}$1${NC}"; }
 
-home_dir() { if [[ "$OS" == "windows" ]]; then echo "${USERPROFILE:-$HOME}"; else echo "$HOME"; fi; }
+home_dir() { echo "$HOME"; }
 
 read_version() {
     local v="unknown"
@@ -100,9 +96,6 @@ global_skills_path() {
     case "$agent" in
         claude-code)  echo "$home/.claude/skills" ;;
         opencode)     echo "$home/.config/opencode/skills" ;;
-        gemini-cli)   echo "$home/.gemini/skills" ;;
-        cursor)       echo "$home/.cursor/skills" ;;
-        vscode)       echo "$home/.copilot/skills" ;;
         codex)        echo "$home/.codex/skills" ;;
         pi)           echo "$home/.pi/agent/skills" ;;
         omp)          echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/skills" ;;
@@ -169,7 +162,6 @@ global_prompt_path() {
     case "$agent" in
         claude-code)  echo "$home/.claude/CLAUDE.md" ;;
         opencode)     echo "$home/.config/opencode/AGENTS.md" ;;
-        gemini-cli)   echo "$home/.gemini/GEMINI.md" ;;
         codex)        echo "$home/.codex/agents.md" ;;
         pi)           echo "$home/.pi/agent/AGENTS.md" ;;
         omp)          echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/AGENTS.md" ;;

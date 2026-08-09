@@ -5,7 +5,7 @@ set -euo pipefail
 # Kurama — Uninstall Script
 # Removes exactly what install.sh recorded in each target's install manifest
 # (.kurama-install-manifest.json). User-created skills are never touched.
-# Cross-platform: macOS, Linux, Windows (Git Bash / WSL). Bash 3.2 compatible.
+# Supported platforms: macOS and Linux. Bash 3.2 compatible.
 #
 # Usage:
 #   ./uninstall.sh --agent claude-code               # Remove from one global agent
@@ -23,7 +23,7 @@ MARKER_BEGIN="<!-- BEGIN:kurama -->"
 MARKER_END="<!-- END:kurama -->"
 
 # Agents install.sh can write skills for (project-local is opt-in via --agent).
-ALL_AGENTS="claude-code opencode gemini-cli codex vscode antigravity cursor pi omp"
+ALL_AGENTS="claude-code opencode codex pi omp"
 
 DRY_RUN=false
 SCOPE="global"       # global | project (O1: mirrors setup.sh)
@@ -34,18 +34,12 @@ PI_PACKAGES=""       # "", "yes", or "no" — O3 Pi package revert offer
 # OS detection (mirrors install.sh so target paths resolve identically)
 # ============================================================================
 
+# macOS and Linux only.
 detect_os() {
     case "$(uname -s)" in
         Darwin)  OS="macos" ;;
-        Linux)
-            if grep -qi microsoft /proc/version 2>/dev/null; then
-                OS="wsl"
-            else
-                OS="linux"
-            fi
-            ;;
-        MINGW*|MSYS*|CYGWIN*)  OS="windows" ;;
-        *)  OS="unknown" ;;
+        Linux)   OS="linux" ;;
+        *)       OS="unknown" ;;
     esac
 }
 
@@ -54,16 +48,12 @@ detect_os() {
 # ============================================================================
 
 setup_colors() {
-    if [[ "$OS" == "windows" ]] && [[ -z "${WT_SESSION:-}" ]] && [[ -z "${TERM_PROGRAM:-}" ]]; then
-        RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
-    else
-        RED='\033[0;31m'
-        GREEN='\033[0;32m'
-        YELLOW='\033[1;33m'
-        CYAN='\033[0;36m'
-        BOLD='\033[1m'
-        NC='\033[0m'
-    fi
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
 }
 
 print_ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
@@ -78,68 +68,15 @@ print_info() { echo -e "  ${CYAN}→${NC} $1"; }
 get_tool_path() {
     local tool="$1"
     case "$tool" in
-        claude-code)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.claude/skills" ;;
-                *)        echo "$HOME/.claude/skills" ;;
-            esac
-            ;;
-        opencode)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.config/opencode/skills" ;;
-                *)        echo "$HOME/.config/opencode/skills" ;;
-            esac
-            ;;
-        gemini-cli)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.gemini/skills" ;;
-                *)        echo "$HOME/.gemini/skills" ;;
-            esac
-            ;;
-        codex)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.codex/skills" ;;
-                *)        echo "$HOME/.codex/skills" ;;
-            esac
-            ;;
-        vscode)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.copilot/skills" ;;
-                *)        echo "$HOME/.copilot/skills" ;;
-            esac
-            ;;
-        antigravity)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.gemini/antigravity/skills" ;;
-                *)        echo "$HOME/.gemini/antigravity/skills" ;;
-            esac
-            ;;
-        cursor)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.cursor/skills" ;;
-                *)        echo "$HOME/.cursor/skills" ;;
-            esac
-            ;;
-        pi)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.pi/agent/skills" ;;
-                *)        echo "$HOME/.pi/agent/skills" ;;
-            esac
-            ;;
-        omp)
-            # PI_CODING_AGENT_DIR relocates omp's user base; honor it so uninstall
-            # removes from the same place setup installed to.
-            if [ -n "${PI_CODING_AGENT_DIR:-}" ]; then
-                echo "$PI_CODING_AGENT_DIR/skills"
-            else
-                case "$OS" in
-                    windows)  echo "$USERPROFILE/.omp/agent/skills" ;;
-                    *)        echo "$HOME/.omp/agent/skills" ;;
-                esac
-            fi
-            ;;
+        claude-code)   echo "$HOME/.claude/skills" ;;
+        opencode)      echo "$HOME/.config/opencode/skills" ;;
+        codex)         echo "$HOME/.codex/skills" ;;
+        pi)            echo "$HOME/.pi/agent/skills" ;;
+        # PI_CODING_AGENT_DIR relocates omp's user base; honor it so uninstall
+        # removes from the same place setup installed to.
+        omp)           echo "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
         project-local) echo "./skills" ;;
-        *)  echo "" ;;
+        *)             echo "" ;;
     esac
 }
 
@@ -537,7 +474,7 @@ show_help() {
     echo "  --dry-run              Show what would be removed without deleting"
     echo "  -h, --help             Show this help"
     echo ""
-    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, omp, project-local"
+    echo "Agents: claude-code, opencode, codex, pi, omp, project-local"
     echo ""
     echo "Only files recorded in each target's $INSTALL_MANIFEST_NAME are removed."
     echo "The recorded settings.json hooks block, the Engram MCP registration, and the"

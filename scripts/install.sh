@@ -4,7 +4,7 @@ set -euo pipefail
 # ============================================================================
 # Kurama — Install Script
 # Copies skills to your AI coding assistant's skill directory
-# Cross-platform: macOS, Linux, Windows (Git Bash / WSL)
+# Supported platforms: macOS and Linux
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,18 +37,12 @@ ACTIVE_SKILLS=()
 # OS Detection
 # ============================================================================
 
+# macOS and Linux only.
 detect_os() {
     case "$(uname -s)" in
         Darwin)  OS="macos" ;;
-        Linux)
-            if grep -qi microsoft /proc/version 2>/dev/null; then
-                OS="wsl"
-            else
-                OS="linux"
-            fi
-            ;;
-        MINGW*|MSYS*|CYGWIN*)  OS="windows" ;;
-        *)  OS="unknown" ;;
+        Linux)   OS="linux" ;;
+        *)       OS="unknown" ;;
     esac
 }
 
@@ -56,8 +50,6 @@ os_label() {
     case "$OS" in
         macos)   echo "macOS" ;;
         linux)   echo "Linux" ;;
-        wsl)     echo "WSL" ;;
-        windows) echo "Windows (Git Bash)" ;;
         *)       echo "Unknown" ;;
     esac
 }
@@ -67,18 +59,13 @@ os_label() {
 # ============================================================================
 
 setup_colors() {
-    if [[ "$OS" == "windows" ]] && [[ -z "${WT_SESSION:-}" ]] && [[ -z "${TERM_PROGRAM:-}" ]]; then
-        # Plain CMD without Windows Terminal — no ANSI support
-        RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-    else
-        RED='\033[0;31m'
-        GREEN='\033[0;32m'
-        YELLOW='\033[1;33m'
-        BLUE='\033[0;34m'
-        CYAN='\033[0;36m'
-        BOLD='\033[1m'
-        NC='\033[0m'
-    fi
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
 }
 
 # ============================================================================
@@ -88,83 +75,17 @@ setup_colors() {
 get_tool_path() {
     local tool="$1"
     case "$tool" in
-        claude-code)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.claude/skills" ;;
-                wsl)      echo "$HOME/.claude/skills" ;;
-                *)        echo "$HOME/.claude/skills" ;;
-            esac
-            ;;
-        opencode)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.config/opencode/skills" ;;
-                macos)    echo "$HOME/.config/opencode/skills" ;;
-                *)        echo "$HOME/.config/opencode/skills" ;;
-            esac
-            ;;
-        opencode-commands)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.config/opencode/commands" ;;
-                macos)    echo "$HOME/.config/opencode/commands" ;;
-                *)        echo "$HOME/.config/opencode/commands" ;;
-            esac
-            ;;
-        gemini-cli)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.gemini/skills" ;;
-                wsl)      echo "$HOME/.gemini/skills" ;;
-                *)        echo "$HOME/.gemini/skills" ;;
-            esac
-            ;;
-        codex)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.codex/skills" ;;
-                wsl)      echo "$HOME/.codex/skills" ;;
-                *)        echo "$HOME/.codex/skills" ;;
-            esac
-            ;;
-        vscode)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.copilot/skills" ;;
-                *)        echo "$HOME/.copilot/skills" ;;
-            esac
-            ;;
-        antigravity)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.gemini/antigravity/skills" ;;
-                *)        echo "$HOME/.gemini/antigravity/skills" ;;
-            esac
-            ;;
-        cursor)
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.cursor/skills" ;;
-                wsl)      echo "$HOME/.cursor/skills" ;;
-                *)        echo "$HOME/.cursor/skills" ;;
-            esac
-            ;;
-        pi)
-            # Pi's global skills live under its agent config dir (~/.pi/agent/skills).
-            case "$OS" in
-                windows)  echo "$USERPROFILE/.pi/agent/skills" ;;
-                wsl)      echo "$HOME/.pi/agent/skills" ;;
-                *)        echo "$HOME/.pi/agent/skills" ;;
-            esac
-            ;;
-        omp)
-            # omp keeps user skills under its agent config dir (~/.omp/agent/skills).
-            # PI_CODING_AGENT_DIR relocates that base when set — honor it, since omp
-            # itself resolves the user base from that variable.
-            if [[ -n "${PI_CODING_AGENT_DIR:-}" ]]; then
-                echo "$PI_CODING_AGENT_DIR/skills"
-            else
-                case "$OS" in
-                    windows)  echo "$USERPROFILE/.omp/agent/skills" ;;
-                    wsl)      echo "$HOME/.omp/agent/skills" ;;
-                    *)        echo "$HOME/.omp/agent/skills" ;;
-                esac
-            fi
-            ;;
-        project-local) echo "./skills" ;;
+        claude-code)       echo "$HOME/.claude/skills" ;;
+        opencode)          echo "$HOME/.config/opencode/skills" ;;
+        opencode-commands) echo "$HOME/.config/opencode/commands" ;;
+        codex)             echo "$HOME/.codex/skills" ;;
+        # Pi's global skills live under its agent config dir (~/.pi/agent/skills).
+        pi)                echo "$HOME/.pi/agent/skills" ;;
+        # omp keeps user skills under its agent config dir (~/.omp/agent/skills).
+        # PI_CODING_AGENT_DIR relocates that base when set — honor it, since omp
+        # itself resolves the user base from that variable.
+        omp)               echo "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
+        project-local)     echo "./skills" ;;
     esac
 }
 
@@ -173,9 +94,7 @@ get_tool_path() {
 # ============================================================================
 
 make_writable() {
-    if [[ "$OS" != "windows" ]]; then
-        chmod u+w "$1" 2>/dev/null || true
-    fi
+    chmod u+w "$1" 2>/dev/null || true
 }
 
 # Print the fox banner instead of the plain ASCII title box. TTY-only, so piped
@@ -236,7 +155,7 @@ show_help() {
     echo "  --version        Print the Kurama version and exit"
     echo "  -h, --help       Show this help"
     echo ""
-    echo "Agents: claude-code, opencode, gemini-cli, codex, vscode, antigravity, cursor, pi, omp, project-local, all-global"
+    echo "Agents: claude-code, opencode, codex, pi, omp, project-local, all-global"
     echo ""
     echo "Skill groups:"
     echo "  sdd-core   Core SDD pipeline + authoring utilities (always installed)"
@@ -546,26 +465,9 @@ install_for_agent() {
             echo -e "${YELLOW}${BOLD}║  Without this, /sdd-* commands will not find the agent.      ║${NC}"
             echo -e "${YELLOW}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
             ;;
-        gemini-cli)
-            install_skills "$(get_tool_path gemini-cli)" "Gemini CLI"
-            print_next_step "~/.gemini/GEMINI.md" "examples/gemini-cli/GEMINI.md"
-            ;;
         codex)
             install_skills "$(get_tool_path codex)" "Codex"
             print_next_step "Codex instructions file" "examples/codex/agents.md"
-            ;;
-        vscode)
-            install_skills "$(get_tool_path vscode)" "VS Code (Copilot)"
-            print_next_step ".github/copilot-instructions.md" "examples/vscode/copilot-instructions.md"
-            ;;
-        antigravity)
-            target="$(get_tool_path antigravity)"
-            install_skills "$target" "Antigravity"
-            print_next_step "~/.gemini/GEMINI.md or .agent/rules/" "examples/antigravity/sdd-orchestrator.md"
-            ;;
-        cursor)
-            install_skills "$(get_tool_path cursor)" "Cursor"
-            print_next_step ".cursor/rules/sdd-orchestrator.mdc" "examples/cursor/.cursor/rules/sdd-orchestrator.mdc"
             ;;
         pi)
             install_skills "$(get_tool_path pi)" "Pi"
@@ -583,16 +485,16 @@ install_for_agent() {
             install_skills "$(get_tool_path claude-code)" "Claude Code"
             install_skills "$(get_tool_path opencode)" "OpenCode"
             install_opencode_commands
-            install_skills "$(get_tool_path gemini-cli)" "Gemini CLI"
             install_skills "$(get_tool_path codex)" "Codex"
-            install_skills "$(get_tool_path cursor)" "Cursor"
+            install_skills "$(get_tool_path pi)" "Pi"
+            install_skills "$(get_tool_path omp)" "omp"
             echo -e "\n${YELLOW}Next steps:${NC}"
             echo -e "  1. Add orchestrator to ${BOLD}~/.claude/CLAUDE.md${NC}"
             echo -e "  2. ${YELLOW}${BOLD}[REQUIRED]${NC} Add orchestrator agent to ${BOLD}~/.config/opencode/opencode.json${NC}"
             echo -e "     ${YELLOW}See: examples/opencode/opencode.single.json (or opencode.multi.json) — without this, /sdd-* commands won't work${NC}"
-            echo -e "  3. Add orchestrator to ${BOLD}~/.gemini/GEMINI.md${NC}"
-            echo -e "  4. Add orchestrator to ${BOLD}Codex instructions file${NC}"
-            echo -e "  5. Add SDD rules to .cursor/rules/sdd-orchestrator.mdc"
+            echo -e "  3. Add orchestrator to ${BOLD}Codex instructions file${NC}"
+            echo -e "  4. Add orchestrator to ${BOLD}~/.pi/agent/AGENTS.md${NC}"
+            echo -e "  5. Add orchestrator to ${BOLD}~/.omp/agent/AGENTS.md${NC}"
             ;;
         custom)
             if [[ -z "${CUSTOM_PATH:-}" ]]; then
@@ -617,32 +519,24 @@ interactive_menu() {
     echo -e "${BOLD}Select your AI coding assistant:${NC}\n"
     echo "  1) Claude Code    ($(get_tool_path claude-code))"
     echo "  2) OpenCode       ($(get_tool_path opencode))"
-    echo "  3) Gemini CLI     ($(get_tool_path gemini-cli))"
-    echo "  4) Codex          ($(get_tool_path codex))"
-    echo "  5) VS Code        ($(get_tool_path vscode))"
-    echo "  6) Antigravity    (~/.gemini/antigravity/skills/)"
-    echo "  7) Cursor         ($(get_tool_path cursor))"
-    echo "  8) Pi             ($(get_tool_path pi))"
-    echo "  9) omp            ($(get_tool_path omp))"
-    echo "  10) Project-local  ($(get_tool_path project-local))"
-    echo "  11) All global    (Claude Code + OpenCode + Gemini CLI + Codex + Cursor)"
-    echo "  12) Custom path"
+    echo "  3) Codex          ($(get_tool_path codex))"
+    echo "  4) Pi             ($(get_tool_path pi))"
+    echo "  5) omp            ($(get_tool_path omp))"
+    echo "  6) Project-local  ($(get_tool_path project-local))"
+    echo "  7) All global     (Claude Code + OpenCode + Codex + Pi + omp)"
+    echo "  8) Custom path"
     echo ""
-    read -rp "Choice [1-12]: " choice
+    read -rp "Choice [1-8]: " choice
 
     case $choice in
         1)  install_for_agent "claude-code" ;;
         2)  install_for_agent "opencode" ;;
-        3)  install_for_agent "gemini-cli" ;;
-        4)  install_for_agent "codex" ;;
-        5)  install_for_agent "vscode" ;;
-        6)  install_for_agent "antigravity" ;;
-        7)  install_for_agent "cursor" ;;
-        8)  install_for_agent "pi" ;;
-        9)  install_for_agent "omp" ;;
-        10) install_for_agent "project-local" ;;
-        11) install_for_agent "all-global" ;;
-        12) install_for_agent "custom" ;;
+        3)  install_for_agent "codex" ;;
+        4)  install_for_agent "pi" ;;
+        5)  install_for_agent "omp" ;;
+        6)  install_for_agent "project-local" ;;
+        7)  install_for_agent "all-global" ;;
+        8)  install_for_agent "custom" ;;
         *)
             print_error "Invalid choice"
             exit 1

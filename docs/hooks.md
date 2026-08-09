@@ -97,9 +97,8 @@ Hooks are a platform capability, so how far these gates reach depends on the har
 | Harness | Native hook support | How the gates apply |
 |---------|---------------------|---------------------|
 | **Claude Code** | Yes — `PreToolUse` (and other events) via `settings.json`. | Ships here. Wire `hooks.json`; both gates run automatically. |
-| **Gemini CLI** | Yes — hooks via extensions. | Port the two scripts as extension hooks on the equivalent pre-tool event; the script logic is harness-agnostic (it reads a JSON payload and gates by exit code). |
 | **OpenCode** | Partial — plugin lifecycle, not a generic pre-tool gate. | The delegate-only rule is already structural (the orchestrator agent has no write tools in `opencode.single.json`); the archive gate can run as `archive-gate.sh <change>` from a command wrapper. |
-| **Codex CLI / VS Code Copilot / Cursor / Antigravity** | No general-purpose tool-gate hook today. | Run the gates **manually / in CI**: `archive-gate.sh <change>` before closing a change, and the write guard's spirit stays prose (the orchestrator instructions). |
+| **Codex CLI / Pi / omp** | No general-purpose tool-gate hook today. | Run the gates **manually / in CI**: `archive-gate.sh <change>` before closing a change, and the write guard's spirit stays prose (the orchestrator instructions). |
 
 Because the scripts gate purely by **stdin JSON in, exit code out**, they are not
 Claude-Code-specific: any harness that can run a command before a tool call, or any

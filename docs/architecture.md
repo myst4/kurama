@@ -158,7 +158,6 @@ kurama/
 ├── README.md                          ← Project overview and quick start
 ├── LICENSE
 ├── VERSION                            ← Version source of truth; installers and skills/manifest.json reference it
-├── gemini-extension.json              ← Gemini CLI extension manifest (GEMINI.md + skills/); alternative to manual copy
 ├── .claude-plugin/                    ← Claude Code plugin packaging (alternative to manual copy)
 │   ├── plugin.json                    ← name/version (from VERSION)/description/skills path
 │   └── marketplace.json               ← Single-entry marketplace example for `/plugin marketplace add`
@@ -215,20 +214,14 @@ kurama/
 │   │   ├── opencode.multi.json        ← Orchestrator + dedicated sdd-<phase> agents, model customizable per phase
 │   │   ├── commands/sdd-*.md          ← Slash commands for OpenCode
 │   │   └── plugins/background-agents.ts ← Async background delegation plugin (both modes)
-│   ├── gemini-cli/GEMINI.md
 │   ├── codex/agents.md
-│   ├── vscode/copilot-instructions.md
-│   ├── antigravity/sdd-orchestrator.md
-│   ├── cursor/.cursor/rules/sdd-orchestrator.mdc
 │   └── omp/
 │       ├── AGENTS.md                  ← GENERATED — omp orchestrator context (native provider, highest priority)
 │       ├── RULES.md                   ← omp-only sticky rules: always-apply, re-attached near the current turn
 │       └── agents/                    ← 17 omp task agents (thinkingLevel/glob/spawns:"" — NOT interchangeable with the Claude or Pi sets, which omp filters out)
 └── scripts/
-    ├── setup.sh                       ← Full setup: detect + install + configure (Unix)
-    ├── setup.ps1                      ← Full setup: detect + install + configure (Windows)
-    ├── install.sh                     ← Skills-only installer (Unix); reads skills/manifest.json
-    ├── install.ps1                    ← Skills-only installer (Windows); reads skills/manifest.json
+    ├── setup.sh                       ← Full setup: detect + install + configure
+    ├── install.sh                     ← Skills-only installer; reads skills/manifest.json
     ├── install_test.sh                ← Regression test suite for install.sh
     ├── uninstall.sh                   ← Removes exactly what an install manifest recorded
     └── build-examples.sh              ← Assembles examples/_templates/ into every examples/* orchestrator file (portable bash 3.2/BSD)

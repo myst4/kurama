@@ -38,7 +38,7 @@ omp://task-agent-discovery.md) on omp v17.1.3:
 Model routing: omp resolves a subagent's model from `task.agentModelOverrides`,
 then the agent's frontmatter `model`, then the parent session model. There is no
 orchestrator-passed model parameter, so MODEL_ASSIGNMENTS is omitted and renders
-empty (same as pi/codex/gemini-cli).
+empty (same as pi/codex).
 -->
 
 <!-- @@HEADER@@ -->

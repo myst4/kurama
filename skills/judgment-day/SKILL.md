@@ -171,7 +171,7 @@ judgment-day is harness-agnostic. It needs three primitives from the host: **lau
 |--------------|-------------------|-------------|-------|
 | Claude Code | native `Task`/`Agent` (two in one turn) | returned inline | parallel by default |
 | OpenCode | native `task` (two in one turn) | returned inline | see example binding below |
-| Codex / Gemini CLI / Copilot / others | native sub-agent/subtask if present | inline | if no parallelism → sequential fallback |
+| Codex / Pi / omp / others | native sub-agent/subtask if present | inline | if no parallelism → sequential fallback |
 | No sub-agent mechanism at all | sequential fallback | inline | one judge at a time |
 
 **Sequential fallback (required when the host lacks parallel sub-agents)**:
