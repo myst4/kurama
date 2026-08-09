@@ -297,9 +297,15 @@ check_markers() {
         soft "orchestrator prompt not found: $prompt"
         return 0
     fi
+    # grep -c PRINTS "0" and EXITS 1 when there is no match, so `|| echo 0`
+    # appends a second line and the variable becomes "0\n0" — `[ -eq ]` then dies
+    # with "integer expression expected" and the else branch reports a bogus
+    # UNBALANCED, masking the real diagnosis (the orchestrator was never merged,
+    # or someone rewrote the prompt file over it). Assign on failure instead of
+    # piping a fallback into the substitution.
     local b e
-    b=$(grep -cF 'BEGIN:kurama' "$prompt" 2>/dev/null || echo 0)
-    e=$(grep -cF 'END:kurama' "$prompt" 2>/dev/null || echo 0)
+    b=$(grep -cF 'BEGIN:kurama' "$prompt" 2>/dev/null) || b=0
+    e=$(grep -cF 'END:kurama' "$prompt" 2>/dev/null) || e=0
     if [ "$b" -eq "$e" ] && [ "$b" -ge 1 ]; then
         pass "orchestrator markers balanced ($b pair) in $prompt"
     elif [ "$b" -eq 0 ] && [ "$e" -eq 0 ]; then

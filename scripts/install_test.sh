@@ -2378,6 +2378,34 @@ test_doctor_healthy_exit_zero() {
     return 0
 }
 
+test_doctor_missing_markers_is_warning_not_failure() {
+    # grep -c prints "0" AND exits 1 on no match, so `$(grep -c ... || echo 0)`
+    # yielded "0\n0": `[ -eq ]` died with "integer expression expected" and the
+    # else branch reported a bogus UNBALANCED. That masked the real diagnosis —
+    # a prompt file rewritten over the merged orchestrator block reads exactly
+    # like this. A prompt with no markers is a WARNING, never a hard failure.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    bash "$SETUP_SCRIPT" --agent claude-code > /dev/null 2>&1
+    # Rewrite the prompt over the merged block, as a user editing CLAUDE.md would.
+    printf '# CLAUDE.md\n\nMy own instructions.\n' > "$HOME/.claude/CLAUDE.md"
+    local output status
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) && status=0 || status=$?
+    case "$output" in
+        *"integer expression expected"*)
+            echo "doctor.sh still emits a bash error counting markers"; return 1 ;;
+        *UNBALANCED*)
+            echo "doctor.sh reports UNBALANCED for a prompt with zero markers"; return 1 ;;
+    esac
+    echo "$output" | grep -qi 'no kurama markers' \
+        || { echo "doctor.sh must name the unmerged orchestrator"; return 1; }
+    if [ "$status" -ne 0 ]; then
+        echo "a missing orchestrator block is a warning, not a failure (exit $status)"
+        return 1
+    fi
+    return 0
+}
+
 test_doctor_broken_receipt_exit_nonzero() {
     local shim="$TEST_TMPDIR/doctorbin"
     make_doctor_shims "$shim"
@@ -2859,6 +2887,7 @@ echo ""
 
 echo -e "${BOLD}Phase 10b — doctor.sh health check (O7)${NC}"
 run_test "doctor is green on a healthy install (exit 0)" test_doctor_healthy_exit_zero
+run_test "unmerged orchestrator is a warning, not UNBALANCED" test_doctor_missing_markers_is_warning_not_failure
 run_test "doctor is red on a broken receipt (exit 1)" test_doctor_broken_receipt_exit_nonzero
 run_test "doctor is green on a healthy project install" test_doctor_project_scope_healthy
 run_test "doctor is red on orphaned agents (no receipt)" test_doctor_orphaned_agents_exit_nonzero
