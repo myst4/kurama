@@ -14,6 +14,7 @@ UNINSTALL_SCRIPT="$SCRIPT_DIR/uninstall.sh"
 UPDATE_SCRIPT="$SCRIPT_DIR/update.sh"
 DOCTOR_SCRIPT="$SCRIPT_DIR/doctor.sh"
 TUI_SCRIPT="$SCRIPT_DIR/setup-tui.sh"
+VALIDATE_SCRIPT="$SCRIPT_DIR/validate_skills.sh"
 MANIFEST_FILE="$REPO_DIR/skills/manifest.json"
 
 # ============================================================================
@@ -2266,7 +2267,12 @@ test_scope_project_uninstall_clean() {
 # Print a flat JSON string array from a receipt, one entry per line (nothing when
 # the key is absent). Mirrors manifest_json_array (scripts/doctor.sh) so the test
 # reads receipts exactly the way uninstall/update/doctor do: jq when present, awk
-# fallback otherwise.
+# fallback otherwise. That includes the opening rule below, which handles a
+# single-line "key": [] itself — a copy that only set inarr would walk past the
+# empty array into the NEXT key, which is the defect
+# test_nojq_receipt_parser_ignores_single_line_empty_array exists to catch. This
+# is the sixth copy of that parser; they are kept in sync by convention, so an
+# edit here belongs in the other five too.
 receipt_array_values() {
     local manifest="$1" key="$2"
     [ -f "$manifest" ] || return 0
@@ -2275,7 +2281,19 @@ receipt_array_values() {
         return 0
     fi
     awk -v key="$key" '
-        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
+            tail = substr($0, index($0, "[") + 1)
+            if (tail ~ /\]/) {                       # array opens and closes on this line
+                sub(/\].*/, "", tail)
+                n = split(tail, parts, ",")
+                for (i = 1; i <= n; i++) {
+                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
+                    if (parts[i] != "") print parts[i]
+                }
+                next
+            }
+            inarr = 1; next
+        }
         inarr && /\]/ { inarr = 0 }
         inarr {
             line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
@@ -2947,6 +2965,269 @@ test_doctor_reports_engram_mcp() {
 }
 
 # ============================================================================
+# Tests — jq-less host (the awk fallbacks actually work)
+#
+# Kurama advertises itself as zero-dependency, but every restricted-PATH farm in
+# this file linked jq in, so the awk fallbacks were never executed here. They are
+# also never executed on a developer's Mac (macOS ships jq in /usr/bin since 15),
+# which is exactly how two defects shipped: manifest_skill_lines resolved 0 skills
+# from the pretty-printed manifest, and the receipt array parser walked past a
+# single-line "key": [] into the NEXT key. The farm below is the same idiom as the
+# pi-absent / git-absent / gum-absent ones, with jq as the subject.
+#
+# What a jq-less install does NOT promise: an identical tree. Measured on project
+# scope, claude-code — the receipt comes out byte-identical, and the trees differ
+# in exactly one file, `.claude/settings.json`, which exists with jq and not
+# without it. That is merge_hooks_settings degrading to printed manual steps and
+# returning 0, the documented contract in docs/installation.md:141-142 — JSON
+# edits go through jq or not at all, never sed. It is intentional, so these cases
+# assert what is actually guaranteed (exit 0, the full skill set, the receipt's
+# arrays, a merged orchestrator) rather than whole-tree equality. Anyone adding a
+# tree comparison here has to exclude that file, for that reason.
+# ============================================================================
+
+# Build a restricted PATH (symlink farm) at $1 holding the core tools an install
+# needs, deliberately WITHOUT jq, so its absence is deterministic regardless of
+# the host. python3 IS linked: it is what a real jq-less Linux box looks like, and
+# it keeps validate_skills.sh's JSON checks running for real instead of soft-
+# skipping them — no copy of manifest_skill_lines has a python3 branch, so it
+# cannot stand in for jq in anything tested here.
+make_nojq_farm() {
+    local bindir="$1"
+    mkdir -p "$bindir"
+    local tool p
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date chmod rm rmdir ls awk sed tr wc find mktemp sort head tail printf test touch ln cut diff git python3; do
+        p="$(command -v "$tool" 2>/dev/null)" || continue
+        ln -sf "$p" "$bindir/$tool"
+    done
+    # Deliberately DO NOT link jq into the farm.
+}
+
+# Fail unless jq is genuinely unreachable through the farm at $1. A farm that
+# still saw jq would make every case in this section vacuously green, so this
+# guard runs first in all of them. Asked two ways: no link in the directory, and
+# `command -v jq` — the question every script under test asks — empty with the
+# farm as the whole PATH (hash -r so a location this shell already remembered
+# cannot answer for it).
+assert_farm_has_no_jq() {
+    local bindir="$1"
+    if [ -e "$bindir/jq" ]; then
+        echo "jq is linked into the farm ($bindir/jq) — this case would prove nothing"
+        return 1
+    fi
+    local found
+    found="$(bash -c 'PATH="$1"; hash -r; command -v jq' bash "$bindir" 2>/dev/null || true)"
+    if [ -n "$found" ]; then
+        echo "command -v jq resolves to '$found' under the farm PATH — this case would prove nothing"
+        return 1
+    fi
+    return 0
+}
+
+# Fail unless the receipts $1 (control) and $2 hold the same entries, in the same
+# order, for every array key named after them. Read through receipt_array_values,
+# i.e. the way the shipped tooling reads a receipt rather than a private parser.
+assert_receipt_arrays_match() {
+    local control="$1" target="$2"
+    shift 2
+    local key expected actual
+    for key in "$@"; do
+        expected="$(receipt_array_values "$control" "$key")"
+        actual="$(receipt_array_values "$target" "$key")"
+        if [ "$expected" != "$actual" ]; then
+            echo "  receipt ${key}[] differs from the jq-present control run:"
+            echo "    control: $(printf '%s' "$expected" | tr '\n' ' ')"
+            echo "    no jq:   $(printf '%s' "$actual" | tr '\n' ' ')"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Fail unless $1 carries a balanced kurama orchestrator block. Counting BOTH
+# markers is what separates a merged prompt from a half-written one: uninstall
+# refuses to strip an unbalanced pair, so it would leave the block behind forever.
+assert_balanced_kurama_block() {
+    local file="$1"
+    assert_file_exists "$file" || return 1
+    local begin end
+    begin=$(grep -cF 'BEGIN:kurama' "$file" 2>/dev/null || true)
+    end=$(grep -cF 'END:kurama' "$file" 2>/dev/null || true)
+    if [ "$begin" -lt 1 ] || [ "$begin" != "$end" ]; then
+        echo "  ${file##*/}: $begin BEGIN:kurama / $end END:kurama (expected a matching pair)"
+        return 1
+    fi
+    return 0
+}
+
+# Count installed SKILL.md files under $1 (0 when the directory does not exist).
+count_skill_files() {
+    [ -d "$1" ] || { echo 0; return 0; }
+    find "$1" -name 'SKILL.md' | wc -l | tr -d ' '
+}
+
+# Rewrite $1 in place so its files[] becomes a single-line empty array, leaving
+# every other key exactly as setup.sh wrote it. No writer in this repo emits that
+# shape, which is why the receipt parser's opening rule was never exercised
+# against it; the receipt this runs on is a throwaway install, never a real one.
+collapse_receipt_files_to_empty_array() {
+    local manifest="$1"
+    local tmp="$manifest.tmp"
+    awk '
+        !collapsed && /^[[:space:]]*"files"[[:space:]]*:[[:space:]]*\[[[:space:]]*$/ {
+            print "  \"files\": [],"; collapsed = 1; skip = 1; next
+        }
+        skip && /^[[:space:]]*\],?[[:space:]]*$/ { skip = 0; next }
+        skip { next }
+        { print }
+    ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+}
+
+test_nojq_setup_claude_code_project_installs() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    # A control install on the host PATH fixes the expected skill count, so this
+    # asserts "same as with jq" rather than a literal that rots on the next skill.
+    local control="$TEST_TMPDIR/control-repo" target="$TEST_TMPDIR/nojq-repo"
+    make_git_repo "$control"
+    make_git_repo "$target"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$control" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "control (jq present) setup exited non-zero"; return 1; }
+    local expected
+    expected="$(count_skill_files "$control/.claude/skills")"
+    [ "$expected" -gt 0 ] || { echo "control install resolved 0 skills — nothing to compare against"; return 1; }
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$target" \
+        --without-engram --non-interactive 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "setup.sh exited $status without jq (must install cleanly):"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+
+    assert_eq "$expected" "$(count_skill_files "$target/.claude/skills")" \
+        "a jq-less install must resolve the same skills as a jq-present one" || return 1
+    assert_all_skills_installed "$target/.claude/skills" || return 1
+    assert_file_exists "$target/.kurama-install-manifest.json" || return 1
+    assert_receipt_arrays_match "$control/.kurama-install-manifest.json" \
+        "$target/.kurama-install-manifest.json" files tools || return 1
+    assert_balanced_kurama_block "$target/CLAUDE.md" || return 1
+    return 0
+}
+
+test_nojq_setup_opencode_project_installs() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    # npm shim inside the farm keeps the opencode dependency step offline, the
+    # same guard the other opencode tests use; it has nothing to do with jq.
+    make_npm_shim "$bindir"
+
+    # A project-scope opencode install writes its prompt to AGENTS.md but keeps the
+    # skills under .claude/skills — same tree as claude-code, so the same path.
+    local control="$TEST_TMPDIR/control-repo" target="$TEST_TMPDIR/nojq-repo"
+    make_git_repo "$control"
+    make_git_repo "$target"
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$control" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "control (jq present) setup exited non-zero"; return 1; }
+    local expected
+    expected="$(count_skill_files "$control/.claude/skills")"
+    [ "$expected" -gt 0 ] || { echo "control install resolved 0 skills — nothing to compare against"; return 1; }
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$target" \
+        --without-engram --non-interactive 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "setup.sh exited $status without jq (must install cleanly):"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+
+    assert_eq "$expected" "$(count_skill_files "$target/.claude/skills")" \
+        "a jq-less install must resolve the same skills as a jq-present one" || return 1
+    assert_all_skills_installed "$target/.claude/skills" || return 1
+    assert_file_exists "$target/.kurama-install-manifest.json" || return 1
+    assert_receipt_arrays_match "$control/.kurama-install-manifest.json" \
+        "$target/.kurama-install-manifest.json" files tools || return 1
+    assert_balanced_kurama_block "$target/AGENTS.md" || return 1
+    return 0
+}
+
+test_nojq_validate_skills_exits_zero() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$VALIDATE_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "validate_skills.sh exited $status without jq (must pass):"
+        printf '%s\n' "$output" | grep -a 'FAIL' | head -5
+        return 1
+    fi
+    # An exit 0 that silently validated nothing would be no better than the bug.
+    printf '%s\n' "$output" | grep -aq 'skills\[\]' && {
+        echo "validate_skills.sh still reports an empty skills[] without jq"; return 1; }
+    return 0
+}
+
+test_nojq_receipt_parser_ignores_single_line_empty_array() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    # A real receipt from a real install — the parser is driven through the script
+    # that drives rm from files[], not reimplemented here.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    # Preconditions the regression needs to be visible: settings[] follows files[]
+    # and names a file that is really on disk, so a parser that runs past the empty
+    # files[] hands uninstall a live path.
+    grep -q '"settings"' "$manifest" || { echo "receipt has no settings[] to leak from"; return 1; }
+    grep -q '.claude/settings.json' "$manifest" || { echo "receipt does not record .claude/settings.json"; return 1; }
+    assert_file_exists "$repo/.claude/settings.json" || return 1
+
+    collapse_receipt_files_to_empty_array "$manifest"
+    grep -q '"files": \[\],' "$manifest" || {
+        echo "the receipt was not mutated to a single-line empty files[]"; return 1; }
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --dry-run --without-pi-packages 2>&1) || status=$?
+    assert_eq "0" "$status" "uninstall --dry-run must exit 0" || return 1
+
+    # files[] is empty, so the parser must yield nothing at all. Before the fix it
+    # yielded settings[]'s contents and this line reads
+    # "would remove: .claude/settings.json" — the user's settings deleted outright
+    # instead of having its kurama hooks block stripped.
+    if printf '%s\n' "$output" | grep -aq 'would remove: .claude/settings.json'; then
+        echo "the parser leaked settings[] into files[] — uninstall would delete settings.json:"
+        printf '%s\n' "$output" | grep -a 'would remove:'
+        return 1
+    fi
+    # The receipt itself is removed by separate code and is not counted here, so an
+    # empty files[] must report exactly zero.
+    printf '%s\n' "$output" | grep -aqF '0 file(s) would be removed' || {
+        echo "an empty files[] must resolve to 0 removals; got:"
+        printf '%s\n' "$output" | grep -a 'would remove:\|file(s) would be removed'
+        return 1
+    }
+    return 0
+}
+
+# ============================================================================
 # Run all tests
 # ============================================================================
 
@@ -3208,6 +3489,13 @@ run_test "project scope writes .mcp.json inside the repo" test_engram_project_sc
 run_test "non-interactive never invokes brew (guide only)" test_engram_brew_not_invoked_noninteractive
 run_test "uninstall strips the Engram MCP registration, rest intact" test_engram_uninstall_removes_registration
 run_test "doctor mentions the Engram MCP registration" test_doctor_reports_engram_mcp
+echo ""
+
+echo -e "${BOLD}jq-less host (awk fallbacks, restricted-PATH farm without jq)${NC}"
+run_test "claude-code project install needs no jq" test_nojq_setup_claude_code_project_installs
+run_test "opencode project install needs no jq" test_nojq_setup_opencode_project_installs
+run_test "validate_skills.sh passes without jq" test_nojq_validate_skills_exits_zero
+run_test "single-line empty files[] resolves to nothing" test_nojq_receipt_parser_ignores_single_line_empty_array
 echo ""
 
 # ============================================================================

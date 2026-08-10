@@ -57,9 +57,11 @@ agent_binary() {
 # below has to work on a machine that never installed gum. Nothing here may call
 # gum — not even heading/hint, which are not defined yet either.
 #
-# The parsers mirror doctor.sh:172-198 rather than improving on them, so a
-# receipt reads the same whichever script opens it (jq when present, portable
-# awk otherwise).
+# The parsers mirror doctor.sh's manifest_field()/manifest_json_array() rather
+# than improving on them, so a receipt reads the same whichever script opens it
+# (jq when present, portable awk otherwise). That is also why the receipt-array
+# opening rule below was corrected in every copy at once instead of here alone —
+# see docs/superpowers/specs/2026-08-10-jq-optional-fallbacks-design.md.
 
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
@@ -94,8 +96,25 @@ manifest_json_array() {
     if command -v jq >/dev/null 2>&1; then
         jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null; return 0
     fi
+    # The opening rule reads the rest of the line before deciding to stay open:
+    # `"tools": []` opens and closes on one line, and consuming it as an opening
+    # would swallow every following line until the next `]` — emitting the NEXT
+    # key's declaration line as if it were an element. `!inarr` keeps a nested
+    # occurrence of the same key from re-opening an array already being read.
     awk -v key="$key" '
-        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
+            tail = substr($0, index($0, "[") + 1)
+            if (tail ~ /\]/) {                       # array opens and closes on this line
+                sub(/\].*/, "", tail)
+                n = split(tail, parts, ",")
+                for (i = 1; i <= n; i++) {
+                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
+                    if (parts[i] != "") print parts[i]
+                }
+                next
+            }
+            inarr = 1; next
+        }
         inarr && /\]/ { inarr = 0 }
         inarr {
             line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)

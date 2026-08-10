@@ -450,7 +450,15 @@ make_writable() {
 
 # Emit "<name> <group>" for every skill declared in skills/manifest.json. Uses jq
 # when available, otherwise a portable awk fallback (bash 3.2 / BSD awk) that parses
-# only the "skills" array and reads name+group from the same line. Mirrors install.sh.
+# only the "skills" array, tracking object boundaries so name and group may sit on
+# separate lines — skills/manifest.json is pretty-printed and they always do.
+# CANONICAL PARSER: byte-identical copies live in install.sh and validate_skills.sh.
+# There is no shared library; keep the three in sync by hand and do not "improve"
+# one copy locally. Three properties must survive any edit: the !inarr guard on the
+# opening rule (manifest.json also has groups/targets objects), the ^[[:space:]]*\]
+# anchor on the closing rule (a bare /\]/ would match a ] inside a value), and the
+# rule order, which lets a one-line {"name":"x","group":"y"} reset, capture and
+# print in that order.
 manifest_skill_lines() {
     [ -f "$MANIFEST_FILE" ] || return 1
     if command -v jq >/dev/null 2>&1; then
@@ -458,23 +466,20 @@ manifest_skill_lines() {
         return 0
     fi
     awk '
-        /"skills"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
-        inarr && /\]/ { inarr = 0 }
+        !inarr && /"skills"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
+        inarr && /^[[:space:]]*\]/                      { inarr = 0; next }
+        inarr && /\{/                                   { name = ""; group = "" }
         inarr {
-            name = ""; group = ""
             if (match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
-                s = substr($0, RSTART, RLENGTH)
-                sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-                sub(/".*/, "", s)
-                name = s
+                s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); name = s
             }
             if (match($0, /"group"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
-                g = substr($0, RSTART, RLENGTH)
-                sub(/.*"group"[[:space:]]*:[[:space:]]*"/, "", g)
-                sub(/".*/, "", g)
-                group = g
+                g = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", g); sub(/".*/, "", g); group = g
             }
+        }
+        inarr && /\}/ {
             if (name != "" && group != "") print name " " group
+            name = ""; group = ""
         }
     ' "$MANIFEST_FILE"
 }
@@ -520,7 +525,19 @@ receipt_json_array() {
         jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null; return 0
     fi
     awk -v key="$key" '
-        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
+            tail = substr($0, index($0, "[") + 1)
+            if (tail ~ /\]/) {                       # array opens and closes on this line
+                sub(/\].*/, "", tail)
+                n = split(tail, parts, ",")
+                for (i = 1; i <= n; i++) {
+                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
+                    if (parts[i] != "") print parts[i]
+                }
+                next
+            }
+            inarr = 1; next
+        }
         inarr && /\]/ { inarr = 0 }
         inarr {
             line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
@@ -687,8 +704,16 @@ $(receipt_rel "$target_dir/$skill_name/SKILL.md")"
         count=$((count + 1))
     done < <(manifest_skill_lines)
 
+    # A manifest that exists and has content but resolves to nothing means the
+    # parser, not the checkout, came up empty — and the only parser that can do
+    # that is the awk fallback. Name jq instead of accusing the user's clone.
     if [ "$count" -eq 0 ]; then
-        fail "No skills resolved from $MANIFEST_FILE — is this a complete clone?"
+        if [ -s "$MANIFEST_FILE" ] && ! command -v jq >/dev/null 2>&1; then
+            fail "No skills resolved from $MANIFEST_FILE — jq is not installed and the awk fallback found no skills[] entries"
+            fail "Install jq and re-run, or check that skills[] in that file is well-formed."
+        else
+            fail "No skills resolved from $MANIFEST_FILE — is this a complete clone?"
+        fi
         exit 1
     fi
 
