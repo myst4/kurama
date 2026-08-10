@@ -21,6 +21,16 @@ set -uo pipefail
 #
 # Usage:
 #   ./scripts/setup-tui.sh
+#
+# Environment:
+#   KURAMA_TUI_PROBE=1  Print the installs this front-end would offer to update
+#                       — one tab-separated line per target (scope, path,
+#                       comma-joined tools, version) — and exit 0. It runs
+#                       before the gum precondition and before the banner, so
+#                       it is the seam install_test.sh drives on a machine with
+#                       no gum. No output means nothing detected.
+#   KURAMA_NO_BANNER=1  Exported (not read) below: the fox is drawn once here,
+#                       so the scripts this front-end runs skip theirs.
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,6 +50,123 @@ agent_binary() {
         *)           echo "" ;;
     esac
 }
+
+# --- detecting an existing install -------------------------------------------
+# Read-only receipt probing, deliberately placed ABOVE the gum precondition: it
+# is the one part of this front-end that is pure bash, and KURAMA_TUI_PROBE
+# below has to work on a machine that never installed gum. Nothing here may call
+# gum — not even heading/hint, which are not defined yet either.
+#
+# The parsers mirror doctor.sh:172-198 rather than improving on them, so a
+# receipt reads the same whichever script opens it (jq when present, portable
+# awk otherwise).
+
+INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
+
+# Where each harness keeps its GLOBAL receipt: the skills dir, mirroring
+# get_skills_path() in setup.sh:204-216 (project scope puts it in the repo root).
+global_skills_path() {
+    case "$1" in
+        claude-code)  echo "$HOME/.claude/skills" ;;
+        opencode)     echo "$HOME/.config/opencode/skills" ;;
+        codex)        echo "$HOME/.codex/skills" ;;
+        pi)           echo "$HOME/.pi/agent/skills" ;;
+        omp)          echo "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
+        *)            echo "" ;;
+    esac
+}
+
+manifest_field() {
+    local manifest="$1" key="$2"
+    [ -f "$manifest" ] || return 0
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '.[$k] // ""' "$manifest" 2>/dev/null; return 0
+    fi
+    awk -v key="$key" '
+        match($0, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"") {
+            s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
+        }' "$manifest"
+}
+
+manifest_json_array() {
+    local manifest="$1" key="$2"
+    [ -f "$manifest" ] || return 0
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null; return 0
+    fi
+    awk -v key="$key" '
+        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        inarr && /\]/ { inarr = 0 }
+        inarr {
+            line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
+            gsub(/,$/, "", line); gsub(/"/, "", line)
+            if (line != "") print line
+        }' "$manifest"
+}
+
+# A project-scope receipt is shared by every harness installed into the repo and
+# lists them all in "tools". Receipts written by v6 and by the legacy install.sh
+# have no "tools" at all, so the scalar "tool" is the fallback.
+manifest_tools() {
+    local tools
+    tools="$(manifest_json_array "$1" "tools" | awk 'NF')"
+    [ -n "$tools" ] || tools="$(manifest_field "$1" "tool")"
+    printf '%s\n' "$tools"
+}
+
+# Newline-separated list → one line joined by $2, duplicates dropped, order kept.
+join_list() {
+    printf '%s\n' "$1" | awk -v sep="$2" '
+        NF && !seen[$0]++ { out = (out == "" ? $0 : out sep $0) }
+        END { print out }'
+}
+
+# One tab-separated line per target: scope, path, tools, version.
+#
+# At most two, because that is what update.sh and doctor.sh accept as units. The
+# five global receipts collapse into ONE global target on purpose: with no
+# --agent both scripts already walk every global receipt themselves, and a TUI
+# that looped them here would be a second implementation of that walk. Its path
+# field therefore carries every receipt dir found, comma-joined — informative,
+# and never passed as an argument.
+detect_targets() {
+    local a dir manifest version paths="" tools="" versions=""
+
+    for a in $AGENTS; do
+        dir="$(global_skills_path "$a")"
+        [ -n "$dir" ] || continue
+        manifest="$dir/$INSTALL_MANIFEST_NAME"
+        [ -f "$manifest" ] || continue
+        paths="$paths$dir
+"
+        tools="$tools$(manifest_tools "$manifest")
+"
+        version="$(manifest_field "$manifest" "version")"
+        [ -n "$version" ] && versions="$versions$version
+"
+    done
+
+    [ -n "$paths" ] && printf '%s\t%s\t%s\t%s\n' \
+        "global" "$(join_list "$paths" ",")" \
+        "$(join_list "$tools" ",")" "$(join_list "$versions" ",")"
+
+    # Project scope keeps its receipt in the repo root. $PWD is the user's repo in
+    # the intended invocation (bash /path/to/kurama/scripts/setup-tui.sh from
+    # inside it); run from the Kurama checkout there is nothing to find, because
+    # setup.sh refuses to install into Kurama itself.
+    manifest="$PWD/$INSTALL_MANIFEST_NAME"
+    [ -f "$manifest" ] && printf '%s\t%s\t%s\t%s\n' \
+        "project" "$PWD" \
+        "$(join_list "$(manifest_tools "$manifest")" ",")" \
+        "$(manifest_field "$manifest" "version")"
+
+    return 0
+}
+
+if [ "${KURAMA_TUI_PROBE:-}" = "1" ]; then
+    detect_targets
+    exit 0
+fi
 
 # --- preconditions ----------------------------------------------------------
 
@@ -95,6 +222,111 @@ print_banner || heading "Kurama — setup"
 # The banner is drawn once, here. Each setup.sh below would otherwise paint it
 # again — four foxes for a three-harness install.
 export KURAMA_NO_BANNER=1
+
+# --- 0.5 already installed? --------------------------------------------------
+# The front door used to have one destination. Someone who already has Kurama
+# and wants it re-synced, or just checked, was asked which harnesses to install
+# and at what scope — and handed a setup.sh line. So: probe first, and offer the
+# maintenance scripts when there is something to maintain.
+#
+# This stays a command builder. It assembles an update.sh/doctor.sh line, shows
+# it, and runs it; it re-implements neither update nor diagnosis. With nothing
+# detected, everything below is skipped and the install flow runs exactly as it
+# did before.
+
+targets="$(detect_targets)"
+
+if [ -n "$targets" ]; then
+    global_label=""
+    project_label=""
+    project_path=""
+
+    # Split by hand rather than with `IFS=<tab> read -r a b c d`: a tab is IFS
+    # whitespace, so read would collapse two adjacent ones and an empty middle
+    # field (a receipt with no tools) would silently shift the version left.
+    #
+    # Labels double as the choose values: matching "global*"/"project*" back out
+    # of the answer is how phase 2 reads its scope too.
+    TAB="$(printf '\t')"
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        t_scope="${line%%"$TAB"*}";  rest="${line#*"$TAB"}"
+        t_path="${rest%%"$TAB"*}";   rest="${rest#*"$TAB"}"
+        t_tools="${rest%%"$TAB"*}";  t_version="${rest#*"$TAB"}"
+
+        label="$t_scope"
+        [ -n "$t_tools" ] && label="$label — ${t_tools//,/, }"
+        [ -n "$t_version" ] && label="$label (v$t_version)"
+        case "$t_scope" in
+            global)  global_label="$label" ;;
+            project) project_label="$label — $t_path"; project_path="$t_path" ;;
+        esac
+    done <<EOF
+$targets
+EOF
+
+    if [ -n "$global_label" ] && [ -n "$project_label" ]; then
+        target="$(gum choose --header "Kurama is already installed. Which one?" \
+            "$global_label" "$project_label")"
+        [ -n "$target" ] || exit 0
+    elif [ -n "$global_label" ]; then
+        target="$global_label"
+        hint "Found an existing global install: $global_label"
+    else
+        target="$project_label"
+        hint "Found an existing project install: $project_label"
+    fi
+
+    case "$target" in
+        project*) maint_scope="project" ;;
+        *)        maint_scope="global" ;;
+    esac
+
+    action="$(gum choose --header "What would you like to do?" \
+        "update — re-sync it from this checkout" \
+        "diagnose — read-only health check, changes nothing" \
+        "install again — go through the full install flow" \
+        "exit — leave it as it is")"
+
+    maint_script=""
+    maint_verb=""
+    case "$action" in
+        update*)   maint_script="update.sh"; maint_verb="Updating" ;;
+        diagnose*) maint_script="doctor.sh"; maint_verb="Diagnosing" ;;
+        "install again"*) ;;  # fall through to phase 1 — today's flow, unchanged
+        *) exit 0 ;;          # "exit", or escape out of the menu
+    esac
+
+    if [ -n "$maint_script" ]; then
+        cmd="./scripts/$maint_script"
+        [ "$maint_scope" = "project" ] && cmd="$cmd --scope project --path \"$project_path\""
+
+        heading "Command"
+        gum style --border rounded --border-foreground "$ACCENT" --padding "0 1" "$cmd"
+        if [ "$maint_scope" = "global" ]; then
+            hint "No --agent: both scripts already cover every global receipt on this machine."
+        else
+            hint "Re-runnable and idempotent — paste it into CI or a dotfiles bootstrap."
+        fi
+
+        gum confirm "Run it now?" || { echo "Not run. The command above is yours to keep."; exit 0; }
+
+        # Real argv, not an eval of the preview: a repo path with spaces must not
+        # re-split. Same reason phase 6 does it this way.
+        heading "$maint_verb the $maint_scope install"
+
+        set --
+        [ "$maint_scope" = "project" ] && set -- --scope project --path "$project_path"
+
+        if bash "$SCRIPT_DIR/$maint_script" "$@"; then
+            gum style --foreground 42 "  ✓ $maint_script done"
+            exit 0
+        else
+            gum style --foreground 196 "  ✗ $maint_script reported a problem"
+            exit 1
+        fi
+    fi
+fi
 
 # --- 1. which harnesses ------------------------------------------------------
 # Detected ones are offered pre-selected: a user who installed opencode almost
