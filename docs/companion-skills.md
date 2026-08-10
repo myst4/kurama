@@ -9,6 +9,14 @@ skills** for AI coding agents — is the reference companion. Every pairing belo
 **optional by design**: Kurama never takes a hard dependency on superpowers (or any
 external skill), and the pipeline runs identically when they are absent.
 
+The reverse also holds, and the orchestrator prompt enforces it ("SDD owns the work
+lifecycle", in the SDD Session Protocol): when Kurama is installed, external process
+skills run **inside** SDD phases, never as replacement pipelines. superpowers' own
+rules state that CLAUDE.md/AGENTS.md instructions take precedence over its skills —
+the orchestrator prompt is that instruction, so a natural-language feature request
+enters `/sdd-new` even when a session-level skill advertises itself as mandatory
+for any creative work.
+
 ## Zero-config discovery
 
 There is nothing to wire up. superpowers installs as ordinary `*/SKILL.md` files in a

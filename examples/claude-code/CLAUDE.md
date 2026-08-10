@@ -106,10 +106,11 @@ Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue
 
 Load it when a cycle starts. A session that never invokes SDD never needs it.
 
-Two rules that must hold even before you load it, because they decide whether you ask anything at all:
+Three rules that must hold even before you load it, because they decide whether you ask anything at all — and which pipeline runs:
 
 - **Persisted settings SATISFY the preflight.** If all four values resolve from `openspec/config.yaml` or the `sdd-init/{project}` bundle, do NOT ask — print a one-line status in the user's language and start. `sdd-init` already asked; re-asking answered questions is friction, not safety. Ask ONLY for values with no persisted answer, in one grouped prompt.
 - **Never enter at `sdd-apply`** because the user said "implement X". Planning artifacts must exist first; if they do not, propose `/sdd-new` or `/sdd-ff` and stop.
+- **SDD owns the work lifecycle.** When this orchestrator is installed, every feature, bug, or refactor request — natural language included ("let's build X", "hagamos este issue") — enters the SDD pipeline, no matter what other process skills are present in the session. External process skills (superpowers' `brainstorming`, `writing-plans`, or any skill that advertises itself as mandatory for "any creative work") are **companions inside SDD phases**, never replacement pipelines: brainstorming-shaped work belongs inside `sdd-explore`/`sdd-propose`, plan-shaped work inside `sdd-tasks`, and their artifacts are SDD artifacts, not a parallel spec tree. Such skills defer to CLAUDE.md/AGENTS.md by their own stated rules — this file is that instruction. If one demands to run first, run the SDD phase and apply the skill's discipline within it.
 
 ### TDD Module (optional)
 
