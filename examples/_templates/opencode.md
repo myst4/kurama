@@ -9,7 +9,7 @@ Holds ONLY this harness's deltas; the shared body lives in core.md.
 Bind this to the dedicated `sdd-orchestrator` agent or rule only. Do NOT apply it to executor phase agents such as `sdd-apply` or `sdd-verify`.
 
 <!-- @@DELEGATION_MECHANISM@@ -->
-delegate (async) is the default for delegated work. Use task (sync) only when you need the result before your next action.
+task is the tool for delegated work — it is OpenCode's native sub-agent mechanism and needs no plugin. For background execution, start OpenCode with `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true` exported in your shell.
 
 <!-- @@NATIVE_NOTES@@ -->
 ### Single vs multi config
