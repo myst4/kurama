@@ -85,10 +85,36 @@ pre-sync hash snapshot, the changed-file report and the `.bak` pruning stay as t
 cover the union of files. A tool whose slug fails `tool_to_slug` aborts that target, as
 today.
 
-`scripts/doctor.sh` — the target header reports every tool in `tools[]`. In
-`check_receipt_files`, drift resolution currently calls `resolve_source "$rel" "$tool"` with
-one tool; it tries each tool in the receipt and accepts the first that resolves to an
-existing source file.
+`scripts/doctor.sh` — the target header reports every tool in `tools[]`.
+
+In `check_receipt_files`, drift resolution currently calls `resolve_source "$rel" "$tool"`
+with one tool. It tries each tool in the receipt. An earlier draft of this spec said "accepts
+the first that resolves to an existing source file"; that rule is wrong and was corrected
+during implementation. `examples/claude-code/agents/sdd-spec.md` and
+`examples/pi/agents/sdd-spec.md` both exist and share a basename, so for a receipt recording
+`["claude-code","pi"]` the first-existing rule misattributes the `.pi/agents/` file to
+claude-code's source and reports a soft drift on a file that is perfectly in sync — a false
+red in exactly the multi-harness install this change exists to support. The rule is therefore
+content-preferred: accept the candidate the installed file actually matches, and fall back to
+the first existing candidate so a genuinely drifted file still resolves and is still
+reported. This weakens only one case — a file hand-edited into a byte-identical copy of
+another recorded harness's source.
+
+`check_markers` and `check_hooks` are widened the same way, for the same reason the header is.
+`check_markers` resolved one prompt path from the single `tool`, so a claude-code + opencode
+repo checked `AGENTS.md` and never looked at `CLAUDE.md`, which carries a `BEGIN:kurama` block
+of its own. It now checks the prompt of every recorded tool, deduplicated by **resolved path**
+rather than by tool: in project scope claude-code and codex both map to `CLAUDE.md` and
+pi/opencode/omp collapse similarly, so a per-tool loop would print the same verdict twice for
+the same file. The balanced-marker logic itself — the fix from PR #7 — is unchanged.
+`check_hooks` early-returned unless the single `tool` was claude-code, so the same repo never
+checked the hooks claude-code had actually installed; it now runs whenever `claude-code`
+appears anywhere in the recorded list.
+
+Measured on a two-harness project repo, `doctor.sh` at HEAD prints
+`Diagnosing opencode (project)`, verifies markers in `AGENTS.md` only, skips the hooks check
+entirely, and still reports "All checks passed — healthy" — a clean bill of health issued
+without inspecting half the install.
 
 `scripts/uninstall.sh` — no logic change. It already consumes the flat arrays, which now
 arrive complete. This is exactly where the bug bites today.

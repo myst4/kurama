@@ -224,12 +224,59 @@ resolve_source() {
     esac
 }
 
+# Every harness the receipt records. A project-scope receipt is shared by every
+# harness installed into that repo, so it lists them all in "tools" and the flat
+# arrays are the union across them. Receipts written by v6 and by the legacy
+# install.sh have no "tools", so the effective list is the single "tool".
+manifest_tools() {
+    local manifest="$1" tools
+    tools="$(manifest_json_array "$manifest" "tools" | awk 'NF')"
+    [ -n "$tools" ] || tools="$(manifest_field "$manifest" "tool")"
+    printf '%s\n' "$tools"
+}
+
+# Render a newline-separated tool list as "a, b" for a header line.
+fmt_tool_list() {
+    printf '%s\n' "$1" | awk 'NF { out = (out == "" ? $0 : out ", " $0) } END { print out }'
+}
+
+# resolve_source against every tool the receipt records, for a file that exists
+# on disk. A project-scope receipt is shared by every harness installed into the
+# repo, and resolve_source maps */agents/* per harness (pi and omp have their own
+# examples dir), so no single tool can resolve the whole union.
+#
+# Why this prefers a content match instead of simply taking the first tool whose
+# mapping exists: examples/claude-code/agents/sdd-spec.md and
+# examples/pi/agents/sdd-spec.md are different files with the same basename, and
+# both exist. For a receipt recording claude-code and pi, first-existing
+# misattributes the .pi/agents/sdd-spec.md entry to the claude-code source, the
+# hashes differ, and doctor reports a soft drift on a file that is perfectly in
+# sync — a false red in exactly the multi-harness install this check was widened
+# to cover. So: accept the candidate the installed file actually matches, and
+# fall back to the first candidate that exists, which keeps a genuinely drifted
+# file resolvable and still reported. The only case this weakens is a file
+# hand-edited into a byte-identical copy of another recorded harness's source.
+resolve_source_any() {
+    local rel="$1" tools="$2" installed="$3" t src first="" installed_hash
+    installed_hash="$(hash_file "$installed")"
+    while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        src="$(resolve_source "$rel" "$t")"
+        [ -n "$src" ] && [ -f "$src" ] || continue
+        [ -n "$first" ] || first="$src"
+        if [ "$installed_hash" = "$(hash_file "$src")" ]; then printf '%s' "$src"; return 0; fi
+    done <<TOOLS
+$tools
+TOOLS
+    printf '%s' "$first"
+}
+
 # ============================================================================
 # Checks
 # ============================================================================
 
 check_receipt_files() {
-    local receipt_dir="$1" tool="$2"
+    local receipt_dir="$1" tools="$2"
     local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
     local files rel missing=0 drift=0 total=0
     files="$(manifest_json_array "$manifest" "files")"
@@ -241,8 +288,8 @@ check_receipt_files() {
             continue
         fi
         local src
-        src="$(resolve_source "$rel" "$tool")"
-        if [ -n "$src" ] && [ -f "$src" ]; then
+        src="$(resolve_source_any "$rel" "$tools" "$receipt_dir/$rel")"
+        if [ -n "$src" ]; then
             if [ "$(hash_file "$receipt_dir/$rel")" != "$(hash_file "$src")" ]; then
                 drift=$((drift + 1))
             fi
@@ -280,19 +327,47 @@ check_version() {
     fi
 }
 
-check_markers() {
+# The orchestrator prompt file one harness merges its block into (mirrors
+# setup.sh). Several harnesses share one file: in project scope claude-code and
+# codex both land in CLAUDE.md, and opencode/pi/omp all land in AGENTS.md.
+prompt_path_for() {
     local tool="$1" scope="$2" receipt_dir="$3"
-    local prompt
     if [ "$scope" = "project" ]; then
         case "$tool" in
-            pi|opencode) prompt="$receipt_dir/AGENTS.md" ;;
-            omp)         prompt="$receipt_dir/AGENTS.md" ;;
-            *)           prompt="$receipt_dir/CLAUDE.md" ;;
+            pi|opencode) echo "$receipt_dir/AGENTS.md" ;;
+            omp)         echo "$receipt_dir/AGENTS.md" ;;
+            *)           echo "$receipt_dir/CLAUDE.md" ;;
         esac
     else
-        prompt="$(global_prompt_path "$tool")"
+        global_prompt_path "$tool"
     fi
-    [ -n "$prompt" ] || return 0
+}
+
+# Check every prompt file the recorded harnesses merged into. A project-scope
+# receipt records them all, and "tool" is only the most recent one — checking
+# that alone leaves the other harness's prompt unverified (a claude-code +
+# opencode repo would check AGENTS.md and never look at CLAUDE.md, which carries
+# a BEGIN:kurama block of its own). Dedup is by RESOLVED PATH, not by tool, since
+# the harnesses collapse onto shared files and a per-tool loop would print the
+# same verdict twice for the same file.
+check_markers() {
+    local tools="$1" scope="$2" receipt_dir="$3"
+    local t prompt seen=""
+    while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        prompt="$(prompt_path_for "$t" "$scope" "$receipt_dir")"
+        [ -n "$prompt" ] || continue
+        printf '%s\n' "$seen" | grep -Fxq -- "$prompt" && continue
+        seen="$seen
+$prompt"
+        check_markers_file "$prompt"
+    done <<TOOLS
+$tools
+TOOLS
+}
+
+check_markers_file() {
+    local prompt="$1"
     if [ ! -f "$prompt" ]; then
         soft "orchestrator prompt not found: $prompt"
         return 0
@@ -316,8 +391,13 @@ check_markers() {
 }
 
 check_hooks() {
-    local tool="$1" scope="$2" receipt_dir="$3"
-    [ "$tool" = "claude-code" ] || return 0
+    local tools="$1" scope="$2" receipt_dir="$3"
+    # claude-code is the only harness that installs hooks, but it does not have
+    # to be the receipt's most recent "tool" — in a claude-code + opencode repo
+    # the hooks on disk are claude-code's while "tool" reads opencode. Check
+    # whenever claude-code is anywhere in the recorded list. Legacy display names
+    # ("Claude Code") deliberately do not match, exactly as before.
+    printf '%s\n' "$tools" | grep -Fxq -- claude-code || return 0
     local settings hooks_dir
     if [ "$scope" = "project" ]; then
         settings="$receipt_dir/.claude/settings.json"
@@ -430,20 +510,22 @@ check_tooling() {
 diagnose_target() {
     local receipt_dir="$1"
     local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
-    local tool scope
-    tool="$(manifest_field "$manifest" "tool")"
+    local scope tools tool_label
     scope="$(manifest_field "$manifest" "scope")"; [ -n "$scope" ] || scope="global"
+    # A project-scope receipt can record several harnesses; report them all.
+    tools="$(manifest_tools "$manifest")"
+    tool_label="$(fmt_tool_list "$tools")"
 
-    header "Diagnosing ${tool:-unknown} ($scope) — $receipt_dir"
+    header "Diagnosing ${tool_label:-unknown} ($scope) — $receipt_dir"
     if [ ! -f "$manifest" ]; then
         bad "no install receipt at $receipt_dir"
         return 0
     fi
     pass "receipt found: $manifest"
-    check_receipt_files "$receipt_dir" "$tool"
+    check_receipt_files "$receipt_dir" "$tools"
     check_version "$manifest"
-    check_markers "$tool" "$scope" "$receipt_dir"
-    check_hooks "$tool" "$scope" "$receipt_dir"
+    check_markers "$tools" "$scope" "$receipt_dir"
+    check_hooks "$tools" "$scope" "$receipt_dir"
     check_engram_mcp "$receipt_dir"
 }
 
