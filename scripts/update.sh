@@ -138,16 +138,18 @@ manifest_field() {
         }' "$manifest"
 }
 
-# Emit each element of the receipt "files" array (jq or awk fallback).
-manifest_files() {
-    local manifest="$1"
+# Emit each element of a flat receipt array — "files", "tools", … (jq or awk
+# fallback). Mirrors manifest_json_array in doctor.sh/uninstall.sh so every
+# script parses a receipt the same way.
+manifest_json_array() {
+    local manifest="$1" key="$2"
     [ -f "$manifest" ] || return 0
     if command -v jq >/dev/null 2>&1; then
-        jq -r '(.files // [])[]' "$manifest" 2>/dev/null
+        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null
         return 0
     fi
-    awk '
-        /"files"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
+    awk -v key="$key" '
+        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
         inarr && /\]/ { inarr = 0 }
         inarr {
             line = $0
@@ -155,6 +157,22 @@ manifest_files() {
             gsub(/,$/, "", line); gsub(/"/, "", line)
             if (line != "") print line
         }' "$manifest"
+}
+
+# Every harness recorded in the receipt. A project-scope receipt is shared by
+# every harness installed into that repo, so it lists them all in "tools"; the
+# flat arrays below are the union across them. Receipts written by v6 and by the
+# legacy install.sh have no "tools", so the effective list is the single "tool".
+manifest_tools() {
+    local manifest="$1" tools
+    tools="$(manifest_json_array "$manifest" "tools" | awk 'NF')"
+    [ -n "$tools" ] || tools="$(manifest_field "$manifest" "tool")"
+    printf '%s\n' "$tools"
+}
+
+# Render a newline-separated tool list as "a, b" for a header/info line.
+fmt_tool_list() {
+    printf '%s\n' "$1" | awk 'NF { out = (out == "" ? $0 : out ", " $0) } END { print out }'
 }
 
 # True when the receipt recorded the Kurama startup logo (the OpenCode .tsx or
@@ -165,7 +183,7 @@ manifest_files() {
 manifest_has_startup_logo() {
     local manifest="$1"
     [ -f "$manifest" ] || return 1
-    manifest_files "$manifest" \
+    manifest_json_array "$manifest" "files" \
         | awk '/kurama-logo\.tsx?$/ { found = 1 } END { exit(found ? 0 : 1) }'
 }
 
@@ -218,8 +236,11 @@ resync_target() {
         return 0
     fi
 
-    local tool rscope old_ver new_ver old_commit new_commit
-    tool="$(manifest_field "$manifest" "tool")"
+    local tools tool_label rscope old_ver new_ver old_commit new_commit
+    # Every harness this receipt records — one re-sync per tool below. Falls back
+    # to the single "tool" for pre-tools[] receipts.
+    tools="$(manifest_tools "$manifest")"
+    tool_label="$(fmt_tool_list "$tools")"
     rscope="$(manifest_field "$manifest" "scope")"; [ -n "$rscope" ] || rscope="global"
     old_ver="$(manifest_field "$manifest" "version")"; [ -n "$old_ver" ] || old_ver="unknown"
     new_ver="$(read_version)"
@@ -229,12 +250,13 @@ resync_target() {
     old_commit="$(manifest_field "$manifest" "commit")"
     new_commit="$(repo_commit)"
 
-    header "Updating $tool ($rscope) — $receipt_dir"
+    header "Updating $tool_label ($rscope) — $receipt_dir"
     info "Version: $(fmt_ver_commit "$old_ver" "$old_commit") → $(fmt_ver_commit "$new_ver" "$new_commit")"
 
-    # Snapshot pre-sync hashes of every recorded file.
+    # Snapshot pre-sync hashes of every recorded file. files[] is the union across
+    # every recorded tool, so one snapshot covers all of them.
     local files rel pre
-    files="$(manifest_files "$manifest")"
+    files="$(manifest_json_array "$manifest" "files")"
     local hashfile; hashfile="$(mktemp)"
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
@@ -250,35 +272,58 @@ EOF
         return 0
     fi
 
-    # Normalize the receipt's "tool" to the canonical slug setup.sh accepts.
+    # Normalize each recorded tool to the canonical slug setup.sh accepts.
     # install.sh stores a display name ("Claude Code") whose space would corrupt
     # the delegated command; setup.sh stores the slug already. An unrecognized
     # value is a hard stop — mis-invoking setup.sh would be worse than aborting.
-    local slug
-    slug="$(tool_to_slug "$tool")"
-    if [ -z "$slug" ]; then
-        fail "Unrecognized tool in receipt: '$tool' — cannot re-sync $receipt_dir"
+    # Resolve every slug BEFORE installing anything, so a bad entry aborts the
+    # target instead of leaving it half re-synced.
+    local tool slug; local -a slugs=()
+    while IFS= read -r tool; do
+        [ -n "$tool" ] || continue
+        slug="$(tool_to_slug "$tool")"
+        if [ -z "$slug" ]; then
+            fail "Unrecognized tool in receipt: '$tool' — cannot re-sync $receipt_dir"
+            rm -f "$hashfile"
+            return 1
+        fi
+        slugs+=("$slug")
+    done <<EOF
+$tools
+EOF
+    if [ "${#slugs[@]}" -eq 0 ]; then
+        fail "Receipt records no tool — cannot re-sync $receipt_dir"
         rm -f "$hashfile"
         return 1
     fi
 
     # Delegate the actual re-sync to the idempotent installer, matching the
-    # recorded scope. --without-pi-packages so an update never silently
-    # (re)installs the package stack; skills/agents/hooks/orchestrator re-sync.
-    # An argv array keeps the slug and any spaced --path intact (no word-splitting).
-    local -a args=(--agent "$slug" --non-interactive --without-pi-packages)
-    if [ "$rscope" = "project" ]; then
-        args+=(--scope project --path "$receipt_dir")
-    fi
-    # Carry an installed startup logo across the re-sync (opt-in in setup.sh).
-    if manifest_has_startup_logo "$manifest"; then
-        args+=(--with-logo)
-    fi
-    if ! bash "$SETUP_SCRIPT" "${args[@]}" >/dev/null 2>&1; then
-        fail "Re-sync failed for $tool ($rscope)"
-        rm -f "$hashfile"
-        return 1
-    fi
+    # recorded scope — once per recorded tool, since a project-scope receipt is
+    # shared by every harness installed into that repo and re-syncing only one of
+    # them would let the others drift. --without-pi-packages so an update never
+    # silently (re)installs the package stack; skills/agents/hooks/orchestrator
+    # re-sync. An argv array keeps the slug and any spaced --path intact (no
+    # word-splitting).
+    # Read the logo flag once, up front: each setup.sh run below rewrites the
+    # receipt, so probing it inside the loop would read a moving target.
+    local with_logo=false
+    if manifest_has_startup_logo "$manifest"; then with_logo=true; fi
+
+    for slug in "${slugs[@]}"; do
+        local -a args=(--agent "$slug" --non-interactive --without-pi-packages)
+        if [ "$rscope" = "project" ]; then
+            args+=(--scope project --path "$receipt_dir")
+        fi
+        # Carry an installed startup logo across the re-sync (opt-in in setup.sh).
+        if $with_logo; then
+            args+=(--with-logo)
+        fi
+        if ! bash "$SETUP_SCRIPT" "${args[@]}" >/dev/null 2>&1; then
+            fail "Re-sync failed for $slug ($rscope)"
+            rm -f "$hashfile"
+            return 1
+        fi
+    done
 
     # Report which recorded files changed (restored drift or picked up new content).
     local changed=0 post

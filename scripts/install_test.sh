@@ -2262,6 +2262,95 @@ test_scope_project_uninstall_clean() {
     return 0
 }
 
+# Print a flat JSON string array from a receipt, one entry per line (nothing when
+# the key is absent). Mirrors manifest_json_array (scripts/doctor.sh) so the test
+# reads receipts exactly the way uninstall/update/doctor do: jq when present, awk
+# fallback otherwise.
+receipt_array_values() {
+    local manifest="$1" key="$2"
+    [ -f "$manifest" ] || return 0
+    if command -v jq > /dev/null 2>&1; then
+        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null
+        return 0
+    fi
+    awk -v key="$key" '
+        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        inarr && /\]/ { inarr = 0 }
+        inarr {
+            line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
+            gsub(/,$/, "", line); gsub(/"/, "", line)
+            if (line != "") print line
+        }' "$manifest"
+}
+
+# True when $2 is an exact line of the newline-separated list $1.
+receipt_array_has() {
+    printf '%s\n' "$1" | grep -qxF "$2"
+}
+
+test_scope_project_receipt_records_every_tool() {
+    # Two harnesses share ONE repo-root receipt (O1), so the second install must
+    # MERGE into it rather than truncate it. tools[] holds both slugs and prompts[]
+    # holds both orchestrator files — otherwise uninstall walks an incomplete list
+    # and leaves the first harness's BEGIN:kurama block behind.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    # npm shim keeps the opencode dependency step offline (same guard as the
+    # global opencode tests).
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+
+    local tools
+    tools="$(receipt_array_values "$manifest" tools)"
+    local tool
+    for tool in claude-code opencode; do
+        receipt_array_has "$tools" "$tool" || {
+            echo "receipt tools[] missing '$tool' (got: $(printf '%s' "$tools" | tr '\n' ' '))"
+            return 1
+        }
+    done
+
+    # prompts[] is compared by basename: entries are repo-relative paths.
+    local prompt_names="" entry
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        prompt_names="$prompt_names${entry##*/}"$'\n'
+    done <<< "$(receipt_array_values "$manifest" prompts)"
+    local name
+    for name in CLAUDE.md AGENTS.md; do
+        receipt_array_has "$prompt_names" "$name" || {
+            echo "receipt prompts[] missing '$name' (got: $(printf '%s' "$prompt_names" | tr '\n' ' '))"
+            return 1
+        }
+    done
+
+    # Both prompt files really carry a block to strip before the uninstall runs.
+    grep -qF 'BEGIN:kurama' "$repo/CLAUDE.md" || { echo "CLAUDE.md has no kurama block to remove"; return 1; }
+    grep -qF 'BEGIN:kurama' "$repo/AGENTS.md" || { echo "AGENTS.md has no kurama block to remove"; return 1; }
+
+    bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages > /dev/null 2>&1
+
+    local f
+    for f in "$repo/CLAUDE.md" "$repo/AGENTS.md"; do
+        [ -f "$f" ] || continue
+        if grep -qF 'BEGIN:kurama' "$f"; then
+            echo "uninstall left a BEGIN:kurama block in ${f##*/}"
+            return 1
+        fi
+    done
+    return 0
+}
+
 # ---- O2: hooks always for claude-code ----
 
 test_hooks_installed_global_claude() {
@@ -2867,6 +2956,7 @@ run_test "project receipt lives at the repo root" test_scope_project_receipt_at_
 run_test "refuses to install into the Kurama repo" test_scope_project_rejects_kurama_repo
 run_test "non-git target aborts (non-interactive)" test_scope_project_rejects_non_git_noninteractive
 run_test "project uninstall is clean, user files survive" test_scope_project_uninstall_clean
+run_test "project receipt records every installed harness" test_scope_project_receipt_records_every_tool
 echo ""
 
 echo -e "${BOLD}Phase 10b — Claude Code hooks (O2)${NC}"

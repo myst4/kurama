@@ -498,6 +498,61 @@ _json_array() {
         }'
 }
 
+# Read back a receipt we (or a previous run) wrote. Mirrors manifest_field /
+# manifest_json_array in doctor.sh/update.sh/uninstall.sh so every script parses
+# a receipt the same way: jq when available, portable awk otherwise.
+receipt_field() {
+    local manifest="$1" key="$2"
+    [ -f "$manifest" ] || return 0
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '.[$k] // ""' "$manifest" 2>/dev/null; return 0
+    fi
+    awk -v key="$key" '
+        match($0, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"") {
+            s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
+        }' "$manifest"
+}
+
+receipt_json_array() {
+    local manifest="$1" key="$2"
+    [ -f "$manifest" ] || return 0
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null; return 0
+    fi
+    awk -v key="$key" '
+        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        inarr && /\]/ { inarr = 0 }
+        inarr {
+            line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
+            gsub(/,$/, "", line); gsub(/"/, "", line)
+            if (line != "") print line
+        }' "$manifest"
+}
+
+# Union of two newline lists: blanks dropped, duplicates dropped, insertion
+# order preserved (the first list's entries keep their positions, the second
+# list's new entries land at the end).
+_merge_lines() {
+    printf '%s\n%s\n' "$1" "$2" | awk 'NF && !seen[$0]++'
+}
+
+# Filter inherited receipt entries down to the ones still backed by a file on
+# disk. Paths resolve exactly like the readers resolve them: an entry starting
+# with / is absolute, anything else is relative to RECEIPT_DIR.
+_receipt_existing() {
+    local line out=""
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        case "$line" in
+            /*) [ -e "$line" ] || continue ;;
+            *)  [ -e "$RECEIPT_DIR/$line" ] || continue ;;
+        esac
+        out="$out$line
+"
+    done <<< "$1"
+    printf '%s' "$out"
+}
+
 # Flush the receipt accumulators to RECEIPT_DIR/.kurama-install-manifest.json.
 # Extends install.sh's format with additive fields — "scope", "settings"
 # (settings.json files carrying a surgically-removable kurama hooks block),
@@ -508,12 +563,40 @@ _json_array() {
 # uninstall/update/doctor can reverse and re-sync exactly what setup wrote. Older
 # receipts that lack these fields still parse (consumers treat them as
 # global/empty).
+#
+# The receipt is MERGED, not truncated: in project scope every harness installed
+# into the repo shares one receipt (scoped_receipt_dir returns $TARGET_PATH for
+# all of them), so overwriting would discard the previous harness's files and
+# leave uninstall/update/doctor blind to them. Inherited entries are only carried
+# over while the file they name still exists, which keeps the union from
+# accumulating stale paths that doctor would report as MISSING. In global scope
+# each harness owns its own receipt dir, so the merge is a no-op union.
 finalize_receipt() {
     [ -n "$RECEIPT_DIR" ] || return 0
     local manifest_path="$RECEIPT_DIR/$INSTALL_MANIFEST_NAME"
     local version commit
     version="$(read_version)"
     commit="$(read_commit)"
+
+    # tools[]: every harness recorded here. v6 and legacy install.sh receipts only
+    # carry the scalar "tool", so fall back to it; the current tool goes last and
+    # stays the value of "tool".
+    local prev_tools
+    prev_tools="$(receipt_json_array "$manifest_path" "tools")"
+    if [ -z "$prev_tools" ]; then
+        prev_tools="$(receipt_field "$manifest_path" "tool")"
+    fi
+    prev_tools="$(printf '%s\n' "$prev_tools" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
+
+    local tools files settings pi_packages engram_mcp prompts tui_plugins
+    tools="$(_merge_lines "$prev_tools" "$RECEIPT_TOOL")"
+    files="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "files")")" "$RECEIPT_FILES")"
+    settings="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "settings")")" "$RECEIPT_SETTINGS")"
+    engram_mcp="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "engram_mcp")")" "$RECEIPT_ENGRAM_MCP")"
+    prompts="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "prompts")")" "$RECEIPT_PROMPTS")"
+    tui_plugins="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "tui_plugins")")" "$RECEIPT_TUI_PLUGINS")"
+    # pi_packages holds "npm:pkg@ver" specs, not paths: nothing to stat.
+    pi_packages="$(_merge_lines "$(receipt_json_array "$manifest_path" "pi_packages")" "$RECEIPT_PI_PACKAGES")"
 
     mkdir -p "$RECEIPT_DIR"
     make_writable "$manifest_path"
@@ -523,25 +606,28 @@ finalize_receipt() {
         printf '  "version": "%s",\n' "$version"
         [ -n "$commit" ] && printf '  "commit": "%s",\n' "$commit"
         printf '  "tool": "%s",\n' "$RECEIPT_TOOL"
+        printf '  "tools": [\n'
+        _json_array "$tools"
+        printf '  ],\n'
         printf '  "scope": "%s",\n' "$SCOPE"
         printf '  "engram": "%s",\n' "${ENGRAM:-no}"
         printf '  "files": [\n'
-        _json_array "$RECEIPT_FILES"
+        _json_array "$files"
         printf '  ],\n'
         printf '  "settings": [\n'
-        _json_array "$RECEIPT_SETTINGS"
+        _json_array "$settings"
         printf '  ],\n'
         printf '  "pi_packages": [\n'
-        _json_array "$RECEIPT_PI_PACKAGES"
+        _json_array "$pi_packages"
         printf '  ],\n'
         printf '  "engram_mcp": [\n'
-        _json_array "$RECEIPT_ENGRAM_MCP"
+        _json_array "$engram_mcp"
         printf '  ],\n'
         printf '  "prompts": [\n'
-        _json_array "$RECEIPT_PROMPTS"
+        _json_array "$prompts"
         printf '  ],\n'
         printf '  "tui_plugins": [\n'
-        _json_array "$RECEIPT_TUI_PLUGINS"
+        _json_array "$tui_plugins"
         printf '  ]\n'
         printf '}\n'
     } > "$manifest_path"
