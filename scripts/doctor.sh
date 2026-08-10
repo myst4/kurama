@@ -43,17 +43,9 @@ FAILS=0
 WARNS=0
 
 # ============================================================================
-# OS + colors
+# Colors
 # ============================================================================
 
-# macOS and Linux only.
-detect_os() {
-    case "$(uname -s)" in
-        Darwin)  OS="macos" ;;
-        Linux)   OS="linux" ;;
-        *)       OS="unknown" ;;
-    esac
-}
 setup_colors() {
     RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
     CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -181,6 +173,20 @@ manifest_field() {
         }' "$manifest"
 }
 
+# Emit each element of a flat receipt array — "files", "tools", … (jq or awk
+# fallback). Mirrors manifest_json_array in update.sh/uninstall.sh so every
+# script parses a receipt the same way.
+#
+# Why the opening rule handles the whole array itself instead of just setting
+# inarr: for a single-line "key": [] the array closes on the line that opened it,
+# so setting inarr and skipping to the next line hands the closing-bracket check
+# a bracket that never arrives. The parser then runs to the end of the receipt,
+# printing the NEXT key's declaration line as if it were an element, followed by
+# the elements that belong to that other key. uninstall.sh drives rm from
+# files[], so an empty files[] would migrate .claude/settings.json out of
+# settings[] and delete the file outright instead of stripping its kurama hooks
+# block. The !inarr guard is the same defense one level up: without it a later
+# "<key>" nested elsewhere in the receipt re-opens an array already closed.
 manifest_json_array() {
     local manifest="$1" key="$2"
     [ -f "$manifest" ] || return 0
@@ -188,7 +194,19 @@ manifest_json_array() {
         jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null; return 0
     fi
     awk -v key="$key" '
-        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
+            tail = substr($0, index($0, "[") + 1)
+            if (tail ~ /\]/) {                       # array opens and closes on this line
+                sub(/\].*/, "", tail)
+                n = split(tail, parts, ",")
+                for (i = 1; i <= n; i++) {
+                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
+                    if (parts[i] != "") print parts[i]
+                }
+                next
+            }
+            inarr = 1; next
+        }
         inarr && /\]/ { inarr = 0 }
         inarr {
             line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
@@ -262,7 +280,7 @@ resolve_source_any() {
     while IFS= read -r t; do
         [ -n "$t" ] || continue
         src="$(resolve_source "$rel" "$t")"
-        [ -n "$src" ] && [ -f "$src" ] || continue
+        if [ -z "$src" ] || [ ! -f "$src" ]; then continue; fi
         [ -n "$first" ] || first="$src"
         if [ "$installed_hash" = "$(hash_file "$src")" ]; then printf '%s' "$src"; return 0; fi
     done <<TOOLS
@@ -547,7 +565,6 @@ show_help() {
     echo "Exit code is non-zero if any hard check fails."
 }
 
-detect_os
 setup_colors
 
 while [[ $# -gt 0 ]]; do

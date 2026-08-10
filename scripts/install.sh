@@ -202,7 +202,16 @@ print_version() {
 
 # Emit "<name> <group>" for every skill declared in skills/manifest.json.
 # Uses jq when available, otherwise a portable awk fallback (bash 3.2 / BSD awk)
-# that parses only the "skills" array and reads name+group from the same line.
+# that parses only the "skills" array. The fallback tracks object boundaries, so
+# "name" and "group" may sit on separate lines — as they do in the pretty-printed
+# manifest this repo ships.
+#
+# This awk is the canonical skills-manifest parser and is duplicated byte-for-byte
+# in setup.sh and validate_skills.sh. There is no shared library: if you change it
+# here, change it in all three. See
+# docs/superpowers/specs/2026-08-10-jq-optional-fallbacks-design.md for the three
+# properties that must be preserved (the !inarr guard, the anchored closing rule,
+# and the rule order that makes a one-line object work).
 manifest_skill_lines() {
     [ -f "$MANIFEST_FILE" ] || return 1
     if command -v jq >/dev/null 2>&1; then
@@ -210,23 +219,20 @@ manifest_skill_lines() {
         return 0
     fi
     awk '
-        /"skills"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
-        inarr && /\]/ { inarr = 0 }
+        !inarr && /"skills"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
+        inarr && /^[[:space:]]*\]/                      { inarr = 0; next }
+        inarr && /\{/                                   { name = ""; group = "" }
         inarr {
-            name = ""; group = ""
             if (match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
-                s = substr($0, RSTART, RLENGTH)
-                sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-                sub(/".*/, "", s)
-                name = s
+                s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); name = s
             }
             if (match($0, /"group"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
-                g = substr($0, RSTART, RLENGTH)
-                sub(/.*"group"[[:space:]]*:[[:space:]]*"/, "", g)
-                sub(/".*/, "", g)
-                group = g
+                g = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", g); sub(/".*/, "", g); group = g
             }
+        }
+        inarr && /\}/ {
             if (name != "" && group != "") print name " " group
+            name = ""; group = ""
         }
     ' "$MANIFEST_FILE"
 }
@@ -288,7 +294,16 @@ compute_active_skills() {
     done < <(manifest_skill_lines)
 
     if [ "${#ACTIVE_SKILLS[@]}" -eq 0 ]; then
-        print_error "No skills selected — could not read $MANIFEST_FILE"
+        # sdd-core cannot be excluded, so an empty selection means the manifest
+        # was not parsed — not that the user deselected everything. When the file
+        # is there and non-empty, the checkout is fine and the parser is at fault;
+        # without jq that is the awk fallback, so name jq instead of the clone.
+        if [ -s "$MANIFEST_FILE" ] && ! command -v jq >/dev/null 2>&1; then
+            print_error "No skills selected — could not parse $MANIFEST_FILE without jq"
+            print_error "Install jq and re-run (macOS: brew install jq · Debian/Ubuntu: apt-get install jq)"
+        else
+            print_error "No skills selected — could not read $MANIFEST_FILE"
+        fi
         exit 1
     fi
 }

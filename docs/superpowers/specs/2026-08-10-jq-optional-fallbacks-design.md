@@ -154,9 +154,16 @@ change:
    the other order is blocked where jq would allow it. It fails closed, so not a security hole,
    but on a jq-less machine it could deadlock every delegated writer. `archive-gate.sh` shares the
    helper and may diverge the same way; that was not executed.
-4. **A receipt can record a file setup never created** — global claude-code without jq degrades
-   the hooks merge correctly but still writes `"settings": ["../settings.json"]` for a file that
-   does not exist. doctor does not notice because it checks `files[]`, not `settings[]`.
+4. **A receipt can record a file setup never created.** Without jq, `merge_hooks_settings()`
+   prints manual instructions and returns 0, so `settings.json` is never written — but
+   `finalize_receipt` still records it in `settings[]`. doctor does not notice, because it checks
+   `files[]`, not `settings[]`. Measured in **both** scopes: global claude-code writes
+   `"settings": ["../settings.json"]`, and project scope writes `".claude/settings.json"`. In
+   project scope this is the *only* observable difference between a jq-present and a jq-less
+   install once the parsers are fixed — receipts come out byte-identical and every other file
+   matches. That divergence is the documented contract from `docs/installation.md:141-142` (JSON
+   edits are jq-only and never sed-edited), so tests must not assert whole-tree equality; the
+   defect is the receipt claiming a file that is not there.
 5. **`--with-engram` without jq writes `{"engram":"yes","engram_mcp":[]}`** and the summary still
    prints `Engram: enabled … (MCP registered per client)` when nothing was registered. `doctor.sh`
    is already self-aware here; the summary is not.

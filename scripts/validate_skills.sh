@@ -146,34 +146,41 @@ EOF
 # ----------------------------------------------------------------------------
 
 # Emit "<name> <group>" for every skill declared in skills/manifest.json.
-# jq when available, otherwise a portable awk fallback (bash 3.2 / BSD awk).
+# jq when available, otherwise a portable awk fallback (bash 3.2 / BSD awk) that
+# tracks object boundaries, so "name" and "group" may sit on separate lines — as
+# they do in the pretty-printed manifest this repo ships.
+#
+# The awk below is the canonical skills-manifest parser and is duplicated
+# byte-for-byte in install.sh and setup.sh. There is no shared library: if you
+# change it here, change it in all three. The local is named MANIFEST_FILE for
+# that reason — it keeps the awk invocation identical to the other two copies.
+# See docs/superpowers/specs/2026-08-10-jq-optional-fallbacks-design.md for the
+# three properties that must be preserved (the !inarr guard, the anchored closing
+# rule, and the rule order that makes a one-line object work).
 manifest_skill_lines() {
-    local manifest="$1"
-    [ -f "$manifest" ] || return 1
+    local MANIFEST_FILE="$1"
+    [ -f "$MANIFEST_FILE" ] || return 1
     if command -v jq >/dev/null 2>&1; then
-        jq -r '.skills[] | "\(.name) \(.group)"' "$manifest" 2>/dev/null
+        jq -r '.skills[] | "\(.name) \(.group)"' "$MANIFEST_FILE" 2>/dev/null
         return 0
     fi
     awk '
-        /"skills"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
-        inarr && /\]/ { inarr = 0 }
+        !inarr && /"skills"[[:space:]]*:[[:space:]]*\[/ { inarr = 1; next }
+        inarr && /^[[:space:]]*\]/                      { inarr = 0; next }
+        inarr && /\{/                                   { name = ""; group = "" }
         inarr {
-            name = ""; group = ""
             if (match($0, /"name"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
-                s = substr($0, RSTART, RLENGTH)
-                sub(/.*"name"[[:space:]]*:[[:space:]]*"/, "", s)
-                sub(/".*/, "", s)
-                name = s
+                s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); name = s
             }
             if (match($0, /"group"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
-                g = substr($0, RSTART, RLENGTH)
-                sub(/.*"group"[[:space:]]*:[[:space:]]*"/, "", g)
-                sub(/".*/, "", g)
-                group = g
+                g = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", g); sub(/".*/, "", g); group = g
             }
-            if (name != "" && group != "") print name " " group
         }
-    ' "$manifest"
+        inarr && /\}/ {
+            if (name != "" && group != "") print name " " group
+            name = ""; group = ""
+        }
+    ' "$MANIFEST_FILE"
 }
 
 check_manifest() {
@@ -204,7 +211,16 @@ check_manifest() {
     local lines
     lines="$(manifest_skill_lines "$manifest")"
     if [ -z "$lines" ]; then
-        fail "skills/manifest.json has no skills[] entries"
+        # Note the irony this branch exists for: the parse check above has a
+        # python3 fallback, so on a jq-less host we successfully validate the
+        # JSON and then declare it empty. If the file is there and non-empty,
+        # nothing is wrong with the manifest — the skills parser could not read
+        # it, and without jq that is the awk fallback. Name jq, not the checkout.
+        if [ -s "$manifest" ] && ! command -v jq >/dev/null 2>&1; then
+            fail "skills/manifest.json parsed but no skills[] entries were resolved — jq is not installed and the awk fallback read none"
+        else
+            fail "skills/manifest.json has no skills[] entries"
+        fi
         return
     fi
 

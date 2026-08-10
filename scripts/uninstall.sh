@@ -31,19 +31,6 @@ TARGET_PATH=""       # repo root for project scope, or explicit dir for --path
 PI_PACKAGES=""       # "", "yes", or "no" — O3 Pi package revert offer
 
 # ============================================================================
-# OS detection (mirrors install.sh so target paths resolve identically)
-# ============================================================================
-
-# macOS and Linux only.
-detect_os() {
-    case "$(uname -s)" in
-        Darwin)  OS="macos" ;;
-        Linux)   OS="linux" ;;
-        *)       OS="unknown" ;;
-    esac
-}
-
-# ============================================================================
 # Colors
 # ============================================================================
 
@@ -87,6 +74,19 @@ get_tool_path() {
 # Emit each string element of a named JSON array (files, settings, pi_packages)
 # from an install manifest. Uses jq when available, otherwise a portable awk
 # fallback that reads the one-element-per-line arrays setup.sh/install.sh write.
+# Mirrors manifest_json_array in doctor.sh/update.sh so every script parses a
+# receipt the same way.
+#
+# Why the opening rule handles the whole array itself instead of just setting
+# inarr: for a single-line "key": [] the array closes on the line that opened it,
+# so setting inarr and skipping to the next line hands the closing-bracket check
+# a bracket that never arrives. The parser then runs to the end of the receipt,
+# printing the NEXT key's declaration line as if it were an element, followed by
+# the elements that belong to that other key. This function drives rm from
+# files[] below, so an empty files[] would migrate .claude/settings.json out of
+# settings[] and delete the file outright instead of stripping its kurama hooks
+# block. The !inarr guard is the same defense one level up: without it a later
+# "<key>" nested elsewhere in the receipt re-opens an array already closed.
 manifest_json_array() {
     local manifest="$1" key="$2"
     [ -f "$manifest" ] || return 0
@@ -95,7 +95,19 @@ manifest_json_array() {
         return 0
     fi
     awk -v key="$key" '
-        $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" { inarr = 1; next }
+        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
+            tail = substr($0, index($0, "[") + 1)
+            if (tail ~ /\]/) {                       # array opens and closes on this line
+                sub(/\].*/, "", tail)
+                n = split(tail, parts, ",")
+                for (i = 1; i <= n; i++) {
+                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
+                    if (parts[i] != "") print parts[i]
+                }
+                next
+            }
+            inarr = 1; next
+        }
         inarr && /\]/ { inarr = 0 }
         inarr {
             line = $0
@@ -485,7 +497,6 @@ show_help() {
 # Main
 # ============================================================================
 
-detect_os
 setup_colors
 
 AGENT=""
