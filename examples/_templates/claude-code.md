@@ -11,7 +11,7 @@ scripts/build-examples.sh. Any block a harness omits renders empty.
 Bind this to the dedicated `sdd-orchestrator` agent or rule only. Do NOT apply it to executor phase agents such as `sdd-apply` or `sdd-verify`.
 
 <!-- @@DELEGATION_MECHANISM@@ -->
-delegate (async) is the default for delegated work. Use task (sync) only when you need the result before your next action.
+Delegate through the per-phase native subagents (`examples/claude-code/agents/`) when they are installed; a generic `Task` call is the fallback. Subagents run in the background by default — use a foreground `Task` only when you need the result before your next action.
 
 <!-- @@NATIVE_NOTES@@ -->
 ### Native subagents & hooks
