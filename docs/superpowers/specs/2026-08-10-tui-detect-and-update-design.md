@@ -75,6 +75,19 @@ When `KURAMA_TUI_PROBE=1` is set, the script prints one tab-separated line per d
 banner. That is the only new environment variable, and it is documented next to
 `KURAMA_NO_BANNER`.
 
+The `path` field means different things for the two scopes, deliberately. For `project` it is
+the repo, and it *is* passed to `--path`. For the aggregated `global` target it is every
+global receipt dir found, comma-joined, and it is purely informational — the command built for
+global scope is a bare `./scripts/update.sh` with no `--agent` and no `--path`, because both
+maintenance scripts already walk every global receipt themselves. `tools` and `version` are
+likewise the deduplicated union across those receipts, emitted in `$AGENTS` order so the
+output is deterministic. Global lines are printed before project lines.
+
+Splitting the line requires care: a tab is IFS *whitespace*, so `IFS=$'\t' read -r a b c d`
+collapses adjacent tabs and a receipt with neither `tools[]` nor `tool` would shift the version
+into the tools field. The TUI splits with `${line%%"$TAB"*}` / `${line#*"$TAB"}`, which is
+exact for empty fields.
+
 This keeps the seam honest: the test exercises the same code path the TUI uses, not a copy.
 
 ## Testing

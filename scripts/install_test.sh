@@ -13,6 +13,7 @@ SETUP_SCRIPT="$SCRIPT_DIR/setup.sh"
 UNINSTALL_SCRIPT="$SCRIPT_DIR/uninstall.sh"
 UPDATE_SCRIPT="$SCRIPT_DIR/update.sh"
 DOCTOR_SCRIPT="$SCRIPT_DIR/doctor.sh"
+TUI_SCRIPT="$SCRIPT_DIR/setup-tui.sh"
 MANIFEST_FILE="$REPO_DIR/skills/manifest.json"
 
 # ============================================================================
@@ -2351,6 +2352,212 @@ test_scope_project_receipt_records_every_tool() {
     return 0
 }
 
+# ---- TUI detect-and-update pre-flight (setup-tui.sh, KURAMA_TUI_PROBE=1) ----
+# The gum TUI cannot be driven from here, but its detection pre-flight is pure
+# bash and carries the logic most likely to be wrong: the two receipt locations
+# (repo root vs per-harness global skills dir) and the tools[]/tool fallback.
+# KURAMA_TUI_PROBE=1 makes the script print one TAB-separated line per detected
+# install — <scope>\t<path>\t<comma-joined tools>\t<version> — and exit 0 before
+# it touches gum or the banner. The tests below drive that seam, which is the
+# same code the TUI itself runs, not a copy of it.
+
+# Run the probe with $1 as CWD (project detection reads $PWD). Prints its stdout
+# verbatim; stderr is dropped so a stray warning cannot corrupt the fields.
+run_tui_probe() {
+    (cd "$1" && KURAMA_TUI_PROBE=1 bash "$TUI_SCRIPT" 2>/dev/null)
+}
+
+# Number of non-empty lines in $1 (0 for the empty string).
+probe_line_count() {
+    printf '%s\n' "$1" | awk 'NF' | wc -l | tr -d ' '
+}
+
+# True when $2 is a whole entry of the comma-joined tools field $1.
+probe_tools_has() {
+    printf '%s\n' "$1" | tr ',' '\n' | grep -qxF "$2"
+}
+
+# Strip tools[] from a receipt, leaving the v6 / legacy install.sh shape that
+# only carries the scalar "tool". jq when present, awk otherwise — the same
+# two-path style receipt_array_values uses to read them.
+receipt_drop_tools() {
+    local manifest="$1"
+    local tmp="$manifest.tmp"
+    if command -v jq > /dev/null 2>&1; then
+        jq 'del(.tools)' "$manifest" > "$tmp"
+    else
+        awk '
+            /"tools"[[:space:]]*:[[:space:]]*\[/ { skip = 1; next }
+            skip && /^[[:space:]]*\],?[[:space:]]*$/ { skip = 0; next }
+            skip { next }
+            { print }' "$manifest" > "$tmp"
+    fi
+    mv "$tmp" "$manifest"
+}
+
+test_tui_probe_detects_project_install() {
+    # One repo, two harnesses, one shared repo-root receipt (O1) — so the probe
+    # must report ONE project target that names both, not one line per harness.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    # npm shim keeps the opencode dependency step offline.
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+
+    local out status=0
+    out="$(run_tui_probe "$repo")" || status=$?
+    assert_eq "0" "$status" "probe must exit 0" || return 1
+    assert_eq "1" "$(probe_line_count "$out")" "one project receipt is one line" || return 1
+
+    # Fields are read positionally, not substring-matched, so a reordering of the
+    # line is a failure here rather than a silent pass.
+    local scope path tools version
+    IFS=$'\t' read -r scope path tools version <<< "$out"
+    assert_eq "project" "$scope" "field 1 is the scope" || return 1
+    assert_eq "$repo" "$path" "field 2 is the probed directory" || return 1
+    local tool
+    for tool in claude-code opencode; do
+        probe_tools_has "$tools" "$tool" || {
+            echo "probe tools field missing '$tool' (got: '$tools')"
+            return 1
+        }
+    done
+    [ -n "$version" ] || { echo "probe version field (4) is empty"; return 1; }
+    return 0
+}
+
+test_tui_probe_v6_receipt_reports_its_tool() {
+    # A receipt written before tools[] existed only carries the scalar "tool".
+    # The probe must fall back to it instead of reporting an unnamed install.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    receipt_drop_tools "$manifest"
+    if grep -q '"tools"' "$manifest"; then
+        echo "tools[] survived the v6 downgrade — the fallback is not being exercised"
+        return 1
+    fi
+    grep -q '"tool": "claude-code"' "$manifest" || {
+        echo "the v6 downgrade also dropped the scalar tool field"; return 1; }
+
+    local out status=0
+    out="$(run_tui_probe "$repo")" || status=$?
+    assert_eq "0" "$status" "probe must exit 0" || return 1
+    assert_eq "1" "$(probe_line_count "$out")" "one project receipt is one line" || return 1
+
+    local scope path tools version
+    IFS=$'\t' read -r scope path tools version <<< "$out"
+    assert_eq "project" "$scope" "field 1 is the scope" || return 1
+    assert_eq "$repo" "$path" "field 2 is the probed directory" || return 1
+    assert_eq "claude-code" "$tools" "field 3 falls back to the scalar tool" || return 1
+    [ -n "$version" ] || { echo "probe version field (4) is empty"; return 1; }
+    return 0
+}
+
+test_tui_probe_no_receipt_is_silent() {
+    # Nothing in $PWD and nothing in the sandboxed HOME: the probe prints nothing
+    # and still exits 0, so the TUI falls through to today's install flow.
+    local empty="$TEST_TMPDIR/empty"
+    mkdir -p "$empty"
+
+    local out status=0
+    out="$(run_tui_probe "$empty")" || status=$?
+    assert_eq "0" "$status" "probe must exit 0 when nothing is installed" || return 1
+    assert_eq "0" "$(probe_line_count "$out")" "no receipt anywhere means no output" || return 1
+    return 0
+}
+
+test_tui_probe_detects_global_install() {
+    # Global receipts live in the per-harness skills dir, not the repo root.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "global claude-code setup exited non-zero"; return 1; }
+    assert_file_exists "$HOME/.claude/skills/.kurama-install-manifest.json" || return 1
+
+    # Probed from a directory that has no receipt of its own, so the global line
+    # is the only one the probe can emit.
+    local elsewhere="$TEST_TMPDIR/elsewhere"
+    mkdir -p "$elsewhere"
+
+    local out status=0
+    out="$(run_tui_probe "$elsewhere")" || status=$?
+    assert_eq "0" "$status" "probe must exit 0" || return 1
+    assert_eq "1" "$(probe_line_count "$out")" "one global install is one line" || return 1
+
+    local scope path tools version
+    IFS=$'\t' read -r scope path tools version <<< "$out"
+    assert_eq "global" "$scope" "field 1 is the scope" || return 1
+    case "$path" in
+        "$HOME"/*) ;;
+        *) echo "field 2 is not a path under the sandboxed HOME (got: '$path')"; return 1 ;;
+    esac
+    probe_tools_has "$tools" claude-code || {
+        echo "probe tools field missing 'claude-code' (got: '$tools')"; return 1; }
+    [ -n "$version" ] || { echo "probe version field (4) is empty"; return 1; }
+    return 0
+}
+
+test_tui_probe_runs_without_gum() {
+    # The whole point of answering before the gum precondition check: without gum
+    # that check exits 1, and a probe placed after it could never report anything
+    # on a machine that has Kurama but not gum.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+
+    # Restricted PATH (symlink farm) that deliberately omits gum, so its absence
+    # is deterministic regardless of the host — same trick as the pi-absent test.
+    local bindir="$TEST_TMPDIR/nogum-bin"
+    mkdir -p "$bindir"
+    local tool p
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date chmod rm ls awk sed tr wc find mktemp sort head tail printf test jq git; do
+        p="$(command -v "$tool" 2>/dev/null)" || continue
+        ln -sf "$p" "$bindir/$tool"
+    done
+    if [ -e "$bindir/gum" ]; then
+        echo "gum is reachable on the restricted PATH — the test proves nothing"
+        return 1
+    fi
+
+    local out status=0
+    out="$(cd "$repo" && PATH="$bindir" KURAMA_TUI_PROBE=1 bash "$TUI_SCRIPT" 2>/dev/null)" || status=$?
+    assert_eq "0" "$status" "probe must exit 0 even with gum missing" || return 1
+    assert_eq "1" "$(probe_line_count "$out")" "one project receipt is one line" || return 1
+
+    local scope path tools version
+    IFS=$'\t' read -r scope path tools version <<< "$out"
+    assert_eq "project" "$scope" "field 1 is the scope" || return 1
+    assert_eq "$repo" "$path" "field 2 is the probed directory" || return 1
+    local t
+    for t in claude-code opencode; do
+        probe_tools_has "$tools" "$t" || {
+            echo "probe tools field missing '$t' (got: '$tools')"
+            return 1
+        }
+    done
+    [ -n "$version" ] || { echo "probe version field (4) is empty"; return 1; }
+    return 0
+}
+
 # ---- O2: hooks always for claude-code ----
 
 test_hooks_installed_global_claude() {
@@ -2957,6 +3164,14 @@ run_test "refuses to install into the Kurama repo" test_scope_project_rejects_ku
 run_test "non-git target aborts (non-interactive)" test_scope_project_rejects_non_git_noninteractive
 run_test "project uninstall is clean, user files survive" test_scope_project_uninstall_clean
 run_test "project receipt records every installed harness" test_scope_project_receipt_records_every_tool
+echo ""
+
+echo -e "${BOLD}TUI detect-and-update pre-flight (setup-tui.sh probe)${NC}"
+run_test "project install is detected with both harnesses" test_tui_probe_detects_project_install
+run_test "v6-style receipt (no tools[]) still reports its tool" test_tui_probe_v6_receipt_reports_its_tool
+run_test "no receipt: no output, exit 0" test_tui_probe_no_receipt_is_silent
+run_test "global install is detected in the sandboxed HOME" test_tui_probe_detects_global_install
+run_test "probe answers before the gum precondition" test_tui_probe_runs_without_gum
 echo ""
 
 echo -e "${BOLD}Phase 10b — Claude Code hooks (O2)${NC}"
