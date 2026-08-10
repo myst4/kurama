@@ -29,7 +29,7 @@ Core principle: **does this inflate my context without need?** If yes → delega
 | Bash for state (git, gh) | ✅ | — |
 | Bash for execution (test, build, install) | — | ✅ |
 
-delegate (async) is the default for delegated work. Use task (sync) only when you need the result before your next action.
+Delegate through the per-phase native subagents (`examples/claude-code/agents/`) when they are installed; a generic `Task` call is the fallback. Subagents run in the background by default — use a foreground `Task` only when you need the result before your next action.
 
 Anti-patterns — these ALWAYS inflate context without need:
 - Reading 4+ files to "understand" the codebase inline → delegate an exploration
