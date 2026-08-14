@@ -22,6 +22,8 @@ Resolution order:
 3. Fallback: read `.kurama/skill-registry.md` from the project root if it exists
 4. No registry found? → proceed without skills (but warn the user: "No skill registry found — sub-agents will work without project-specific standards. Run `skill-registry` to fix this.")
 
+**"Not found" only counts after a fail-loud check.** Step 3 means `test -f .kurama/skill-registry.md` or the harness's Read tool — primitives that surface their own failure. A read command that ERRORED is evidence of a broken check, NOT of a missing registry: retry with the other method before concluding step 4. Never probe with a pattern that suppresses stderr (`… 2>/dev/null || echo missing`), and never with a finder at all: `.kurama/` is both hidden AND gitignored, so `fd`/`rg` skip it even when given hidden flags. For `.kurama/` the check is `test -f` or Read, full stop. Same rule, in full: `orchestrator-sdd-protocol.md` → *Artifact existence checks (fail-loud)*.
+
 ### Step 2: Match Relevant Skills
 
 Match skills on TWO dimensions:

@@ -31,6 +31,12 @@ standard single-lens pass or a full-4R sweep.
    BLOCKER/CRITICAL block; WARNING/SUGGESTION are recorded once as `info`), and convergence
    budget. You do not persist the ledger yourself — the orchestrator merges and persists it.
 
+Resolve both paths in order, first hit wins: `skills/…` (repo checkout),
+`.claude/skills/…` (project install), `~/.claude/skills/…` (global install). The two install
+roots are hidden directories, which Grep/Glob skip by default — check with Read, your only
+file primitive here. A Read that ERRORED is a broken check, not a missing contract: report it
+to the orchestrator instead of reviewing without the ledger rules.
+
 ## Return contract
 
 Emit your own findings-ledger rows using the shared schema, with `id: R1-{NNN}` and

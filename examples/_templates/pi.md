@@ -38,4 +38,4 @@ This example is markdown-only — it does not install the `gentle-pi` npm stack,
 Model routing lives in each Pi agent's own frontmatter (or, under `gentle-pi`, the `/gentleman:models` modal), not in an orchestrator-passed `model` parameter — which is why there is no Model Assignments block below. Use the reasoning-effort shape recommended for each phase (fast/cheap for explore, propose, archive; stronger reasoning for spec, design, tasks; strong coding for apply; independent fresh context for verify/review) when assigning per-agent models.
 
 <!-- @@STATE_CONVENTIONS@@ -->
-Convention files under `~/.pi/agent/skills/_shared/` (global) or `.pi/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.pi/agent/skills/_shared/` (global) or `.pi/skills/_shared/` (workspace) — both hidden dirs; finders need `fd -H` / `rg --hidden` to see them. Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.

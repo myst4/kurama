@@ -57,6 +57,35 @@ override) wins over the persisted one, for this session only. Persisted settings
 the preflight on their own — that is the point of `sdd-init`. Cache the resolved block
 for the session and forward the four values in every phase prompt.
 
+### Artifact existence checks (fail-loud)
+
+Preflight resolves by reading artifacts — `openspec/config.yaml`, the `sdd-init/{project}`
+bundle, the `_shared/` contracts. **"Absent" and "unreadable" are different findings and must
+never collapse into the same conclusion.** A missing artifact means the project was never
+initialized; a failed read means the CHECK is broken. Treating the second as the first
+degrades the whole pipeline silently: it re-asks answered questions, or worse, runs a phase
+with defaults the user never chose.
+
+- **Check existence with fail-loud primitives only** — `test -f <path>` / `test -d <path>`,
+  or the harness's own Read tool, which errors visibly when it cannot read. A failed read
+  command is evidence of a BROKEN CHECK, NOT of a missing file.
+- **Banned probes.** Anything that suppresses stderr or substitutes its own verdict for the
+  command's — `bat X 2>/dev/null || echo missing`, any `cmd 2>/dev/null` inside a
+  conditional — and any content finder used as an existence check. `fd` and `rg` skip
+  dot-directories unless told to include hidden files (`fd -H`, `rg --hidden`; note that
+  `rg -H` is `--with-filename`, NOT hidden), and every harness config root is one:
+  `.claude/`, `.codex/`, `.pi/`, `.omp/`, `.kurama/`, plus opencode's `~/.config/opencode/`
+  (not itself a dot-dir, but reached through one). `.kurama/` is worse: it is gitignored, so
+  both finders skip it EVEN WITH hidden flags unless also given `--no-ignore` (`rg -u`,
+  `fd -I`). Existence is `test -f` or Read — never a finder.
+- **Project-shape inconsistency is BLOCKING.** When the project's own shape implies an
+  artifact must exist — `openspec/changes/` present ⇒ `openspec/config.yaml` exists; this
+  orchestrator prompt is installed ⇒ the `_shared/` contracts exist — and the check reports
+  it missing, that is an INCONSISTENCY, not an uninitialized project. STOP: re-verify with a
+  SECOND, different method (`test -f` after a failed Read, or the reverse), and report both
+  results to the user in their language. Never fall through to "not initialized", never
+  proceed on defaults, and never let a phase launch on the unverified reading.
+
 ## SDD Entry Routing
 
 A natural-language SDD request starts the pipeline at its ENTRY, never at a loose
@@ -90,7 +119,9 @@ Checks (every phase):
   `success` (not `partial` or `blocked`, and no verify FAIL).
 - **Artifact existence** — the declared artifact is actually retrievable from the active
   backend; read it back (engram: `mem_search` + `mem_get_observation` on the topic key;
-  openspec: read the file). A phase that claims success but produced no retrievable
+  openspec: read the file) using the fail-loud primitives of *Artifact existence checks*
+  above. A read that ERRORS is a broken check, not a missing artifact: re-verify with a
+  second method before ruling. A phase that claims success but produced no retrievable
   artifact FAILS the gate.
 - **No hallucination** — spot-check the concrete claims; every cited path, symbol, or
   command must resolve. A dangling reference FAILS the gate.
