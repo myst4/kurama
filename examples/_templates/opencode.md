@@ -49,4 +49,4 @@ When running under a named profile (the `kurama-orchestrator` primary), the per-
 <!-- /gentle-ai:sdd-model-assignments -->
 
 <!-- @@STATE_CONVENTIONS@@ -->
-Convention files under the agent's global skills directory (global) or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.config/opencode/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project fallback — a hidden dir; finders need `fd -H` / `rg --hidden` to see it). Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.

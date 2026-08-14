@@ -111,7 +111,7 @@ Meta-commands (type directly — orchestrator handles them, won't appear in auto
 
 Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, an executor skill, or a natural-language equivalent ("use SDD to add X") — read `skills/_shared/orchestrator-sdd-protocol.md` and follow it. It is the canonical home for the three session-level procedures: the **Preflight** (resolving pace, artifact store, delivery, review budget), **Entry Routing** (a natural-language request enters at `/sdd-new`, never at a loose `sdd-apply`), and the **Automatic Mode Gatekeeper** (the per-phase validation that only applies when `execution_mode` is `auto`).
 
-Load it when a cycle starts. A session that never invokes SDD never needs it.
+Load it when a cycle starts. A session that never invokes SDD never needs it. To find it: the `_shared/` contracts live in this harness's shared-skills directory (see *State and Conventions*), normally inside a hidden config dir that `fd`/`rg` skip unless told to include hidden files (`fd -H`, `rg --hidden`). Check existence with Read or `test -f`, never a stderr-suppressed probe — a failed read is a broken check, not a missing file.
 
 Three rules that must hold even before you load it, because they decide whether you ask anything at all — and which pipeline runs:
 
@@ -204,7 +204,7 @@ The orchestrator resolves skills from the registry ONCE (at session start or fir
 
 Orchestrator skill resolution (do once per session):
 1. `mem_search(query: "skill-registry", project: "{project}")` → `mem_get_observation(id)` for full registry content
-2. Fallback: read `.kurama/skill-registry.md` if engram not available
+2. Fallback: read `.kurama/skill-registry.md` if engram not available (verify with `test -f` or Read — a failed read is not a missing registry, and never use a finder: `.kurama/` is gitignored, so `fd`/`rg` skip it even with hidden flags)
 3. Cache the **Compact Rules** section and the **User Skills** trigger table
 4. If no registry exists, warn user and proceed without project-specific standards
 
@@ -243,7 +243,7 @@ Sub-agents retrieve content in two steps — `mem_search(query: "{topic_key}", p
 
 ### State and Conventions
 
-Convention files under the agent's global skills directory (global) or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.config/opencode/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project fallback — a hidden dir; finders need `fd -H` / `rg --hidden` to see it). Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.
 
 ### Recovery Rule
 

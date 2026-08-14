@@ -14,4 +14,4 @@ Bind this to the dedicated `sdd-orchestrator` agent or rule only. Do NOT apply i
 Use task for all delegated work. Codex does not expose async delegate tooling.
 
 <!-- @@STATE_CONVENTIONS@@ -->
-Convention files under `~/.codex/skills/_shared/` (global) or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.codex/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project — a hidden dir; finders need `fd -H` / `rg --hidden` to see it). Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.

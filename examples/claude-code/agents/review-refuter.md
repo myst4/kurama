@@ -29,6 +29,12 @@ defects, request another refuter, or inspect unrelated scope.
    and "Refutation protocol") for how your verdicts feed the merged ledger. Judgment Day does
    NOT use this refuter — its two-judge convergence is its own verification.
 
+Resolve both paths in order, first hit wins: `skills/…` (repo checkout),
+`.claude/skills/…` (project install), `~/.claude/skills/…` (global install). The two install
+roots are hidden directories, which Grep/Glob skip by default — check with Read, your only
+file primitive here. A Read that ERRORED is a broken check, not a missing contract: report it
+to the orchestrator instead of refuting without the ledger rules.
+
 ## Return contract
 
 Return `results: [{finding_id, outcome, proof_refs}]` for every input claim, preserving every

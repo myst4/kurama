@@ -42,4 +42,4 @@ Read this table at session start (or before first delegation), cache it for the 
 <!-- /gentle-ai:sdd-model-assignments -->
 
 <!-- @@STATE_CONVENTIONS@@ -->
-Convention files under the agent's global skills directory (global) or `.agent/skills/_shared/` (workspace): `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`.
+Convention files under `~/.claude/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project) — both hidden dirs; finders need `fd -H` / `rg --hidden` to see them. Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.
