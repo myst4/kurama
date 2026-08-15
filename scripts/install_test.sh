@@ -139,6 +139,34 @@ assert_all_skills_installed() {
     return 0
 }
 
+# Run test function $1 in a subshell, echo its combined output, and exit with its
+# status.
+#
+# #31: `set -e` is re-armed INSIDE the subshell on purpose. run_test calls this
+# from an `if` condition, and bash suppresses errexit for the whole extent of a
+# condition — the suppression is inherited by the command substitution's subshell
+# too, so a bare failing command inside the test body neither aborted it nor
+# reached run_test. An explicit `set -e` in the subshell is the only way to undo
+# that; the outer shell's -u and pipefail are never suppressed and carry over.
+invoke_test_body() {
+    local func="$1"
+    ( set -e; "$func" 2>&1 )
+}
+
+# Count files matching -name pattern $2 under directory $1, answering 0 when the
+# directory does not exist.
+#
+# #31: `find <missing dir> -name X | wc -l` exits 1, and under `set -o pipefail`
+# that status is the whole assignment's — which aborts the test body now that
+# errexit really reaches it. Every caller that counts what SURVIVED a removal is
+# asking about a directory the removal may legitimately have taken with it, so
+# the absent case is a real answer (zero), not an error.
+count_matching_files() {
+    local dir="$1" pattern="$2"
+    [ -d "$dir" ] || { echo 0; return 0; }
+    find "$dir" -name "$pattern" | wc -l | tr -d ' '
+}
+
 run_test() {
     local name="$1"
     local func="$2"
@@ -146,7 +174,7 @@ run_test() {
     setup
     echo -n "  $name ... "
     local output
-    if output=$($func 2>&1); then
+    if output=$(invoke_test_body "$func"); then
         echo -e "${GREEN}PASS${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
@@ -158,6 +186,56 @@ run_test() {
         FAILURES="$FAILURES\n  - $name"
     fi
     teardown
+}
+
+# ============================================================================
+# Tests — the harness itself (#31)
+#
+# A test suite that cannot fail is worse than no suite: it reports green over
+# every regression it was written to catch. `run_test` invokes the test function
+# as an `if` condition, and bash suppresses errexit for the whole extent of a
+# condition — including the command substitution's subshell. Every test shaped
+# "run the thing, then `return 0`" was therefore unfailable: the bare command's
+# non-zero status neither aborted the body nor reached run_test. invoke_test_body
+# re-arms errexit inside the subshell, which is the only place the suppression
+# can be undone; these two cases pin both halves of that contract.
+# ============================================================================
+
+# Fails on its first bare command, then claims success exactly as the unfailable
+# tests did. Never registered as a test — it is the fixture the two cases below
+# feed to the real harness entry point.
+_fixture_test_body_fails_then_returns_zero() {
+    false
+    echo "errexit was NOT active: execution continued past a failed bare command"
+    return 0
+}
+
+_fixture_test_body_succeeds() {
+    true
+    return 0
+}
+
+test_harness_bare_command_failure_fails_the_test() {
+    local output status=0
+    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "invoke_test_body returned 0 for a body whose bare command failed —"
+        echo "every 'run it, then return 0' test in this file is unfailable."
+        [ -n "$output" ] && printf '  body said: %s\n' "$output"
+        return 1
+    fi
+    if printf '%s\n' "$output" | grep -q 'errexit was NOT active'; then
+        echo "the body ran past its failed command (errexit suppressed inside the subshell)"
+        return 1
+    fi
+    return 0
+}
+
+test_harness_passing_test_still_passes() {
+    local status=0
+    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "a body that succeeds must still be reported as a pass" || return 1
+    return 0
 }
 
 # ============================================================================
@@ -1834,11 +1912,15 @@ test_dropped_harnesses_rejected_by_name() {
     # validated the slug: an unknown one fell through every path-resolution case and
     # produced an empty target plus a bare `mkdir: : No such file or directory`. The
     # failure must name the agent and the supported set instead.
-    local a out
+    local a out status
     for a in gemini-cli cursor vscode antigravity bogus; do
-        out=$(bash "$SETUP_SCRIPT" --agent "$a" 2>&1)
-        # shellcheck disable=SC2181  # the exit code of the command above is what is under test
-        if [ $? -eq 0 ]; then
+        # The status is captured on the same line as the output: with errexit live
+        # in the test body (#31), a bare `out=$(...)` on a command expected to fail
+        # aborts the case before the assertion below ever runs — which is exactly
+        # how this case sat unfailable, never once reading setup.sh's exit code.
+        status=0
+        out=$(bash "$SETUP_SCRIPT" --agent "$a" 2>&1) || status=$?
+        if [ "$status" -eq 0 ]; then
             echo "--agent $a was accepted; it must fail"
             return 1
         fi
@@ -1851,11 +1933,15 @@ test_dropped_harnesses_rejected_by_name() {
             *) echo "--agent $a did not name the supported set"; return 1 ;;
         esac
     done
-    # And the supported five must still be accepted by the same validator.
+    # And the supported five must still be accepted by the same validator. Only the
+    # validator's verdict is under test here, so a non-zero exit from a later
+    # install step is not this case's business — the status is captured (never
+    # ignored with `|| true`) and the message is what gets asserted.
     for a in claude-code opencode codex pi omp; do
-        out=$(bash "$SETUP_SCRIPT" --agent "$a" --non-interactive 2>&1)
+        status=0
+        out=$(bash "$SETUP_SCRIPT" --agent "$a" --non-interactive 2>&1) || status=$?
         case "$out" in
-            *"Unknown agent"*) echo "--agent $a was rejected; it is supported"; return 1 ;;
+            *"Unknown agent"*) echo "--agent $a was rejected; it is supported (exit $status)"; return 1 ;;
         esac
     done
     return 0
@@ -3768,7 +3854,7 @@ test_uninstall_removes_every_opencode_artifact() {
     bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages > /dev/null 2>&1
 
     local left
-    left=$(find "$HOME/.config/opencode/commands" -name 'sdd-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    left=$(count_matching_files "$HOME/.config/opencode/commands" 'sdd-*.md')
     assert_eq "0" "$left" "the nine /sdd-* command files survived the uninstall" || return 1
 
     local agents_md="$HOME/.config/opencode/AGENTS.md"
@@ -3800,7 +3886,7 @@ test_uninstall_sweeps_legacy_opencode_artifacts() {
     bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages > /dev/null 2>&1
 
     local left
-    left=$(find "$HOME/.config/opencode/commands" -name 'sdd-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    left=$(count_matching_files "$HOME/.config/opencode/commands" 'sdd-*.md')
     assert_eq "0" "$left" "legacy receipt: the /sdd-* commands were left behind" || return 1
     if [ -f "$HOME/.config/opencode/AGENTS.md" ]; then
         echo "legacy receipt: the wholesale AGENTS.md was left behind"; return 1
@@ -3837,7 +3923,7 @@ test_uninstall_claude_code_never_touches_opencode() {
     bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages > /dev/null 2>&1
 
     local left
-    left=$(find "$HOME/.config/opencode/commands" -name 'sdd-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    left=$(count_matching_files "$HOME/.config/opencode/commands" 'sdd-*.md')
     assert_eq "9" "$left" "uninstalling claude-code removed OpenCode's command files" || return 1
     jq -e '[(.agent // {}) | keys[] | select(startswith("sdd-"))] | length > 0' \
         "$HOME/.config/opencode/opencode.json" > /dev/null 2>&1 || {
@@ -4302,6 +4388,11 @@ echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}${BOLD}║    Kurama — Install Tests      ║${NC}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+echo ""
+
+echo -e "${BOLD}The harness itself${NC}"
+run_test "a failing bare command fails its test" test_harness_bare_command_failure_fails_the_test
+run_test "a passing body is still reported as a pass" test_harness_passing_test_still_passes
 echo ""
 
 echo -e "${BOLD}Help & Error Handling${NC}"
