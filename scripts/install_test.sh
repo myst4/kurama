@@ -3724,6 +3724,96 @@ test_uninstall_claude_code_never_touches_opencode() {
     return 0
 }
 
+# A pre-marker prompt file: the generated example copied whole, exactly as the
+# old wholesale `cp` (and the manual-install docs) leave it — plus a sentinel so
+# "was this file rewritten or only warned about?" is answered by content, not by
+# timestamps.
+write_pre_marker_prompt_copy() {
+    local example="$1" target="$2"
+    mkdir -p "$(dirname "$target")"
+    cp "$example" "$target"
+    printf '\nSTALE-SENTINEL-FROM-AN-OLDER-RELEASE\n' >> "$target"
+}
+
+test_setup_remerges_a_pre_marker_prompt_copy() {
+    # C1: every OpenCode install written before the marker merge has an
+    # unmarked AGENTS.md whose body contains "## Kurama Orchestrator" — one of
+    # ORCHESTRATOR_HEADINGS. setup_orchestrator's already_present branch warns
+    # and writes NOTHING, so the prompt is frozen: no markers ever appear,
+    # content is never refreshed, doctor keeps telling the user to re-run setup,
+    # and update keeps reporting "no recorded file changed".
+    run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
+    local prompt="$HOME/.config/opencode/AGENTS.md"
+    write_pre_marker_prompt_copy "$REPO_DIR/examples/opencode/AGENTS.md" "$prompt"
+    local before
+    before=$(grep -cF 'BEGIN:kurama' "$prompt" || true)
+    assert_eq "0" "$before" "precondition: the pre-marker copy must carry no markers" || return 1
+
+    run_setup_opencode --opencode-mode single || { echo "setup opencode re-run failed"; return 1; }
+
+    local b e
+    b=$(grep -cF 'BEGIN:kurama' "$prompt" || true)
+    e=$(grep -cF 'END:kurama' "$prompt" || true)
+    assert_eq "1" "$b" "the re-run did not add a BEGIN marker to the pre-marker copy" || return 1
+    assert_eq "1" "$e" "the re-run did not add an END marker to the pre-marker copy" || return 1
+    # Rewritten, not appended to: the stale content is gone …
+    if grep -q 'STALE-SENTINEL' "$prompt"; then
+        echo "the re-run left the stale content in place (append, not refresh)"; return 1
+    fi
+    # … and the fresh orchestrator content is there.
+    grep -qF '## Kurama Orchestrator' "$prompt" || {
+        echo "the refreshed prompt lost the orchestrator content"; return 1; }
+    # The old file is recoverable.
+    local baks
+    baks=$(find "$(dirname "$prompt")" -name 'AGENTS.md.bak.*' | wc -l | tr -d ' ')
+    [ "$baks" -ge 1 ] || { echo "the rewrite kept no backup of the pre-marker file"; return 1; }
+    return 0
+}
+
+test_setup_remerges_a_pre_marker_claude_prompt_copy() {
+    # The same shape on a second harness: the fingerprint is build-examples'
+    # GENERATED banner, which only Kurama writes, so the re-merge is generic
+    # rather than an OpenCode special case.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local prompt="$HOME/.claude/CLAUDE.md"
+    write_pre_marker_prompt_copy "$REPO_DIR/examples/claude-code/CLAUDE.md" "$prompt"
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code re-run failed"; return 1; }
+
+    local b
+    b=$(grep -cF 'BEGIN:kurama' "$prompt" || true)
+    assert_eq "1" "$b" "a pre-marker CLAUDE.md copy was not re-merged with markers" || return 1
+    if grep -q 'STALE-SENTINEL' "$prompt"; then
+        echo "the re-run left the stale content in place"; return 1
+    fi
+    return 0
+}
+
+test_setup_leaves_a_user_written_prompt_warn_only() {
+    # The other side of the fingerprint: a file the USER wrote (no GENERATED
+    # banner) keeps the warn-only behavior — setup must never rewrite it.
+    run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
+    local prompt="$HOME/.config/opencode/AGENTS.md"
+    printf '# My own AGENTS.md\n\n## Kurama Orchestrator\n\nmy hand-written notes\n' > "$prompt"
+
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+    local output
+    output=$(PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --without-engram \
+        --non-interactive --opencode-mode single 2>&1) \
+        || { echo "setup opencode re-run failed"; return 1; }
+
+    grep -q 'my hand-written notes' "$prompt" || {
+        echo "setup rewrote a user-written prompt file"; return 1; }
+    local b
+    b=$(grep -cF 'BEGIN:kurama' "$prompt" || true)
+    assert_eq "0" "$b" "setup marker-merged a file it does not own" || return 1
+    printf '%s\n' "$output" | grep -q 'already present' || {
+        echo "setup never reported that it left the file alone"; return 1; }
+    return 0
+}
+
 # ============================================================================
 # Tests — #23: doctor verdicts it actually verified
 #
@@ -3863,6 +3953,39 @@ test_doctor_unmarked_orchestrator_is_recognized_by_content() {
     printf '%s\n' "$output" | grep -q 'present but unmarked' || {
         echo "doctor does not report the unmarked orchestrator honestly"; return 1; }
     assert_eq "0" "$status" "a pre-marker install is not a failure" || return 1
+    return 0
+}
+
+test_doctor_project_orphans_are_not_double_reported() {
+    # I1: in project scope several harnesses share one location —
+    # claude-code/codex/opencode all resolve to <repo>/.claude/skills, and
+    # claude-code+codex share <repo>/CLAUDE.md. A per-agent loop reported the
+    # same artifact once per harness that maps to it: four real problems printed
+    # as "8 failure(s)". The verdict was right, the count was not.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup failed"; return 1; }
+    rm -f "$repo/.kurama-install-manifest.json"
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "doctor was green over an orphaned project install"; return 1
+    fi
+    local n
+    n=$(printf '%s\n' "$output" | grep -c 'Kurama skills in' || true)
+    assert_eq "1" "$n" "the shared project skills dir is reported once per harness" || return 1
+    n=$(printf '%s\n' "$output" | grep -c 'orchestrator block still merged' || true)
+    assert_eq "1" "$n" "the shared CLAUDE.md block is reported once per harness" || return 1
+    # And no failure line is printed twice, whatever the artifact.
+    local total distinct
+    total=$(printf '%s\n' "$output" | grep -c '✗' || true)
+    distinct=$(printf '%s\n' "$output" | grep '✗' | sort -u | wc -l | tr -d ' ')
+    assert_eq "$distinct" "$total" "doctor printed the same failure more than once" || return 1
     return 0
 }
 
@@ -4319,6 +4442,9 @@ run_test "uninstall removes every OpenCode artifact" test_uninstall_removes_ever
 run_test "uninstall sweeps a pre-#22 OpenCode receipt" test_uninstall_sweeps_legacy_opencode_artifacts
 run_test "the sweep never deletes a user-written AGENTS.md" test_uninstall_leaves_foreign_agents_md_alone
 run_test "uninstalling claude-code never touches OpenCode" test_uninstall_claude_code_never_touches_opencode
+run_test "a pre-marker prompt copy is re-merged, not frozen" test_setup_remerges_a_pre_marker_prompt_copy
+run_test "the same re-merge works on a claude-code copy" test_setup_remerges_a_pre_marker_claude_prompt_copy
+run_test "a user-written prompt stays warn-only" test_setup_leaves_a_user_written_prompt_warn_only
 echo ""
 
 echo -e "${BOLD}#23 — doctor verdicts it actually verified${NC}"
@@ -4328,6 +4454,7 @@ run_test "display-name receipt still runs every check" test_doctor_normalizes_di
 run_test "an unresolvable tool is a hard failure" test_doctor_unresolvable_tool_is_hard_fail
 run_test "a healthy OpenCode install is green" test_doctor_green_on_healthy_opencode
 run_test "a pre-marker orchestrator is verified by content" test_doctor_unmarked_orchestrator_is_recognized_by_content
+run_test "project orphans are reported once, not per harness" test_doctor_project_orphans_are_not_double_reported
 run_test "a partial receipt is never reported healthy" test_doctor_partial_receipt_is_not_reported_healthy
 echo ""
 
