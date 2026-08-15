@@ -1259,18 +1259,25 @@ install_opencode_profile() {
     fi
 
     # Derive the profile agents from the template: rename the "-kurama" suffix to
-    # "-NAME" and scope the orchestrator's task permission to this profile's own
-    # suffixed subagents. The template carries no "model" key, so an agent nobody
-    # assigns a model to simply inherits OpenCode's default — the model from the
-    # flag is applied further down, AFTER the restore, so it can win.
+    # "-NAME", in the agent keys AND in the orchestrator's task permission. The
+    # template carries no "model" key, so an agent nobody assigns a model to
+    # simply inherits OpenCode's default — the model from the flag is applied
+    # further down, AFTER the restore, so it can win.
+    #
+    # #25: the permission map is RENAMED, not reassigned. Overwriting it with
+    # {"*":"deny", "sdd-*-NAME":"allow"} dropped the "review-*", "jd-*" and
+    # "general" grants the template (and opencode.multi.json) carry, so a
+    # named-profile orchestrator could not delegate the mandated review layer at
+    # all — the one path where the permission map and the template disagreed.
+    # Renaming keeps template and installer in agreement by construction.
     local profile_agents
     profile_agents=$(jq --arg name "$name" '
+        def rename_kurama(k): if (k|startswith("sdd-")) and (k|endswith("-kurama"))
+            then (k[:-7] + "-" + $name) else k end;
         .agent
-        | with_entries(
-            if (.key|startswith("sdd-")) and (.key|endswith("-kurama"))
-            then .key |= (.[:-7] + "-" + $name)
-            else . end)
-        | .["kurama-orchestrator"].permission.task = {"*":"deny", ("sdd-*-"+$name):"allow"}
+        | with_entries(.key |= rename_kurama(.))
+        | .["kurama-orchestrator"].permission.task |=
+            with_entries(.key |= rename_kurama(.))
     ' "$template") || { warn "Failed to build profile agents"; return 0; }
 
     # $saved carries the profile agents' user-edited models captured BEFORE the
