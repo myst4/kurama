@@ -58,7 +58,11 @@ Checks run automatically on every PR:
 | **Check Issue Reference** | PR body contains `Closes #N`, `Fixes #N`, or `Resolves #N` |
 | **Check Issue Has status:approved** | The linked issue has the `status:approved` label |
 | **Check PR Has type:\* Label** | PR has exactly one `type:*` label |
-| **Shellcheck** | Shell scripts pass `shellcheck` linting |
+| **Shellcheck** | Every `*.sh` in the repo, including the `examples/claude-code/hooks/` scripts, passes `shellcheck` linting |
+| **Install tests (ubuntu + macos)** | `scripts/install_test.sh` passes on both operating systems |
+| **Validate skills (ubuntu + macos)** | `scripts/validate_skills.sh` structural lint passes on both operating systems |
+| **Examples drift** | Regenerating from `examples/_templates/` via `scripts/build-examples.sh` is a no-op, and both banner generators pass `--check` |
+| **Forbidden claims** | Docs, README, and examples don't advertise a deliberately removed component outside a blessed removal note |
 
 All checks must pass before a PR can be merged.
 
