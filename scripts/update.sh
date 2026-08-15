@@ -39,6 +39,17 @@ AGENT=""
 TARGET_PATH=""
 DRY_RUN=false
 
+# Per-target outcomes. A refusal or a failure is about ONE target, never a reason
+# to abandon the targets queued behind it: install.sh already skips-and-continues
+# the same way (see its MANAGED_TARGETS_SKIPPED). Collected here so the run
+# updates everything it CAN, then closes with an honest summary and exits 1.
+# Newline-separated "label|receipt_dir" entries.
+REFUSED_TARGETS=""
+FAILED_TARGETS=""
+# Set by resync_target for the target it just handled: true when that target was
+# refused (a recoverable receipt gap with a printed remedy) rather than failed.
+LAST_TARGET_REFUSED=false
+
 # ============================================================================
 # Colors
 # ============================================================================
@@ -245,6 +256,7 @@ EOF
 resync_target() {
     local receipt_dir="$1"
     local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
+    LAST_TARGET_REFUSED=false
 
     if [ ! -f "$manifest" ]; then
         warn "No receipt at $receipt_dir — nothing to update (skipping)"
@@ -325,6 +337,7 @@ EOF
             info "Re-run setup once with the mode you use, then update.sh works again:"
             info "  $SETUP_SCRIPT --agent opencode --opencode-mode single|multi [--opencode-profile NAME]"
             rm -f "$hashfile"
+            LAST_TARGET_REFUSED=true
             return 1
         fi
         slugs+=("$slug")
@@ -474,28 +487,78 @@ echo ""
 echo -e "${CYAN}${BOLD}Kurama — Update / Re-sync${NC}"
 $DRY_RUN && echo -e "${YELLOW}${BOLD}Dry run — nothing will be written.${NC}"
 
+# Run one target and file its outcome. Never propagates the non-zero return, so
+# `set -e` cannot abort the remaining targets — the end-of-run summary reports
+# every refusal/failure and sets the exit code.
+run_target() {
+    local label="$1" dir="$2"
+    if resync_target "$dir"; then
+        return 0
+    fi
+    if $LAST_TARGET_REFUSED; then
+        REFUSED_TARGETS="$REFUSED_TARGETS
+$label|$dir"
+    else
+        FAILED_TARGETS="$FAILED_TARGETS
+$label|$dir"
+    fi
+    return 0
+}
+
 if [ "$SCOPE" = "project" ]; then
     TARGET_PATH="${TARGET_PATH:-$PWD}"
-    resync_target "$TARGET_PATH"
+    run_target "project" "$TARGET_PATH"
 elif [ -n "$AGENT" ]; then
     dir="$(global_skills_path "$AGENT")"
     [ -n "$dir" ] || { fail "Unknown agent: $AGENT"; exit 1; }
-    resync_target "$dir"
+    run_target "$AGENT" "$dir"
 else
-    # No agent given: update every global agent that has a receipt.
+    # No agent given: update every global agent that has a receipt. One refused or
+    # failed target never cancels the rest — they are independent installs.
     found=false
     for agent in $ALL_AGENTS; do
         dir="$(global_skills_path "$agent")"
         [ -n "$dir" ] || continue
         if [ -f "$dir/$INSTALL_MANIFEST_NAME" ]; then
             found=true
-            resync_target "$dir"
+            run_target "$agent" "$dir"
         fi
     done
     if ! $found; then
         warn "No global install receipts found — nothing to update."
         info "Run setup.sh first, or pass --scope project --path <repo>."
     fi
+fi
+
+# End-of-run summary. A run that skipped a target must say so at the END, where
+# the user actually looks: the per-target refusal scrolls away behind every target
+# updated after it, and a silent exit 1 reads as "the whole update broke".
+print_target_list() {
+    local entries="$1" label dir count
+    count="$(printf '%s\n' "$entries" | awk 'NF' | wc -l | tr -d ' ')"
+    echo -e "${RED}${BOLD}Not updated — $count target(s) $2${NC}"
+    while IFS='|' read -r label dir; do
+        [ -n "$label" ] || continue
+        fail "$label ($dir)"
+    done <<EOF
+$(printf '%s\n' "$entries" | awk 'NF')
+EOF
+}
+
+if [ -n "$REFUSED_TARGETS" ] || [ -n "$FAILED_TARGETS" ]; then
+    echo ""
+    if [ -n "$REFUSED_TARGETS" ]; then
+        print_target_list "$REFUSED_TARGETS" "refused"
+        # Refusing is always the mode-less OpenCode receipt today; the remedy is
+        # one setup run that records the mode.
+        info "Re-run setup once per refused target, with the mode you use, then update again:"
+        info "  $SETUP_SCRIPT --agent opencode --opencode-mode single|multi [--opencode-profile NAME]"
+    fi
+    if [ -n "$FAILED_TARGETS" ]; then
+        print_target_list "$FAILED_TARGETS" "failed"
+    fi
+    echo -e "\n${YELLOW}${BOLD}Done with errors.${NC} Every other recorded target was updated."
+    exit 1
 fi
 
 echo -e "\n${GREEN}${BOLD}Done.${NC}"
