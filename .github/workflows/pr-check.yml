@@ -131,10 +131,19 @@ jobs:
           # hooks under examples/claude-code/hooks/ run on the user's machine on
           # every Task/Skill call and block with exit 2 — they shipped with zero
           # lint coverage. NUL-delimited so a path with spaces stays one argument.
-          echo "Files under shellcheck:"
-          find . -path ./.git -prune -o -name '*.sh' -type f -print | sort | awk '{ print "  " $0 }'
-          find . -path ./.git -prune -o -name '*.sh' -type f -print0 \
-            | xargs -0 -r shellcheck
+          list="$(mktemp)"
+          trap 'rm -f "$list"' EXIT
+          find . -path ./.git -prune -o -name '*.sh' -type f -print0 > "$list"
+          # An empty lint surface is a moved tree or a broken checkout — never a
+          # pass. `xargs -r` would happily make that an exit-0 no-op.
+          count=$(tr '\0' '\n' < "$list" | awk 'NF { n++ } END { print n + 0 }')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::shellcheck found no *.sh files. Refusing to report a pass on an empty lint surface."
+            exit 1
+          fi
+          echo "Files under shellcheck ($count):"
+          tr '\0' '\n' < "$list" | sort | awk 'NF { print "  " $0 }'
+          xargs -0 shellcheck < "$list"
 
   install-test:
     name: Install tests (${{ matrix.os }})
@@ -211,22 +220,45 @@ jobs:
           #
           # To register a newly removed component, add ONE line to FORBIDDEN:
           #     <awk ERE pattern> <exact paths exempted wholesale, space separated>
+          # Write the pattern in LOWERCASE: matching is case-insensitive and the
+          # pattern is lowercased before use, so "Background-Agents" is caught
+          # too (a case-sensitive bracket range would not survive that).
           #
           # Scope: tracked files under docs/, examples/ and README.md. scripts/
           # is deliberately out — the installers must name removed components in
           # order to delete them.
           #
-          # A match is ALLOWED when the paragraph around it (blank-line
-          # delimited, so a wrapped sentence counts as one unit) also carries a
-          # removal marker. That is what lets "Kurama no longer ships the
-          # background-agents.ts plugin" pass while a fresh install or usage
-          # instruction fails. A file whose PATH names the component always
-          # fails, however innocent its contents.
+          # BLESSING WINDOW — a hit is allowed only when a removal marker sits on
+          # the hit line ITSELF or on one of the two lines touching it. That is
+          # exactly wide enough for a sentence wrapped across two lines
+          # (docs/opencode-profiles.md: marker on 123, hit on 124) and no wider:
+          # a "legacy" row elsewhere in the same table, or a sibling bullet in
+          # the same list, does NOT bless a fresh install instruction.
+          #
+          # A file whose PATH names the component always fails, however innocent
+          # its contents.
           MARKERS='no longer|removed|dropped|deliberately not|do not install|never install|legacy'
 
           FORBIDDEN='
           background-agents docs/changelog.md docs/migration.md
           '
+
+          # Enumerate the in-scope files ONCE. A pathspec that matches nothing
+          # (docs/ renamed away, examples/ deleted) used to make this step a
+          # silent exit-0 no-op, so --error-unmatch turns any unmatched pathspec
+          # into a hard failure, and the count is the belt to that suspenders.
+          list="$(mktemp)"
+          trap 'rm -f "$list"' EXIT
+          if ! git ls-files --error-unmatch -z -- docs README.md examples > "$list"; then
+            echo "::error::forbidden-claims: an in-scope pathspec (docs, README.md, examples) matched no tracked file. Update the pathspec — do not leave the gate scanning a subset."
+            exit 1
+          fi
+          count=$(tr '\0' '\n' < "$list" | awk 'NF { n++ } END { print n + 0 }')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::forbidden-claims: scanned 0 files. Refusing to report a pass on an empty scan."
+            exit 1
+          fi
+          echo "Scanning $count tracked file(s) under docs/, examples/ and README.md."
 
           fail=0
           while read -r pattern exempt; do
@@ -238,29 +270,28 @@ jobs:
                 [ "$file" = "$allowed" ] && skip=1
               done
               [ "$skip" -eq 1 ] && continue
-              if printf '%s' "$file" | grep -Eq "$pattern"; then
+              if printf '%s' "$file" | grep -Eqi "$pattern"; then
                 printf '%s: path names a deliberately removed component\n' "$file"
                 fail=1
               fi
               awk -v pat="$pattern" -v markers="$MARKERS" -v file="$file" '
-                function flush(   i, hit, marked) {
-                  hit = 0; marked = 0
-                  for (i = 1; i <= n; i++) {
-                    if (buf[i] ~ pat)              hit = 1
-                    if (tolower(buf[i]) ~ markers) marked = 1
+                BEGIN { lpat = tolower(pat); lmark = tolower(markers) }
+                { raw[NR] = $0; low[NR] = tolower($0) }
+                END {
+                  for (i = 1; i <= NR; i++) {
+                    if (low[i] !~ lpat) continue
+                    blessed = 0
+                    for (j = i - 1; j <= i + 1; j++)
+                      if (j >= 1 && j <= NR && low[j] ~ lmark) blessed = 1
+                    if (!blessed) {
+                      printf "%s:%d: %s\n", file, i, raw[i]
+                      bad = 1
+                    }
                   }
-                  if (hit && !marked) {
-                    for (i = 1; i <= n; i++)
-                      if (buf[i] ~ pat) printf "%s:%d: %s\n", file, ln[i], buf[i]
-                    bad = 1
-                  }
-                  n = 0
+                  exit (bad ? 1 : 0)
                 }
-                /^[[:space:]]*$/ { flush(); next }
-                { buf[++n] = $0; ln[n] = FNR }
-                END { flush(); exit (bad ? 1 : 0) }
               ' "$file" || fail=1
-            done < <(git ls-files -z -- docs README.md examples)
+            done < "$list"
           done <<EOF
           $FORBIDDEN
           EOF
