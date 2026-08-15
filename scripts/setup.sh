@@ -55,6 +55,14 @@ RECEIPT_PI_PACKAGES=""   # newline list of "npm:pkg@ver" specs installed via pi
 RECEIPT_ENGRAM_MCP=""    # O5: newline list of config files an Engram MCP server was written to
 RECEIPT_PROMPTS=""       # newline list of orchestrator prompt files carrying a removable BEGIN:kurama block
 RECEIPT_TUI_PLUGINS=""   # newline list of opencode tui.json files a Kurama TUI plugin was registered in
+RECEIPT_OPENCODE_CONFIGS=""  # #22: opencode.json files carrying Kurama's sdd-* agent block (merged, never owned)
+# #22: the OpenCode install-time choices. update.sh re-passes them so a re-sync
+# reproduces the SAME install instead of falling back to the non-interactive
+# defaults (single mode, no profile), which deletes every sdd-* key it does not
+# re-create. Recorded per target, so a claude-code receipt never carries them.
+RECEIPT_OPENCODE_MODE=""
+RECEIPT_OPENCODE_PROFILE=""
+RECEIPT_OPENCODE_PROFILE_MODEL=""
 
 # O5: Engram optional persistence engine. setup asks ONCE (or honors the
 # --with-engram/--without-engram flags) whether to wire Engram as the memory
@@ -580,8 +588,11 @@ _receipt_existing() {
 # (settings.json files carrying a surgically-removable kurama hooks block),
 # "pi_packages" (packages installed via `pi install`), "engram_mcp" (client
 # config files an Engram MCP server was written into), "prompts" (orchestrator
-# prompt files carrying a removable BEGIN:kurama block) and "tui_plugins"
-# (opencode tui.json files carrying a removable kurama-logo entry) — so
+# prompt files carrying a removable BEGIN:kurama block), "tui_plugins"
+# (opencode tui.json files carrying a removable kurama-logo entry),
+# "opencode_configs" (opencode.json files carrying Kurama's sdd-* agent block)
+# and the scalar "opencode_mode"/"opencode_profile"/"opencode_profile_model"
+# (the install-time OpenCode choices update.sh must re-pass) — so
 # uninstall/update/doctor can reverse and re-sync exactly what setup wrote. Older
 # receipts that lack these fields still parse (consumers treat them as
 # global/empty).
@@ -610,15 +621,33 @@ finalize_receipt() {
     fi
     prev_tools="$(printf '%s\n' "$prev_tools" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
 
-    local tools files settings pi_packages engram_mcp prompts tui_plugins
+    local tools files settings pi_packages engram_mcp prompts tui_plugins opencode_configs
     tools="$(_merge_lines "$prev_tools" "$RECEIPT_TOOL")"
     files="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "files")")" "$RECEIPT_FILES")"
     settings="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "settings")")" "$RECEIPT_SETTINGS")"
     engram_mcp="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "engram_mcp")")" "$RECEIPT_ENGRAM_MCP")"
     prompts="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "prompts")")" "$RECEIPT_PROMPTS")"
     tui_plugins="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "tui_plugins")")" "$RECEIPT_TUI_PLUGINS")"
+    opencode_configs="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "opencode_configs")")" "$RECEIPT_OPENCODE_CONFIGS")"
     # pi_packages holds "npm:pkg@ver" specs, not paths: nothing to stat.
     pi_packages="$(_merge_lines "$(receipt_json_array "$manifest_path" "pi_packages")" "$RECEIPT_PI_PACKAGES")"
+
+    # #22: the OpenCode mode/profile of THIS run wins; otherwise an existing
+    # record survives. A project receipt shared with other harnesses (or a
+    # claude-code re-run over a shared receipt dir) must never erase opencode's
+    # recorded choice — that is exactly the value update.sh re-passes.
+    local oc_mode oc_profile oc_profile_model
+    oc_mode="$RECEIPT_OPENCODE_MODE"
+    [ -n "$oc_mode" ] || oc_mode="$(receipt_field "$manifest_path" "opencode_mode")"
+    if [ -n "$RECEIPT_OPENCODE_PROFILE" ]; then
+        # This run resolved the profile, so its model is authoritative too —
+        # including the empty value a base-only re-run ("no") leaves behind.
+        oc_profile="$RECEIPT_OPENCODE_PROFILE"
+        oc_profile_model="$RECEIPT_OPENCODE_PROFILE_MODEL"
+    else
+        oc_profile="$(receipt_field "$manifest_path" "opencode_profile")"
+        oc_profile_model="$(receipt_field "$manifest_path" "opencode_profile_model")"
+    fi
 
     mkdir -p "$RECEIPT_DIR"
     make_writable "$manifest_path"
@@ -633,6 +662,12 @@ finalize_receipt() {
         printf '  ],\n'
         printf '  "scope": "%s",\n' "$SCOPE"
         printf '  "engram": "%s",\n' "${ENGRAM:-no}"
+        # #22: emitted only when known, so a receipt that never configured
+        # OpenCode stays exactly as it was and update.sh can tell "no OpenCode
+        # here" apart from "OpenCode, mode unrecorded" (which it refuses).
+        [ -n "$oc_mode" ] && printf '  "opencode_mode": "%s",\n' "$oc_mode"
+        [ -n "$oc_profile" ] && printf '  "opencode_profile": "%s",\n' "$oc_profile"
+        [ -n "$oc_profile_model" ] && printf '  "opencode_profile_model": "%s",\n' "$oc_profile_model"
         printf '  "files": [\n'
         _json_array "$files"
         printf '  ],\n'
@@ -650,6 +685,9 @@ finalize_receipt() {
         printf '  ],\n'
         printf '  "tui_plugins": [\n'
         _json_array "$tui_plugins"
+        printf '  ],\n'
+        printf '  "opencode_configs": [\n'
+        _json_array "$opencode_configs"
         printf '  ]\n'
         printf '}\n'
     } > "$manifest_path"
@@ -1001,6 +1039,21 @@ merge_hooks_settings() {
 # Setup Orchestrator Prompt (idempotent with markers)
 # ============================================================================
 
+# True when a marker-less prompt file is one of our generated examples copied
+# whole: line 1 carries build-examples' GENERATED banner (a line only Kurama
+# writes) and the body carries the orchestrator heading. Byte-for-byte the same
+# fingerprint sweep_legacy_opencode_artifacts uses in uninstall.sh, so "Kurama
+# owns this entire file" means exactly the same thing on both ends of the
+# lifecycle. Harness-agnostic on purpose: OpenCode's old wholesale `cp` produced
+# this shape automatically, and every harness's manual-install instructions can
+# produce it by hand.
+prompt_is_kurama_generated_copy() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+    head -1 "$file" | grep -qF 'GENERATED FILE' || return 1
+    grep -qF 'Kurama Orchestrator' "$file"
+}
+
 setup_orchestrator() {
     local prompt_path="$1"
     local example_file="$2"
@@ -1080,6 +1133,24 @@ $(receipt_rel "$prompt_path")"
                 rm -f "$cfile"
                 fail "Failed to rewrite $prompt_path (left unchanged)"; exit 1
             fi
+        elif prompt_is_kurama_generated_copy "$prompt_path"; then
+            # A pre-marker install: one of our generated examples copied WHOLE
+            # into place (setup's old OpenCode branch did this, and the
+            # manual-install docs still tell users to). Its body carries
+            # "## Kurama Orchestrator", so the already_present branch below
+            # would warn and write NOTHING — leaving the prompt frozen forever:
+            # no markers would ever appear, the content would never refresh, and
+            # doctor/update would keep pointing at a re-run that does nothing.
+            # Kurama wrote every byte of this file, so replace it whole with the
+            # marked block (backup first). The fingerprint is deliberately the
+            # same one uninstall.sh's legacy sweep uses.
+            make_backup "$prompt_path"
+            {
+                echo "$MARKER_BEGIN"
+                echo "$content"
+                echo "$MARKER_END"
+            } | atomic_replace "$prompt_path"
+            ok "Orchestrator re-merged with markers in $prompt_path (was an unmarked full copy)"
         else
             # Check if orchestrator content already exists (no markers)
             local already_present=false
@@ -1221,18 +1292,25 @@ install_opencode_profile() {
     fi
 
     # Derive the profile agents from the template: rename the "-kurama" suffix to
-    # "-NAME" and scope the orchestrator's task permission to this profile's own
-    # suffixed subagents. The template carries no "model" key, so an agent nobody
-    # assigns a model to simply inherits OpenCode's default — the model from the
-    # flag is applied further down, AFTER the restore, so it can win.
+    # "-NAME", in the agent keys AND in the orchestrator's task permission. The
+    # template carries no "model" key, so an agent nobody assigns a model to
+    # simply inherits OpenCode's default — the model from the flag is applied
+    # further down, AFTER the restore, so it can win.
+    #
+    # #25: the permission map is RENAMED, not reassigned. Overwriting it with
+    # {"*":"deny", "sdd-*-NAME":"allow"} dropped the "review-*", "jd-*" and
+    # "general" grants the template (and opencode.multi.json) carry, so a
+    # named-profile orchestrator could not delegate the mandated review layer at
+    # all — the one path where the permission map and the template disagreed.
+    # Renaming keeps template and installer in agreement by construction.
     local profile_agents
     profile_agents=$(jq --arg name "$name" '
+        def rename_kurama(k): if (k|startswith("sdd-")) and (k|endswith("-kurama"))
+            then (k[:-7] + "-" + $name) else k end;
         .agent
-        | with_entries(
-            if (.key|startswith("sdd-")) and (.key|endswith("-kurama"))
-            then .key |= (.[:-7] + "-" + $name)
-            else . end)
-        | .["kurama-orchestrator"].permission.task = {"*":"deny", ("sdd-*-"+$name):"allow"}
+        | with_entries(.key |= rename_kurama(.))
+        | .["kurama-orchestrator"].permission.task |=
+            with_entries(.key |= rename_kurama(.))
     ' "$template") || { warn "Failed to build profile agents"; return 0; }
 
     # $saved carries the profile agents' user-edited models captured BEFORE the
@@ -1279,12 +1357,18 @@ setup_opencode() {
     ask_opencode_mode
     local example_config="$EXAMPLES_DIR/opencode/opencode.${OPENCODE_MODE}.json"
     info "OpenCode mode: $OPENCODE_MODE"
+    # #22: the resolved mode is part of the install, not a transient prompt
+    # answer — update.sh re-passes it, so record it as soon as it is known
+    # (before any write, so even an aborted run's receipt carries it).
+    RECEIPT_OPENCODE_MODE="$OPENCODE_MODE"
 
     # Resolve the profile now (before any merge) and snapshot the models of its
     # own agents from the pre-merge config. The base merge below removes every
     # "sdd-*" key — which includes a profile's suffixed subagents — so we must
     # capture their user-edited models here to restore them idempotently.
     ask_opencode_profile
+    RECEIPT_OPENCODE_PROFILE="$OPENCODE_PROFILE"
+    RECEIPT_OPENCODE_PROFILE_MODEL="$OPENCODE_PROFILE_MODEL"
     local profile_saved="{}"
     if [ "$OPENCODE_PROFILE" != "no" ] && [ -n "$OPENCODE_PROFILE" ] \
         && command -v jq &>/dev/null && [ -s "$config_file" ]; then
@@ -1315,6 +1399,11 @@ setup_opencode() {
             else
                 cp "$cmd_file" "$commands_target/"
             fi
+            # #22: these are Kurama-owned files under a Kurama-owned name, so
+            # they belong in files[] — without this, uninstall left all nine
+            # /sdd-* commands wired to agents it had just deleted.
+            RECEIPT_FILES="$RECEIPT_FILES
+$(receipt_rel "$commands_target/$(basename "$cmd_file")")"
             count=$((count + 1))
         done
         ok "$count OpenCode commands installed ($OPENCODE_MODE mode)"
@@ -1407,6 +1496,12 @@ setup_opencode() {
             cp "$example_config" "$config_file"
             ok "Config created at $config_file ($OPENCODE_MODE mode)"
         fi
+        # #22: record the config we just wrote our agent block into. NOT in
+        # files[] — this file is the user's, and uninstall removes files[]
+        # outright; opencode_configs[] means "strip Kurama's sdd-* agents from
+        # it", which is the only reversal that keeps the user's own agents.
+        RECEIPT_OPENCODE_CONFIGS="$RECEIPT_OPENCODE_CONFIGS
+$(receipt_rel "$config_file")"
     else
         if ! command -v jq &>/dev/null; then
             warn "jq not found — cannot auto-merge opencode.json"
@@ -1440,14 +1535,16 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
         install_opencode_profile "$config_file" "$profile_saved"
     fi
 
-    # Install AGENTS.md prompt file for prompt references in config templates
-    local agents_src="$EXAMPLES_DIR/opencode/AGENTS.md"
-    local agents_target="$home/.config/opencode/AGENTS.md"
-    if [ -f "$agents_src" ]; then
-        mkdir -p "$(dirname "$agents_target")"
-        cp "$agents_src" "$agents_target"
-        ok "AGENTS.md installed -> $agents_target"
-    fi
+    # Install the orchestrator prompt every config template references through
+    # {file:./AGENTS.md}. This used to be a wholesale `cp` of the example over
+    # whatever the user had, which (a) destroyed a hand-written AGENTS.md with no
+    # backup, (b) left no BEGIN:kurama markers — so doctor flagged every HEALTHY
+    # OpenCode install as "orchestrator not merged?" (#23) — and (c) recorded
+    # nothing, so uninstall left the ~22KB file behind (#22). Routing it through
+    # the same setup_orchestrator every other harness uses fixes all three at
+    # once: marker merge, backup, and a prompts[] entry uninstall strips.
+    setup_orchestrator "$home/.config/opencode/AGENTS.md" \
+        "$EXAMPLES_DIR/opencode/AGENTS.md" opencode
 
     # Remove the legacy background-agents.ts plugin if an earlier Kurama install
     # left one behind. This is a migration, not a cleanup nicety: the plugin
@@ -1941,6 +2038,10 @@ setup_agent() {
     RECEIPT_ENGRAM_MCP=""
     RECEIPT_PROMPTS=""
     RECEIPT_TUI_PLUGINS=""
+    RECEIPT_OPENCODE_CONFIGS=""
+    RECEIPT_OPENCODE_MODE=""
+    RECEIPT_OPENCODE_PROFILE=""
+    RECEIPT_OPENCODE_PROFILE_MODEL=""
     RECEIPT_DIR=""
 
     # From here on every abort still writes a receipt (see finalize_receipt_on_exit).
@@ -1988,8 +2089,12 @@ setup_agent() {
 
     # Flush the single per-agent receipt (skills + agents + hooks + settings +
     # pi packages + engram MCP) now that every step has recorded its writes.
-    finalize_receipt
+    # Disarm FIRST: with the trap still armed, a finalize_receipt that fails
+    # (unwritable receipt dir, full disk) would re-enter the handler and run the
+    # very same failing write a second time, replacing the real exit status with
+    # the second attempt's.
     trap - EXIT
+    finalize_receipt
 }
 
 # ============================================================================

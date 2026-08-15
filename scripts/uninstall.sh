@@ -74,8 +74,9 @@ get_tool_path() {
 # Emit each string element of a named JSON array (files, settings, pi_packages)
 # from an install manifest. Uses jq when available, otherwise a portable awk
 # fallback that reads the one-element-per-line arrays setup.sh/install.sh write.
-# Mirrors manifest_json_array in doctor.sh/update.sh so every script parses a
-# receipt the same way.
+# Mirrors manifest_json_array in doctor.sh/update.sh/install.sh (and setup.sh's
+# receipt_json_array / setup-tui.sh's copy) so every script parses a receipt the
+# same way.
 #
 # Why the opening rule handles the whole array itself instead of just setting
 # inarr: for a single-line "key": [] the array closes on the line that opened it,
@@ -123,6 +124,32 @@ manifest_json_array() {
 # Back-compat wrapper: the "files" array.
 manifest_files() {
     manifest_json_array "$1" "files"
+}
+
+# Read a manifest scalar field ("tool", "scope", "version").
+manifest_field() {
+    local manifest="$1" key="$2"
+    [ -f "$manifest" ] || return 0
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '.[$k] // ""' "$manifest" 2>/dev/null
+        return 0
+    fi
+    awk -v key="$key" '
+        match($0, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"") {
+            s = substr($0, RSTART, RLENGTH)
+            sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
+        }' "$manifest"
+}
+
+# Every harness recorded in the receipt. A project-scope receipt is shared by
+# every harness installed into that repo, so it lists them all in "tools"; the
+# flat arrays below are the union across them. Receipts written by v6 and by the
+# legacy install.sh have no "tools", so the effective list is the single "tool".
+manifest_tools() {
+    local manifest="$1" tools
+    tools="$(manifest_json_array "$manifest" "tools" | awk 'NF')"
+    [ -n "$tools" ] || tools="$(manifest_field "$manifest" "tool")"
+    printf '%s\n' "$tools"
 }
 
 # O3: surgically strip the Kurama PreToolUse hooks block (entries whose command
@@ -295,6 +322,109 @@ strip_markers_from_prompt() {
     print_ok "stripped kurama orchestrator block from $file"
 }
 
+# #22: strip Kurama's agent block from an opencode.json recorded in the receipt's
+# opencode_configs[]. setup.sh MERGES into that file — it is the user's config,
+# not ours — so removal is surgical: every "sdd-*" key plus the profile's
+# "kurama-orchestrator" go, and every other agent, model choice and top-level key
+# stays. Mirrors the settings.json/tui.json strips: jq only (never sed on JSON),
+# backup + atomic, and a no-op when nothing of ours is registered.
+remove_kurama_agents_from_opencode_config() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+
+    if ! command -v jq >/dev/null 2>&1; then
+        print_warn "jq not found — cannot strip the Kurama agents from $file"
+        print_info "Manually remove the \"sdd-*\" agents (and \"kurama-orchestrator\") under .agent"
+        return 0
+    fi
+    if ! jq -e . "$file" >/dev/null 2>&1; then
+        print_warn "$file is not valid JSON — leaving it untouched"
+        return 0
+    fi
+
+    # Nothing of ours in there → leave the file (and its mtime) alone.
+    jq -e '[((.agent // {}) | keys[])
+        | select(startswith("sdd-") or . == "kurama-orchestrator")]
+        | length > 0' "$file" >/dev/null 2>&1 || return 0
+
+    if $DRY_RUN; then
+        print_info "would strip the Kurama sdd-* agents from: $file"
+        return 0
+    fi
+
+    local cleaned tmp
+    cleaned=$(jq '
+        (.agent // {}) as $a
+        | .agent = ($a | with_entries(select(
+            ((.key | startswith("sdd-")) or (.key == "kurama-orchestrator")) | not)))
+        | if (.agent | length) == 0 then del(.agent) else . end
+    ' "$file") || { print_warn "failed to clean $file"; return 0; }
+    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
+    cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+    printf '%s\n' "$cleaned" > "$tmp"
+    mv "$tmp" "$file"
+    print_ok "stripped the Kurama sdd-* agents from $file"
+}
+
+# Count of artifacts the legacy sweep below removed, added to the target's total
+# so the "N file(s) removed" line stays honest.
+LEGACY_SWEEP_REMOVED=0
+
+# #22: the OpenCode counterpart of the background-agents sweep. Until this
+# release setup.sh recorded NONE of what setup_opencode wrote, so every receipt
+# written before it lists neither the nine /sdd-* command files, nor the global
+# AGENTS.md, nor opencode.json — and uninstall reported "Done." with all twelve
+# still on disk, the commands still routing to agents that no longer existed.
+# Recorded installs are handled by files[]/prompts[]/opencode_configs[] above;
+# this pass is what makes a PRE-EXISTING install removable, and it is a no-op
+# once those records exist.
+sweep_legacy_opencode_artifacts() {
+    local scope="$1"
+    LEGACY_SWEEP_REMOVED=0
+    # The OpenCode flow is global-only (project scope gets the plain orchestrator
+    # merge), so these fixed ~/.config/opencode paths are the only ones it wrote.
+    [ "$scope" = "project" ] && return 0
+
+    local base="$HOME/.config/opencode"
+    local f
+    for f in "$base"/commands/sdd-*.md; do
+        [ -f "$f" ] || continue
+        if $DRY_RUN; then
+            print_info "would remove (unrecorded by this receipt): ${f#"$HOME"/}"
+        else
+            rm -f "$f"
+            print_ok "removed: ${f#"$HOME"/}"
+        fi
+        LEGACY_SWEEP_REMOVED=$((LEGACY_SWEEP_REMOVED + 1))
+    done
+    rmdir "$base/commands" 2>/dev/null || true
+
+    # AGENTS.md. A current install carries the BEGIN:kurama block and is handled
+    # by the prompts[] strip — never touched here. A pre-marker install is the
+    # example file copied whole, which its GENERATED header identifies exactly:
+    # only then is deleting it right, because Kurama wrote every byte of it.
+    local agents_md="$base/AGENTS.md"
+    if [ -f "$agents_md" ] && ! grep -qF "$MARKER_BEGIN" "$agents_md"; then
+        if head -1 "$agents_md" | grep -qF 'GENERATED FILE' \
+            && grep -qF 'Kurama Orchestrator' "$agents_md"; then
+            if $DRY_RUN; then
+                print_info "would remove (unrecorded by this receipt): ${agents_md#"$HOME"/}"
+            else
+                rm -f "$agents_md"
+                print_ok "removed: ${agents_md#"$HOME"/}"
+            fi
+            LEGACY_SWEEP_REMOVED=$((LEGACY_SWEEP_REMOVED + 1))
+        elif grep -qF 'Kurama Orchestrator' "$agents_md"; then
+            print_warn "$agents_md carries orchestrator content with no kurama markers — left in place"
+            print_info "Remove the Kurama section by hand if you no longer want it"
+        fi
+    fi
+
+    # opencode.json: same surgical strip as the recorded path, and a no-op when
+    # the recorded pass already ran.
+    remove_kurama_agents_from_opencode_config "$base/opencode.json"
+}
+
 # O3: offer to revert the Pi packages Kurama installed (recorded in the receipt).
 # Honors --with/--without-pi-packages; otherwise asks interactively (default no,
 # so a shared package set is never removed by surprise). Never touches gentle-pi
@@ -430,6 +560,20 @@ EOF
 $tui_files
 EOF
 
+    # Strip Kurama's sdd-* agent block from every opencode.json the receipt
+    # recorded (opencode_configs[]). Same relative/absolute handling as above.
+    local ofile opencode_configs
+    opencode_configs="$(manifest_json_array "$manifest" "opencode_configs")"
+    while IFS= read -r ofile; do
+        [ -n "$ofile" ] || continue
+        case "$ofile" in
+            /*) remove_kurama_agents_from_opencode_config "$ofile" ;;
+            *)  remove_kurama_agents_from_opencode_config "$dir/$ofile" ;;
+        esac
+    done <<EOF
+$opencode_configs
+EOF
+
     # Remove the legacy background-agents.ts plugin. Older Kurama versions
     # installed it unconditionally; it is no longer shipped (it hangs the
     # OpenCode TUI), so uninstall must clear it even though no receipt lists it.
@@ -437,6 +581,17 @@ EOF
     if [ -f "$legacy_plugin" ]; then
         rm -f "$legacy_plugin"
         print_ok "Removed legacy background-agents plugin: $legacy_plugin"
+    fi
+
+    # Same idea, one release later: an OpenCode receipt written before #22
+    # records none of what setup_opencode wrote. Sweep those artifacts too —
+    # gated on this receipt actually recording opencode, so removing claude-code
+    # never reaches into ~/.config/opencode.
+    local rscope
+    rscope="$(manifest_field "$manifest" "scope")"; [ -n "$rscope" ] || rscope="global"
+    if manifest_tools "$manifest" | grep -Fxq -- opencode; then
+        sweep_legacy_opencode_artifacts "$rscope"
+        removed=$((removed + LEGACY_SWEEP_REMOVED))
     fi
 
     offer_pi_uninstall "$manifest"

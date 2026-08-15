@@ -130,8 +130,9 @@ manifest_field() {
 }
 
 # Emit each element of a flat receipt array — "files", "tools", … (jq or awk
-# fallback). Mirrors manifest_json_array in doctor.sh/uninstall.sh so every
-# script parses a receipt the same way.
+# fallback). Mirrors manifest_json_array in doctor.sh/uninstall.sh/install.sh
+# (and setup.sh's receipt_json_array / setup-tui.sh's copy) so every script
+# parses a receipt the same way.
 #
 # Why the opening rule handles the whole array itself instead of just setting
 # inarr: for a single-line "key": [] the array closes on the line that opened it,
@@ -292,12 +293,37 @@ EOF
     # value is a hard stop — mis-invoking setup.sh would be worse than aborting.
     # Resolve every slug BEFORE installing anything, so a bad entry aborts the
     # target instead of leaving it half re-synced.
+    # The OpenCode install-time choices, recorded by setup.sh since #22. The
+    # re-sync below runs setup.sh --non-interactive, where an unset mode falls
+    # back to "single" and an unset profile to "no" — and the agent merge then
+    # DELETES every sdd-* key it does not re-create. A multi-mode + profile
+    # install re-synced without them went from 20 agents to 1, and because
+    # opencode.json is not in files[] the run still printed "no recorded file
+    # changed". Re-pass them exactly like the --with-logo carry-over.
+    local oc_mode oc_profile
+    oc_mode="$(manifest_field "$manifest" "opencode_mode")"
+    oc_profile="$(manifest_field "$manifest" "opencode_profile")"
+
     local tool slug; local -a slugs=()
     while IFS= read -r tool; do
         [ -n "$tool" ] || continue
         slug="$(tool_to_slug "$tool")"
         if [ -z "$slug" ]; then
             fail "Unrecognized tool in receipt: '$tool' — cannot re-sync $receipt_dir"
+            rm -f "$hashfile"
+            return 1
+        fi
+        # A receipt written before #22 (or by install.sh) records no mode. Guessing
+        # one silently downgrades the install, so refuse the target instead and say
+        # exactly how to make it re-syncable. Project scope never runs the OpenCode
+        # flow (setup_agent routes it to the plain orchestrator merge), so no mode
+        # is expected there.
+        if [ "$slug" = "opencode" ] && [ "$rscope" != "project" ] && [ -z "$oc_mode" ]; then
+            fail "This OpenCode receipt records no agent mode — refusing to re-sync $receipt_dir"
+            info "Re-syncing without it would reset the install to single mode and delete every"
+            info "sdd-* agent a multi-mode or profile install added."
+            info "Re-run setup once with the mode you use, then update.sh works again:"
+            info "  $SETUP_SCRIPT --agent opencode --opencode-mode single|multi [--opencode-profile NAME]"
             rm -f "$hashfile"
             return 1
         fi
@@ -331,6 +357,19 @@ EOF
         # Carry an installed startup logo across the re-sync (opt-in in setup.sh).
         if $with_logo; then
             args+=(--with-logo)
+        fi
+        # Carry the recorded OpenCode mode + profile (#22). The profile is passed
+        # in its BARE form on purpose: "NAME:provider/model" is documented as an
+        # explicit choice for THAT run and overrides hand-edited models, so
+        # re-passing the recorded model would revert the user's own model edits on
+        # every update. Bare NAME re-installs the profile and restores the models
+        # currently in the config. "no" means the install has no profile — passing
+        # it would create one literally named "no".
+        if [ "$slug" = "opencode" ] && [ "$rscope" != "project" ]; then
+            args+=(--opencode-mode "$oc_mode")
+            if [ -n "$oc_profile" ] && [ "$oc_profile" != "no" ]; then
+                args+=(--opencode-profile "$oc_profile")
+            fi
         fi
         if ! bash "$SETUP_SCRIPT" "${args[@]}" >/dev/null 2>&1; then
             fail "Re-sync failed for $slug ($rscope)"

@@ -105,6 +105,11 @@ yourself, use the installer scripts and then append the orchestrator prompt from
 ./scripts/install.sh        # interactive menu, or: --agent <name>
 ```
 
+It is not a drop-in replacement for `setup.sh`: on a target `setup.sh` already
+manages, `install.sh` refuses and points you at `./scripts/update.sh`, rather
+than overwriting a receipt that records hooks, agents and orchestrator blocks it
+never wrote.
+
 Then, inside your project:
 
 ```text
