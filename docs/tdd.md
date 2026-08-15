@@ -1,7 +1,7 @@
 # TDD Module (optional)
 
 Test-Driven Development in Kurama is an **optional module**. The module now
-**installs by default** (remove it from disk with `--without tdd`), but activation
+**installs by default** (remove it from disk with `install.sh --without tdd`), but activation
 is **opt-in per project** — the cycle stays OFF until you explicitly enable it, and
 nothing infers it from existing test files. When enabled for a project, it hooks
 into three SDD phases — `sdd-tasks` plans the cycle, `sdd-apply` executes it, and
@@ -155,9 +155,10 @@ Two independent things, easy to conflate:
 - **Installing the module** puts `skills/tdd/SKILL.md` on disk. The `tdd` group in
   [skills/manifest.json](../skills/manifest.json) is now **installed by default** —
   `setup.sh` and `install.sh` both include it in the
-  default set. Remove it with `--without tdd` if you never want the module on disk.
-  (The language-pattern plugins like `go-testing` live in the separate opt-in `lang`
-  group.)
+  default set. Remove it with `install.sh --without tdd` if you never want the module
+  on disk — module selection is an `install.sh` flag; `setup.sh` has no `--without`
+  and rejects it. (The language-pattern plugins like `go-testing` live in the separate
+  opt-in `lang` group.)
 - **Activating TDD** turns the RED → GREEN → REFACTOR cycle on for a *specific
   project* via the explicit `tdd.enabled` flag above. Installing the module never
   activates it; the flag starts `false` everywhere, and existing test files never

@@ -53,16 +53,20 @@ Two flags control **where** it installs:
 | `--scope project` | install **everything into one git repo** to trial Kurama there — skills, native agents, hooks, and the orchestrator merge all land under the repo (see [Install scope](#install-scope-global-vs-project-trial-a-repo)). |
 | `--path <repo>` | the target repo for `--scope project` (default: current directory). |
 
-The default skill set installs **24 skills**, including two optional modules that
-ship on disk but stay inert until you opt in per project: the TDD module
-(`skills/tdd`) and the GitHub Projects Kanban module (`skills/kanban-github`). Pass
-`--without tdd` to exclude the TDD module (23 skills), or `--without optional` to
-exclude the `optional` group — `kanban-github` (23 skills). Per-language pattern
-skills live in the opt-in `lang` group, OFF by default: add them with
-`--with lang` (25 skills). Kurama is stack-agnostic, so a default install ships
-no language-specific knowledge.
+`setup.sh` installs the **default skill set — 24 skills**, including two optional
+modules that ship on disk but stay inert until you opt in per project: the TDD module
+(`skills/tdd`) and the GitHub Projects Kanban module (`skills/kanban-github`).
 Installing a module never activates it — activation is a separate explicit
 per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban-github.md)).
+
+> **Changing the skill selection is `install.sh`'s job, not `setup.sh`'s.**
+> `--with`/`--without` are implemented by `scripts/install.sh` only; `setup.sh` has no
+> module flags and exits `Unknown option: --without` if you pass one. With
+> `install.sh`: `--without tdd` excludes the TDD module (23 skills), `--without optional`
+> excludes the `optional` group — `kanban-github` (23 skills), and `--with lang` adds the
+> per-language pattern skills, OFF by default (25 skills). Kurama is stack-agnostic, so a
+> default install ships no language-specific knowledge. `install.sh` copies skills only,
+> so you wire the orchestrator prompt yourself afterwards.
 
 > **`gh` prerequisite (only to activate the Kanban module).** The optional Kanban
 > board sync requires a configured GitHub CLI — `gh` installed, authenticated, and
@@ -111,7 +115,21 @@ Where project scope writes, per harness:
 |---------|--------|---------------|--------------|-------|---------|
 | Claude Code | `<repo>/.claude/skills/` | `<repo>/.claude/agents/` | `<repo>/CLAUDE.md` (marker merge) | `<repo>/.claude/hooks/kurama/` + `<repo>/.claude/settings.json` | `<repo>/.kurama-install-manifest.json` |
 | Pi | `<repo>/.pi/skills/` | `<repo>/.pi/agents/` | `<repo>/AGENTS.md` (marker merge) | — | `<repo>/.kurama-install-manifest.json` |
-| Others | `<repo>/.claude/skills/` | — | `<repo>/CLAUDE.md` (best-effort) | — | `<repo>/.kurama-install-manifest.json` |
+| omp | `<repo>/.omp/skills/` | `<repo>/.omp/agents/` | `<repo>/.omp/AGENTS.md` (marker merge) + `<repo>/.omp/RULES.md` (replaced whole) | — | `<repo>/.kurama-install-manifest.json` |
+| OpenCode | `<repo>/.claude/skills/` | — | `<repo>/AGENTS.md` (marker merge) | — | `<repo>/.kurama-install-manifest.json` |
+| Codex | `<repo>/.claude/skills/` | — | `<repo>/CLAUDE.md` (best-effort) | — | `<repo>/.kurama-install-manifest.json` |
+
+> **omp keeps its own root in project scope too.** Everything lands under
+> `<repo>/.omp/` — including `AGENTS.md`, because omp's `native` provider reads the
+> nearest `.omp/AGENTS.md` and outranks a bare repo-root `AGENTS.md`. `RULES.md` is the
+> one file that is **not** marker-merged (omp has no convention for partial rule files):
+> a pre-existing one is backed up and replaced whole, and recorded in the receipt.
+>
+> **OpenCode's dedicated flow is global-only.** In project scope OpenCode gets skills,
+> a receipt, and a generic orchestrator merge into `<repo>/AGENTS.md` — but **not** the
+> `/sdd-*` commands, the `opencode.json` agent block, or the single/multi mode and
+> profile handling, all of which write to `~/.config/opencode/`. Install OpenCode
+> globally (`--scope global`, the default) to get those.
 
 The install **receipt** (`.kurama-install-manifest.json`) lands at the **repo
 root** for project scope (in the skills dir for global scope), and records the
@@ -180,8 +198,20 @@ Codex's TOML), backup + atomic, leaving every other MCP server and key intact.
 **1. Copy skills:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.claude/skills/
+cp -r skills/_shared \
+      skills/sdd-* skills/review-* \
+      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/judgment-day skills/tdd skills/kanban-github \
+      ~/.claude/skills/
 ```
+
+> That is the full **24-skill default set** (12 `sdd-*`, the 5 `review-*` lenses,
+> `skill-registry`, `skill-creator`, `branch-pr`, `issue-creation`, `judgment-day`,
+> `tdd`, `kanban-github`). Copy all of them: omitting the `review-*` lenses leaves the
+> orchestrator's review triage with nothing to select, and omitting `tdd`/`kanban-github`
+> breaks the phases that resolve them. `skills/go-testing` is deliberately **not** in the
+> list — it is the opt-in `lang` group. `skills/manifest.json` is installer metadata, not
+> a skill.
 
 **2. Add orchestrator to `~/.claude/CLAUDE.md`:**
 
@@ -264,12 +294,12 @@ OpenCode ships two real modes, and they differ in agent structure, not just mode
 
 | | `opencode.single.json` | `opencode.multi.json` |
 |---|---|---|
-| **Agent structure** | Orchestrator agent only — every SDD phase runs as a subtask of the orchestrator | Orchestrator + one dedicated `sdd-<phase>` agent per SDD phase |
+| **Agent structure** | **Exactly one agent** — `sdd-orchestrator`; every SDD phase runs as a `general` subtask of it | Orchestrator + one dedicated `sdd-<phase>` agent per SDD phase (10 agents) |
 | **Use case** | Ready to use as-is, one model for everything | Per-phase model customization |
 | **Models** | Orchestrator's model only; subtasks inherit it | Add `"model"` fields to each phase agent |
-| **Delegation** | Native `task` tool | Native `task` tool |
+| **Delegation** | Native `task` tool, `permission.task` limited to `general` | Native `task` tool |
 
-Executor slash commands (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`) route to `agent: sdd-<phase>` — never to `sdd-orchestrator` — so each phase runs in the agent (and, in multi mode, the model) configured for it. The three workflow commands (`sdd-new`, `sdd-continue`, `sdd-ff`) stay routed to `sdd-orchestrator`, since they coordinate multiple phases rather than executing one.
+The five executor slash commands (`sdd-init`, `sdd-explore`, `sdd-apply`, `sdd-verify`, `sdd-archive`) carry `agent: sdd-<phase>` in their frontmatter — never `sdd-orchestrator` — so in **multi** mode each phase runs in the agent, and the model, configured for it. In **single** mode those `sdd-<phase>` agent entries do not exist (see the mode table above); the phase work happens as a `general` subtask of the one orchestrator agent. The four workflow commands (`sdd-new`, `sdd-continue`, `sdd-ff`, `sdd-status`) stay routed to `sdd-orchestrator` in both modes, since they coordinate multiple phases rather than executing one.
 
 ```bash
 ./scripts/setup.sh --agent opencode                        # Interactive (asks which mode)
@@ -333,10 +363,26 @@ The setup script preserves your model choices across updates — re-running `set
 **1. Copy skills and commands:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.config/opencode/skills/
+cp -r skills/_shared \
+      skills/sdd-* skills/review-* \
+      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/judgment-day skills/tdd skills/kanban-github \
+      ~/.config/opencode/skills/
 cp examples/opencode/commands/sdd-*.md ~/.config/opencode/commands/
 cp examples/opencode/AGENTS.md ~/.config/opencode/AGENTS.md
 ```
+
+> Same **24-skill default set** as above (see the note in the Claude Code section).
+>
+> **The `AGENTS.md` copy is the one step `setup.sh` does differently.** `setup.sh`
+> **marker-merges** that file: it backs up any existing `~/.config/opencode/AGENTS.md`,
+> injects only the `## Kurama` section onward between `<!-- BEGIN:kurama -->` /
+> `<!-- END:kurama -->`, and records it in the receipt — so `update.sh` can re-sync the
+> block and `uninstall.sh` can strip exactly it. A plain `cp` writes the whole example
+> over your file with no markers and no receipt, so `doctor.sh` reports
+> `orchestrator present but unmarked` and neither `update.sh` nor `uninstall.sh` can
+> manage it. Re-running `setup.sh --agent opencode` converts a manual copy back into a
+> marker-merged, updatable block (backing your file up first).
 
 **2. Add orchestrator agent to `~/.config/opencode/opencode.json`:**
 
@@ -346,7 +392,9 @@ Merge the `agent` block from the config template into your existing config:
 
 The OpenCode examples now reference `~/.config/opencode/AGENTS.md` via `"prompt": "{file:./AGENTS.md}"`, so copy that file too.
 
-The `agent:` field in the five executor commands (`sdd-init.md`, `sdd-explore.md`, `sdd-apply.md`, `sdd-verify.md`, `sdd-archive.md`) must point to the corresponding `sdd-<phase>` agent, not `sdd-orchestrator` — this applies in both modes, since single mode's `sdd-<phase>` entries are subtask wrappers around the orchestrator rather than dedicated agents. The other three commands in `examples/opencode/commands/` (`sdd-new.md`, `sdd-continue.md`, `sdd-ff.md`) are workflow commands that coordinate multiple phases; leave their `agent:` field as `sdd-orchestrator`.
+In **multi** mode the `agent:` field in the five executor commands (`sdd-init.md`, `sdd-explore.md`, `sdd-apply.md`, `sdd-verify.md`, `sdd-archive.md`) points to the corresponding dedicated `sdd-<phase>` agent, not `sdd-orchestrator`, so each phase runs on the model configured for it. The workflow commands in `examples/opencode/commands/` (`sdd-new.md`, `sdd-continue.md`, `sdd-ff.md`, `sdd-status.md`) coordinate multiple phases rather than executing one; leave their `agent:` field as `sdd-orchestrator`.
+
+In **single** mode there are no `sdd-<phase>` agents to point at: `opencode.single.json` defines exactly **one** agent, `sdd-orchestrator`, and its `permission.task` block denies every named subagent except the built-in `general` one. Phases therefore run as `general` subtasks of that single orchestrator, inheriting its model. `setup.sh` copies the command files unchanged in single mode, so their `agent:` fields still read `sdd-<phase>` even though the config defines only `sdd-orchestrator`; mirror that if you install by hand, and use `--opencode-mode multi` when you want each phase to resolve to its own agent and model.
 
 </details>
 
@@ -368,8 +416,14 @@ The `agent:` field in the five executor commands (`sdd-init.md`, `sdd-explore.md
 **1. Copy skills:**
 
 ```bash
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation ~/.codex/skills/
+cp -r skills/_shared \
+      skills/sdd-* skills/review-* \
+      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/judgment-day skills/tdd skills/kanban-github \
+      ~/.codex/skills/
 ```
+
+> Same **24-skill default set** as above (see the note in the Claude Code section).
 
 **2. Add orchestrator instructions:**
 
@@ -389,7 +443,11 @@ that project's `.agents/skills/` yourself:
 
 ```bash
 mkdir -p .agents/skills
-cp -r skills/_shared skills/sdd-* skills/skill-registry skills/judgment-day skills/skill-creator skills/branch-pr skills/issue-creation .agents/skills/
+cp -r skills/_shared \
+      skills/sdd-* skills/review-* \
+      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/judgment-day skills/tdd skills/kanban-github \
+      .agents/skills/
 ```
 
 `setup.sh`/`install.sh` do not write to `.agents/skills/` — `~/.codex/skills`
@@ -659,6 +717,10 @@ would delete every `sdd-*` agent a multi-mode or profile install added.
 ./scripts/update.sh --scope project --path /repo # a project-scope install
 ./scripts/update.sh --agent pi --dry-run         # report drift, change nothing
 ```
+
+Because `update.sh` re-syncs from **whatever checkout it runs from** and never pulls,
+the same command is also the rollback path: `git checkout <tag> && ./scripts/update.sh`.
+See [Rolling back to an earlier version](migration.md#rolling-back-to-an-earlier-version).
 
 **`doctor.sh` — read-only health check.** Touches nothing; prints a green/red
 line per check and exits non-zero on any hard failure. It verifies: the receipt

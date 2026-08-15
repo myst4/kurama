@@ -5,6 +5,56 @@ stabilization work (Phases 1-8). For what changed and when, see
 [docs/changelog.md](changelog.md). For the persistence contract itself, see
 [docs/persistence.md](persistence.md).
 
+## Rolling back to an earlier version
+
+A bad release is recoverable with the tools already in the repo — there is no
+downgrade command to learn. `update.sh` re-syncs every recorded install from **the
+checkout it runs from**, and it never pulls, fetches, or otherwise mutates your clone
+(it runs no network command at all). So rolling back is *checkout the old tag, then
+update*:
+
+```bash
+cd /path/to/kurama
+git fetch --tags
+git checkout v5.0.0            # any tag or commit you want to go back to
+./scripts/update.sh --dry-run  # report what would change, write nothing
+./scripts/update.sh            # re-sync every global receipt from THAT checkout
+./scripts/doctor.sh            # confirm receipts, markers, hooks, version
+```
+
+Both scripts take `--agent <name>` to roll back a single target and
+`--scope project --path <repo>` for a per-repo install.
+
+**What it does.** Re-copies skills, native agents, hooks, and the orchestrator
+marker-merge from the checked-out tag, then re-stamps each receipt's version and
+commit — so `doctor.sh` stops reporting a version mismatch and the install matches
+the code you rolled back to.
+
+**What it does not do.**
+
+- It does not roll back your **SDD artifacts**. `openspec/` and `.kurama/` are project
+  data, versioned by your project's own git history, not by Kurama's.
+- It does not **delete** files a newer version added. `update.sh` re-runs the
+  idempotent installer; it does not diff-and-prune. If the version you are leaving
+  installed a file the older one never had — a skill that did not exist yet, an extra
+  native agent — that file stays on disk. For a clean slate, run
+  `./scripts/uninstall.sh` (on the *newer* checkout, so it removes exactly what the
+  newer receipt records) and then `./scripts/setup.sh` from the old one.
+- It does not re-install the Pi package stack, and it never touches your clone's git
+  state beyond the checkout you performed yourself.
+
+**Two guards to expect.**
+
+- You are running the **old** `update.sh` and the **old** `setup.sh`, and each re-sync
+  rewrites the receipt. Receipt fields a newer version introduced are not understood by
+  the older scripts and can be dropped from the rewritten receipt; re-running the newer
+  `setup.sh` restores them.
+- A global **OpenCode** receipt that records no agent mode is *refused* rather than
+  re-synced — guessing would reset a multi-mode or profile install to single mode and
+  delete its `sdd-*` agents. Other targets still update; the message prints the exact
+  `setup.sh --agent opencode --opencode-mode …` command that makes the receipt
+  re-syncable.
+
 ## Breaking change: Windows is no longer supported
 
 Kurama runs on **macOS and Linux**. `scripts/setup.ps1` and `scripts/install.ps1`
@@ -336,7 +386,7 @@ planned after TDD is enabled for the project.
 
 ### Generated example orchestrators (new editing workflow)
 
-The seven per-harness orchestrator files under `examples/` are now
+The per-harness orchestrator files under `examples/` are now
 **generated** from `examples/_templates/core.md` (the shared orchestrator
 body, including the TDD section and the canonical 6-field Result Contract)
 plus one `{harness}.md` overlay per harness holding only that harness's

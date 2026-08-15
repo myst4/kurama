@@ -4,7 +4,7 @@
 
 **A lightweight, multi-harness Spec-Driven Development framework for AI coding agents.**
 
-24 pure-Markdown skills · 9 supported harnesses · zero runtime, zero dependencies
+24 pure-Markdown skills · 5 supported harnesses · zero runtime, zero dependencies
 
 </div>
 
@@ -15,8 +15,9 @@
 Kurama turns any capable AI coding assistant into a disciplined
 **Spec-Driven Development (SDD)** team. It ships as **24 portable Markdown skills**
 (all installed by default — the optional `tdd` and `kanban-github` modules are included but
-removable with `--without tdd` / `--without optional`) plus a set of shared convention
-files, and a thin
+removable with `install.sh --without tdd` / `install.sh --without optional`; module
+selection is an `install.sh` flag, `setup.sh` always installs the default set)
+plus a set of shared convention files, and a thin
 *delegate-only orchestrator* prompt. The orchestrator never writes code itself — it coordinates a pipeline of
 focused sub-agents, each running in a **fresh context window**, that explore,
 specify, design, implement, and verify a change.
@@ -132,13 +133,19 @@ skills, agents, hooks, and MCP registrations included.
 
 All 24 default skills, grouped by role. Every one is a single `SKILL.md` that any
 file-reading agent can load. The optional `tdd` and `kanban-github` modules ship
-installed and can be excluded with `--without tdd` / `--without optional`; installing
-either never activates it — both stay separate per-project switches.
+installed and can be excluded with `install.sh --without tdd` /
+`install.sh --without optional`; installing either never activates it — both stay
+separate per-project switches.
+
+> **Module selection is an `install.sh` flag.** `--with`/`--without` are implemented
+> by `scripts/install.sh` only. `scripts/setup.sh` always installs the **default**
+> skill set and rejects those flags with `Unknown option`. Use `install.sh` when you
+> want a non-default skill selection, then wire the orchestrator prompt yourself.
 
 **No language knowledge is installed by default.** Kurama is stack-agnostic: it knows
 the shape of the workflow, never the values of a specific ecosystem. Per-language
-pattern skills live in the opt-in `lang` group (OFF by default; `--with lang` adds
-`go-testing`), and your own language skills reach sub-agents through the
+pattern skills live in the opt-in `lang` group (OFF by default; `install.sh --with lang`
+adds `go-testing`), and your own language skills reach sub-agents through the
 [skill registry](#the-skills) without touching the harness. The project's test and
 build commands are **asked at `/sdd-init`** and recorded in config — never guessed from
 a list of supported stacks, so any ecosystem works, including one Kurama has never
@@ -202,13 +209,13 @@ by the diff can block, and only `BLOCKER`/`CRITICAL` gate. See
 
 | Skill | Role |
 |-------|------|
-| `tdd` | Language-agnostic RED → GREEN → REFACTOR contract, anti-patterns, and per-task evidence format. Installed by default; remove the module with `--without tdd`. Installing it never activates TDD — that is a separate explicit per-project switch (see [docs/tdd.md](docs/tdd.md)). |
+| `tdd` | Language-agnostic RED → GREEN → REFACTOR contract, anti-patterns, and per-task evidence format. Installed by default; remove the module with `install.sh --without tdd`. Installing it never activates TDD — that is a separate explicit per-project switch (see [docs/tdd.md](docs/tdd.md)). |
 
 ### Kanban module (installed by default, activation opt-in)
 
 | Skill | Role |
 |-------|------|
-| `kanban-github` | Optional GitHub Projects (v2) board sync: each issue the harness works on is a card the orchestrator moves through Backlog → Ready → In Progress → In Review → Done as the SDD cycle crosses phase boundaries. Installed by default (manifest group `optional`; remove with `--without optional`). Installing it never activates the board — activation is opt-in per project via `kanban.enabled`, and **requires a configured GitHub CLI (`gh`)** to turn on. Failed board updates are WARNINGs that never block the cycle. See [docs/kanban-github.md](docs/kanban-github.md). |
+| `kanban-github` | Optional GitHub Projects (v2) board sync: each issue the harness works on is a card the orchestrator moves through Backlog → Ready → In Progress → In Review → Done as the SDD cycle crosses phase boundaries. Installed by default (manifest group `optional`; remove with `install.sh --without optional`). Installing it never activates the board — activation is opt-in per project via `kanban.enabled`, and **requires a configured GitHub CLI (`gh`)** to turn on. Failed board updates are WARNINGs that never block the cycle. See [docs/kanban-github.md](docs/kanban-github.md). |
 
 Shared behavior the SDD skills rely on lives in
 [`skills/_shared/`](skills/_shared/) — the persistence contract, the Engram and
@@ -226,10 +233,14 @@ project in every mode.
 | `engram` | Persistent memory via [Engram](https://github.com/gentleman-programming/engram); survives compaction and cross-session recovery. Default when Engram is available. |
 | `openspec` | Human-readable files under `openspec/`, version-controllable with the repo. |
 | `hybrid` | Both Engram and the filesystem, written simultaneously (higher token cost). |
-| `none` | Nowhere — artifacts are returned inline in the orchestrator context. Default fallback when no backend is available. |
 
-`openspec` and `hybrid` are never selected automatically — the orchestrator must
-pass them explicitly. See [docs/persistence.md](docs/persistence.md).
+Those three are the whole enum. `openspec` and `hybrid` are never selected
+automatically — the orchestrator must pass them explicitly. When Engram is
+unreachable the default degrades to the `.kurama/sdd/` markdown fallback;
+**persistence is never skipped**. The removed `none` mode (persist nothing, return
+artifacts inline) is no longer valid: a resolved `none` is reported as unsupported
+and `openspec` named as its replacement. See
+[docs/persistence.md](docs/persistence.md).
 
 ## Supported harnesses
 
@@ -239,10 +250,17 @@ exposes. "Full" means true sub-agents with isolated, fresh context windows.
 | Harness | Sub-agent support | Setup |
 |---------|:-----------------:|-------|
 | Claude Code | Full (Task tool, fresh-context sub-agents) | `setup.sh --agent claude-code` |
-| OpenCode | Full (native phase agents + async `delegate`) | `setup.sh --agent opencode` |
+| OpenCode | Full (native phase agents via the built-in `task` tool, which blocks) | `setup.sh --agent opencode` |
 | Codex | Inline (skills load as instructions) | `setup.sh --agent codex` |
 | Pi | Inline (skills load as instructions) | `setup.sh --agent pi` (global `~/.pi/agent/AGENTS.md`; see installation guide) |
 | omp | Full (native task agents, isolated per-phase contexts) | `setup.sh --agent omp` (global `~/.omp/agent/`; see installation guide) |
+
+> **OpenCode delegation is synchronous.** Kurama no longer ships the
+> `background-agents.ts` plugin, so there is no async `delegate` tool: both OpenCode
+> modes delegate through the native `task` tool, which blocks until the sub-agent
+> returns. For background sub-agents, export OpenCode's own experimental switch
+> (`OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`) before launching it — see
+> [docs/sub-agents.md](docs/sub-agents.md).
 
 Harness-specific extras land through the same setup command. On **Claude Code**,
 `setup.sh --agent claude-code` also installs all **17 native subagents** (the 9 SDD
@@ -269,7 +287,7 @@ inline. All are detailed in [docs/installation.md](docs/installation.md).
 - [docs/concepts.md](docs/concepts.md) — delta specs, RFC 2119 keywords, the archive cycle.
 - [docs/architecture.md](docs/architecture.md) — orchestration model, the phase DAG, and the result contract.
 - [docs/sub-agents.md](docs/sub-agents.md) — how phases run as sub-agents and share conventions.
-- [docs/persistence.md](docs/persistence.md) — the four artifact store modes in depth.
+- [docs/persistence.md](docs/persistence.md) — the three artifact store modes in depth.
 - [docs/kanban-github.md](docs/kanban-github.md) — the optional GitHub Projects board sync module.
 - [docs/opencode-profiles.md](docs/opencode-profiles.md) — named model profiles for the OpenCode integration.
 - [docs/companion-skills.md](docs/companion-skills.md) — optional pairings with external process skills like superpowers.
@@ -316,7 +334,7 @@ automated PR checks.
 
 Kurama is **actively maintained** as the standalone, lightweight
 multi-harness SDD framework — the pure-Markdown, zero-dependency way to install
-these skills into any of the eight supported agents.
+these skills into any of the five supported agents.
 
 [`gentle-ai`](https://github.com/Gentleman-Programming/gentle-ai) is a separate,
 higher-level distribution: a managed installer (Go binary) that bundles these

@@ -17,10 +17,10 @@ Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI ass
 | **Implementer** | `sdd-apply/SKILL.md` | Writes code following specs and design, marks tasks complete. v2.0: TDD workflow support |
 | **Verifier** | `sdd-verify/SKILL.md` | Validates implementation against specs with real test execution. v2.0: spec compliance matrix |
 | **Archiver** | `sdd-archive/SKILL.md` | Merges delta specs into main specs, moves to archive |
-| **TDD Module** | `tdd/SKILL.md` | Optional RED-GREEN-REFACTOR cycle contract; loaded by `sdd-apply` when TDD resolves active, referenced by `sdd-tasks` and `sdd-verify`. Installed by default (`tdd` manifest group, `default: true`); activation stays opt-in per project — opt out of the module with `--without tdd` |
+| **TDD Module** | `tdd/SKILL.md` | Optional RED-GREEN-REFACTOR cycle contract; loaded by `sdd-apply` when TDD resolves active, referenced by `sdd-tasks` and `sdd-verify`. Installed by default (`tdd` manifest group, `default: true`); activation stays opt-in per project — opt out of the module with `install.sh --without tdd` |
 | **Skill Registry** | `skill-registry/SKILL.md` | Scans user skills + project conventions, writes `.kurama/skill-registry.md` |
 | **Judgment Day** | `judgment-day/SKILL.md` | Runs dual adversarial review with two blind judges and a fix loop |
-| **Go Testing** | `go-testing/SKILL.md` | Go test conventions, including Bubbletea and teatest patterns. `lang` group, OFF by default — opt in with `--with lang` |
+| **Go Testing** | `go-testing/SKILL.md` | Go test conventions, including Bubbletea and teatest patterns. `lang` group, OFF by default — opt in with `install.sh --with lang` |
 | **Skill Creator** | `skill-creator/SKILL.md` | Creates new reusable skills following the project skill spec |
 | **Branch + PR** | `branch-pr/SKILL.md` | Branches changes and opens pull requests with repo conventions |
 | **Issue Creation** | `issue-creation/SKILL.md` | Creates GitHub issues with the repo's structured templates |
@@ -55,7 +55,7 @@ Sub-agents are also instructed to save discoveries, decisions, and bug fixes to 
 
 ## Shared Conventions
 
-`skills/_shared/` contains seven files. `sdd-phase-common.md` is loaded directly by all 8 SDD phase skills (explore through archive) — it is the most load-bearing shared file in the system. Critical engram calls (`mem_search`, `mem_save`, `mem_get_observation`) are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
+`skills/_shared/` contains eight files. `sdd-phase-common.md` is loaded directly by all 8 SDD phase skills (explore through archive) — it is the most load-bearing shared file in the system. Critical engram calls (`mem_search`, `mem_save`, `mem_get_observation`) are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
 
 | File | Purpose |
 |------|---------|

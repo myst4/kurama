@@ -186,9 +186,9 @@ kurama/
 │   ├── sdd-archive/SKILL.md
 │   ├── skill-registry/SKILL.md       ← Scans skills + conventions, writes .kurama/skill-registry.md
 │   ├── judgment-day/SKILL.md         ← Dual blind review + fix loop
-│   ├── go-testing/SKILL.md           ← Go test patterns (`lang` group, OFF by default — opt in with `--with lang`)
+│   ├── go-testing/SKILL.md           ← Go test patterns (`lang` group, OFF by default — opt in with `install.sh --with lang`)
 │   ├── skill-creator/SKILL.md        ← Creates new skills from templates
-│   ├── tdd/SKILL.md                  ← RED-GREEN-REFACTOR module (`tdd` group, installed by default; activation stays opt-in per project — opt out with `--without tdd`)
+│   ├── tdd/SKILL.md                  ← RED-GREEN-REFACTOR module (`tdd` group, installed by default; activation stays opt-in per project — opt out with `install.sh --without tdd`)
 │   ├── issue-creation/SKILL.md       ← GitHub issue creation workflow
 │   └── branch-pr/SKILL.md            ← Branch + pull request workflow
 ├── docs/                              ← Deep-dive documentation
