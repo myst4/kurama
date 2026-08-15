@@ -212,8 +212,7 @@ kurama/
 │   │   ├── AGENTS.md                  ← OpenCode orchestrator prompt referenced by config
 │   │   ├── opencode.single.json       ← Orchestrator agent only; phases run as subtasks
 │   │   ├── opencode.multi.json        ← Orchestrator + dedicated sdd-<phase> agents, model customizable per phase
-│   │   ├── commands/sdd-*.md          ← Slash commands for OpenCode
-│   │   └── plugins/background-agents.ts ← Async background delegation plugin (both modes)
+│   │   └── commands/sdd-*.md          ← Slash commands for OpenCode
 │   ├── codex/agents.md
 │   └── omp/
 │       ├── AGENTS.md                  ← GENERATED — omp orchestrator context (native provider, highest priority)

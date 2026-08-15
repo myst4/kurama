@@ -288,7 +288,14 @@ To assign different models per phase, edit `~/.config/opencode/opencode.json` an
 
 The format is `"provider/model-id"` — check your available models at `~/.cache/opencode/models.json`. Common providers: `anthropic`, `openai`, `google`, `openrouter`. Agents without a `model` field inherit the default model.
 
-Both modes install the `background-agents` plugin (`examples/opencode/plugins/background-agents.ts`), which enables async sub-agent delegation. Use `delegate` to run sub-agents in the background (non-blocking) while the orchestrator continues other work; use `task` to block until the sub-agent completes.
+Both modes run sub-agent delegation on OpenCode's native `task` tool, which blocks until the sub-agent completes.
+
+> **Background execution.** Kurama no longer ships the `background-agents.ts` plugin — it is third-party code that was observed hanging the OpenCode TUI at startup, and OpenCode now covers the feature itself. To opt into background sub-agents, export OpenCode's own experimental switch in your shell before launching it:
+>
+> ```sh
+> export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
+> opencode
+> ```
 
 #### Kurama startup logo (opt-in)
 
