@@ -3160,7 +3160,11 @@ make_nojq_farm() {
     local bindir="$1"
     mkdir -p "$bindir"
     local tool p
-    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date chmod rm rmdir ls awk sed tr wc find mktemp sort head tail printf test touch ln cut diff git python3; do
+    # shasum/sha1sum/cksum are doctor.sh's drift hashers. They are core tools on
+    # any real box; leaving them out would make doctor compare two empty hashes
+    # and report "no drift" without ever having looked — an absence that has
+    # nothing to do with jq, which is the only thing this farm exists to remove.
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date chmod rm rmdir ls awk sed tr wc find mktemp sort head tail printf test touch ln cut diff git python3 shasum sha1sum cksum; do
         p="$(command -v "$tool" 2>/dev/null)" || continue
         ln -sf "$p" "$bindir/$tool"
     done
@@ -3388,6 +3392,162 @@ test_nojq_receipt_parser_ignores_single_line_empty_array() {
         printf '%s\n' "$output" | grep -a 'would remove:\|file(s) would be removed'
         return 1
     }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# #31: a jq-less install must be HEALTHY, not merely exit 0.
+#
+# The four cases above asserted "it installs". None asked the shipped health
+# check what it thought of the result — and the answer was a hard FAILURE:
+# setup.sh degrades honestly (loud warning, printed manual hook steps, and a
+# receipt that records no settings write it never made), then doctor.sh graded
+# that same install red over the hooks block setup had deliberately not written.
+# One of the two had to be wrong. The verdict: an honest, documented degradation
+# is a WARNING carrying its remedy; a receipt that CLAIMS a write which is not
+# there stays a hard FAILURE. Both directions are pinned — a doctor that warned
+# unconditionally would pass the second case and be useless.
+# ---------------------------------------------------------------------------
+
+test_nojq_doctor_grades_the_documented_degradation_a_warning() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    local repo="$TEST_TMPDIR/nojq-proj"
+    make_git_repo "$repo"
+
+    local status=0
+    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "a jq-less install must still complete" || return 1
+
+    # Preconditions — this is the honest-degradation shape, not a broken install:
+    # the hook scripts really are on disk, no settings.json was written, and the
+    # receipt claims neither more nor less than that.
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    assert_file_exists "$repo/.claude/hooks/kurama/archive-gate.sh" || return 1
+    if [ -f "$repo/.claude/settings.json" ]; then
+        echo "precondition: a jq-less run must write no settings.json"; return 1
+    fi
+    if grep -q 'settings.json' "$manifest"; then
+        echo "precondition: the receipt must claim no settings write"; return 1
+    fi
+
+    local output dstatus=0
+    output=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || dstatus=$?
+    if [ "$dstatus" -ne 0 ]; then
+        echo "doctor exited $dstatus over an install it had no evidence was broken:"
+        printf '%s\n' "$output" | grep -a '✗' | head -5
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -aq 'hook scripts present' || {
+        echo "doctor never confirmed the hook scripts a jq-less install DOES write"; return 1; }
+    # The warning has to carry the way out, or it is just a quieter dead end.
+    printf '%s\n' "$output" | grep -aqi 'jq' || {
+        echo "the warning never mentions jq — the user cannot tell what degraded"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'warning(s)' || {
+        echo "the degradation was not reported as a warning at all:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    return 0
+}
+
+test_doctor_fails_when_the_receipt_claims_an_unregistered_hooks_write() {
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    # jq present: setup registers the hooks block AND records the settings.json.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local settings="$HOME/.claude/settings.json"
+    grep -q 'settings.json' "$manifest" || {
+        echo "precondition: the receipt must record the settings write"; return 1; }
+    grep -q 'hooks/kurama/' "$settings" || {
+        echo "precondition: setup must have registered the hooks block"; return 1; }
+
+    # The block is gone but the file is not, so check_receipt_files stays green
+    # and check_hooks is the only check that can see the problem.
+    printf '{}\n' > "$settings"
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "doctor passed an install whose receipt claims a hooks block that is gone"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -aq 'hooks block missing' || {
+        echo "the failure never names the missing hooks block:"
+        printf '%s\n' "$output" | grep -a '✗' | head -5
+        return 1
+    }
+    return 0
+}
+
+test_nojq_install_sh_installs_and_is_graded_healthy() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    # install.sh had zero jq-less coverage, and it is the script whose copied awk
+    # receipt parsers already shipped two defects.
+    local status=0
+    PATH="$bindir" bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "install.sh must install without jq" || return 1
+    assert_all_skills_installed "$HOME/.claude/skills" || return 1
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+
+    # …and the shipped health check must agree. install.sh is the documented
+    # skills-only installer (docs/installation.md): it writes no hooks and its
+    # receipt claims none, so the absence is honest and grades as a warning.
+    local output dstatus=0
+    output=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) || dstatus=$?
+    if [ "$dstatus" -ne 0 ]; then
+        echo "doctor exited $dstatus over a jq-less install.sh install:"
+        printf '%s\n' "$output" | grep -a '✗' | head -5
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -aq 'all .* recorded file(s) present' || {
+        echo "doctor never verified the recorded files (no-jq receipt parse?):"
+        printf '%s\n' "$output" | head -8
+        return 1
+    }
+    return 0
+}
+
+test_nojq_update_sh_resyncs_and_is_graded_healthy() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    local repo="$TEST_TMPDIR/nojq-proj"
+    make_git_repo "$repo"
+
+    # A full jq-present install first, so the update is re-syncing a target that
+    # DOES carry hooks + a registered settings block: any severity change must not
+    # be able to hide a real regression behind a blanket warning.
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "control (jq present) setup exited non-zero"; return 1; }
+    echo "TAMPERED" > "$repo/.claude/skills/sdd-apply/SKILL.md"
+
+    local status=0
+    PATH="$bindir" bash "$UPDATE_SCRIPT" --scope project --path "$repo" > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "update.sh must re-sync without jq" || return 1
+    if grep -q 'TAMPERED' "$repo/.claude/skills/sdd-apply/SKILL.md"; then
+        echo "a jq-less update.sh did not restore the tampered skill"; return 1
+    fi
+    grep -q 'hooks/kurama/' "$repo/.claude/settings.json" 2>/dev/null || {
+        echo "the jq-less update dropped the hooks block the install had registered"; return 1; }
+
+    local output dstatus=0
+    output=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || dstatus=$?
+    if [ "$dstatus" -ne 0 ]; then
+        echo "doctor exited $dstatus after a jq-less update.sh re-sync:"
+        printf '%s\n' "$output" | grep -a '✗' | head -5
+        return 1
+    fi
     return 0
 }
 
@@ -4657,6 +4817,10 @@ run_test "claude-code project install needs no jq" test_nojq_setup_claude_code_p
 run_test "opencode project install needs no jq" test_nojq_setup_opencode_project_installs
 run_test "validate_skills.sh passes without jq" test_nojq_validate_skills_exits_zero
 run_test "single-line empty files[] resolves to nothing" test_nojq_receipt_parser_ignores_single_line_empty_array
+run_test "a jq-less install is graded healthy, not failed" test_nojq_doctor_grades_the_documented_degradation_a_warning
+run_test "a claimed-but-missing hooks write stays a failure" test_doctor_fails_when_the_receipt_claims_an_unregistered_hooks_write
+run_test "install.sh installs + grades healthy without jq" test_nojq_install_sh_installs_and_is_graded_healthy
+run_test "update.sh re-syncs + grades healthy without jq" test_nojq_update_sh_resyncs_and_is_graded_healthy
 echo ""
 
 echo -e "${BOLD}Installer correctness — ghost installs, blanked configs, receipt truncation${NC}"
