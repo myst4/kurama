@@ -75,6 +75,13 @@ per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban
 
 > **For external installers** (e.g. [gentle-ai](https://github.com/gentleman-programming/gentleman-ai-installer)): use `--non-interactive` flag.
 
+> **`install.sh` defers to `setup.sh`.** The two installers are not
+> interchangeable: `install.sh` copies skills only, and on a target whose receipt
+> `setup.sh` wrote it **refuses** (exit 1) and points you at `update.sh` instead
+> of overwriting a receipt that records hooks, native agents, orchestrator blocks
+> and MCP registrations it cannot reproduce. Re-sync those targets with
+> `./scripts/update.sh`.
+
 ---
 
 ## Install scope: global vs. project (trial a repo)
@@ -109,9 +116,10 @@ Where project scope writes, per harness:
 The install **receipt** (`.kurama-install-manifest.json`) lands at the **repo
 root** for project scope (in the skills dir for global scope), and records the
 scope, version, every installed file, the touched `settings.json`, any Pi
-packages, and any Engram MCP registrations — so `uninstall.sh`, `update.sh`,
-and `doctor.sh` (all of which accept the same `--scope`/`--path`) operate on
-exactly what was installed.
+packages, any Engram MCP registrations, and — for OpenCode — the `opencode.json`
+it merged agents into plus the resolved `--opencode-mode`/`--opencode-profile`,
+so `uninstall.sh`, `update.sh`, and `doctor.sh` (all of which accept the same
+`--scope`/`--path`) operate on exactly what was installed.
 
 ---
 
@@ -640,7 +648,10 @@ re-runs the idempotent installer for every recorded target and reports which
 recorded files changed plus the version stamp before → after. It re-syncs
 skills, native agents, hooks, and the orchestrator merge, and stamps the new
 version — user-created files are never touched, and it never re-installs the Pi
-package stack.
+package stack. For OpenCode it re-passes the recorded mode and profile; a receipt
+written before those were recorded (or by `install.sh`) is **refused** with the
+exact `setup.sh` command to make it re-syncable again, because guessing the mode
+would delete every `sdd-*` agent a multi-mode or profile install added.
 
 ```bash
 ./scripts/update.sh                              # re-sync every global receipt

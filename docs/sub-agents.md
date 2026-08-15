@@ -77,8 +77,8 @@ Sub-agents are also instructed to save discoveries, decisions, and bug fixes to 
 ## Review Lenses (4R + refuter)
 
 The post-implementation review layer is a set of **read-only** sub-agent lenses the
-orchestrator runs after `sdd-apply`. Each lens is a `SKILL.md` declaring `tools: Read,
-Grep, Glob` — it finds defects and never edits, runs, or delegates. When the lenses run
+orchestrator runs after `sdd-apply`. Each lens is a `SKILL.md` whose contract is
+read-only — it finds defects and never edits, runs, or delegates. When the lenses run
 as native Claude Code agents (installed by default, see
 [Native Claude Code Subagents](#native-claude-code-subagents-installed-automatically)),
 that read-only boundary is **enforced by the agent's `tools:` list**, not merely
