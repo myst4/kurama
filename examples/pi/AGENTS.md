@@ -93,7 +93,7 @@ Phase skills (appear in autocomplete). All 9 install; the 4 planning phases are 
 - `/sdd-verify [change]` → validate implementation against specs; reports CRITICAL / WARNING / SUGGESTION
 - `/sdd-archive [change]` → close a change and persist final state in the active artifact store
 
-Meta-commands (type directly — orchestrator handles them, won't appear in autocomplete):
+Meta-commands (type directly — YOU handle them; autocomplete visibility is harness-dependent):
 - `/sdd-new <change>` → start a new change by delegating exploration + proposal to sub-agents
 - `/sdd-continue [change]` → run the next dependency-ready phase via sub-agent(s)
 - `/sdd-ff <name>` → fast-forward planning: proposal → specs → design → tasks

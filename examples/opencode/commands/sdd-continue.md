@@ -16,10 +16,10 @@ CONTEXT:
 - Working directory: !`echo -n "$(pwd)"`
 - Current project: !`echo -n "$(basename $(pwd))"`
 - Change name: $ARGUMENTS
-- Artifact store mode: engram
+- Artifact store mode: resolve it from the persisted settings (`artifact_store.mode` in `openspec/config.yaml` or the `sdd-init/{project}` settings bundle) and propagate the resolved value to every sub-agent you launch. Never assume `engram`.
 
-ENGRAM NOTE:
-To check which artifacts exist, search: mem_search(query: "sdd/$ARGUMENTS/", project: "{project}") to list all artifacts for this change.
-Sub-agents handle persistence automatically with topic_key "sdd/$ARGUMENTS/{type}".
+PERSISTENCE NOTE:
+To check which artifacts exist, inspect the store for the resolved mode: engram → mem_search(query: "sdd/$ARGUMENTS/", project: "{project}"); openspec/hybrid → the change's files per skills/_shared/openspec-convention.md; degraded engram → .kurama/sdd/$ARGUMENTS/.
+Sub-agents handle persistence automatically for the mode you propagate, under "sdd/$ARGUMENTS/{type}".
 
 Read the orchestrator instructions to coordinate this workflow. Do NOT execute phase work inline — delegate to sub-agents.
