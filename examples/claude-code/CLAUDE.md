@@ -240,4 +240,4 @@ Convention files under `~/.claude/skills/_shared/` (global) or `<repo>/.claude/s
 
 - `engram` → `mem_search(...)` → `mem_get_observation(...)`
 - `openspec` → read `openspec/changes/*/state.yaml`
-- an unsupported/absent mode → state was never persisted; tell the user to set `openspec` and re-run `/sdd-init`
+- EVERY mode also → `.kurama/sdd/{change}/state.md`, written after each phase transition — the recovery floor
