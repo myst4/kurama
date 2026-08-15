@@ -89,24 +89,44 @@ build_one() {
   done
 
   # 2. Substitute placeholder lines in core.md with their block content.
-  # 3. Collapse runs of blank lines to a single blank line.
-  # 4. Inject the GENERATED marker (after frontmatter if present, else on top).
-  awk -v dir="$tmp" '
+  #
+  # Step 1 wrote one block file per REGISTERED token, so a placeholder whose
+  # token is not in $TOKENS has no file and `getline < f` returns -1. Ignoring
+  # that return value dropped the placeholder line without a word — five
+  # orchestrators shipping with a section missing, exit 0, CI green. It is now a
+  # hard error naming the token, and the output file is never written.
+  if ! awk -v dir="$tmp" -v core="$CORE" '
     /^[[:space:]]*@@[A-Za-z0-9_]+@@[[:space:]]*$/ {
       tok = $0
       gsub(/^[[:space:]]*@@/, "", tok)
       gsub(/@@[[:space:]]*$/, "", tok)
       f = dir "/" tok
-      while ((getline line < f) > 0) print line
+      for (;;) {
+        rc = (getline line < f)
+        if (rc <= 0) break        # 0 = empty block (a token this overlay omits)
+        print line
+      }
       close(f)
+      if (rc < 0) {               # -1 = no block file at all: unknown token
+        printf("error: %s:%d: unknown placeholder @@%s@@\n", core, FNR, tok) > "/dev/stderr"
+        printf("       Add %s to TOKENS in scripts/build-examples.sh and give each\n", tok) > "/dev/stderr"
+        printf("       examples/_templates/<harness>.md overlay a <!-- @@%s@@ --> block.\n", tok) > "/dev/stderr"
+        exit 1
+      }
       next
     }
     { print }
-  ' "$CORE" \
-    | awk '
+  ' "$CORE" > "$tmp/expanded"; then
+    rm -rf "$tmp"
+    return 1
+  fi
+
+  # 3. Collapse runs of blank lines to a single blank line.
+  # 4. Inject the GENERATED marker (after frontmatter if present, else on top).
+  awk '
         /^[[:space:]]*$/ { blank++; if (blank <= 1) print ""; next }
         { blank = 0; print }
-      ' \
+      ' "$tmp/expanded" \
     | awk -v marker="$MARKER" '
         NR == 1 {
           if ($0 == "---") { fm = 1; print; next }
