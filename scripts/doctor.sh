@@ -95,6 +95,76 @@ global_skills_path() {
     esac
 }
 
+# Map a receipt "tool" value to the canonical agent slug setup.sh accepts.
+# setup.sh-written receipts already store the slug (e.g. "claude-code"), but
+# install.sh-written receipts store the human DISPLAY name (e.g. "Claude Code").
+# Those embedded spaces would otherwise word-split the re-sync command into a
+# bogus --agent token (setup.sh: "Unknown option: Code"), aborting the update and
+# leaving the receipt un-re-stamped. Recognized slugs pass through unchanged; an
+# unknown value yields the empty string so the caller fails loudly instead of
+# mis-invoking setup.sh. Receipts from dropped harnesses (gemini-cli, cursor,
+# vscode, antigravity) land here too and correctly fail loudly.
+tool_to_slug() {
+    case "$1" in
+        claude-code|"Claude Code")   echo "claude-code" ;;
+        opencode|"OpenCode")         echo "opencode" ;;
+        codex|"Codex")               echo "codex" ;;
+        pi|"Pi")                     echo "pi" ;;
+        omp)                         echo "omp" ;;
+        *)                           echo "" ;;
+    esac
+}
+
+# Set by check_orphans when it finds anything, so the caller can tell "nothing is
+# installed" (a clean machine) from "unmanaged artifacts" (a broken one).
+ORPHANS_FOUND=false
+
+# Where each harness keeps the artifacts a receipt would have recorded. Mirrors
+# setup.sh's scoped_* resolution; an empty answer means the harness ships none of
+# that kind (codex has no native agents, only two harnesses have command files).
+orphan_skills_dir() {
+    local agent="$1" scope="$2" base="$3"
+    if [ "$scope" = "project" ]; then
+        case "$agent" in
+            pi)  echo "$base/.pi/skills" ;;
+            omp) echo "$base/.omp/skills" ;;
+            *)   echo "$base/.claude/skills" ;;
+        esac
+    else
+        global_skills_path "$agent"
+    fi
+}
+
+orphan_agents_dir() {
+    local agent="$1" scope="$2" base="$3" home; home="$(home_dir)"
+    if [ "$scope" = "project" ]; then
+        case "$agent" in
+            claude-code) echo "$base/.claude/agents" ;;
+            pi)          echo "$base/.pi/agents" ;;
+            omp)         echo "$base/.omp/agents" ;;
+            *)           echo "" ;;
+        esac
+    else
+        case "$agent" in
+            claude-code) echo "$home/.claude/agents" ;;
+            pi)          echo "$home/.pi/agent/agents" ;;
+            omp)         echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/agents" ;;
+            *)           echo "" ;;
+        esac
+    fi
+}
+
+orphan_commands_dir() {
+    local agent="$1" scope="$2" home; home="$(home_dir)"
+    # Command files are a global-scope artifact only.
+    if [ "$scope" = "project" ]; then echo ""; return 0; fi
+    case "$agent" in
+        claude-code) echo "$home/.claude/commands" ;;
+        opencode)    echo "$home/.config/opencode/commands" ;;
+        *)           echo "" ;;
+    esac
+}
+
 # No receipt does not automatically mean "nothing installed". Kurama artifacts can
 # survive on disk with the receipt gone — a hand-moved skills dir, a partial
 # migration, an interrupted uninstall. That state is worse than a clean absence:
@@ -102,27 +172,38 @@ global_skills_path() {
 # skill files that may no longer be there, and update.sh/uninstall.sh cannot manage
 # what no receipt records. Reporting "healthy" for it is a false green, so any
 # orphan found here is a failure with the exact paths to look at.
+#
+# #23: this runs PER AGENT that lacks a receipt, for all five harnesses. It used
+# to run only when NOT ONE of the five had a receipt, and to look only at
+# claude-code paths — so a machine with claude-code's receipt deleted and
+# opencode's intact was diagnosed as opencode, exited 0 "Healthy", and never
+# mentioned the ~/.claude agents, hooks and settings block still fully wired.
 check_orphans() {
-    local home found=false; home="$(home_dir)"
-    local agents_dir="$home/.claude/agents" cmds_dir="$home/.claude/commands"
-    local skills_dir; skills_dir="$(global_skills_path claude-code)"
+    local agent="$1" scope="${2:-global}" base="${3:-}"
+    local found=false f n
+    local skills_dir agents_dir cmds_dir prompt hooks_dir cfg
+
+    skills_dir="$(orphan_skills_dir "$agent" "$scope" "$base")"
+    agents_dir="$(orphan_agents_dir "$agent" "$scope" "$base")"
+    cmds_dir="$(orphan_commands_dir "$agent" "$scope")"
+    prompt="$(prompt_path_for "$agent" "$scope" "$base")"
 
     # Kurama-owned native agents (sdd-* / jd-*) wired with no receipt behind them.
-    local orphan_agents=0 f base
-    if [ -d "$agents_dir" ]; then
+    n=0
+    if [ -n "$agents_dir" ] && [ -d "$agents_dir" ]; then
         for f in "$agents_dir"/sdd-*.md "$agents_dir"/jd-*.md; do
             [ -f "$f" ] || continue
-            orphan_agents=$((orphan_agents + 1))
+            n=$((n + 1))
         done
     fi
-    if [ "$orphan_agents" -gt 0 ]; then
+    if [ "$n" -gt 0 ]; then
         found=true
-        bad "$orphan_agents Kurama agent(s) in $agents_dir with no install receipt"
+        bad "$n Kurama agent(s) in $agents_dir with no install receipt"
         # The agents read their phase skill at launch; a missing skills dir means
         # every delegation silently runs without its phase instructions.
-        if [ ! -d "$skills_dir/sdd-init" ]; then
+        if [ -n "$skills_dir" ] && [ ! -d "$skills_dir/sdd-init" ]; then
             bad "  agents reference $skills_dir/sdd-*/SKILL.md — that path does not exist"
-            for f in "$home"/.claude/skills-*backup*; do
+            for f in "$(dirname "$skills_dir")"/skills-*backup*; do
                 [ -d "$f" ] || continue
                 bad "  skills appear to have been moved to $(basename "$f")"
                 break
@@ -130,23 +211,56 @@ check_orphans() {
         fi
     fi
 
-    if [ -d "$cmds_dir" ]; then
-        local orphan_cmds=0
+    # Skills still on disk with nothing recording them: update.sh cannot refresh
+    # them and uninstall.sh will not remove them.
+    if [ -n "$skills_dir" ] && [ -d "$skills_dir/sdd-init" ]; then
+        found=true
+        bad "Kurama skills in $skills_dir with no install receipt"
+    fi
+
+    if [ -n "$cmds_dir" ] && [ -d "$cmds_dir" ]; then
+        n=0
         for f in "$cmds_dir"/sdd-*.md; do
             [ -f "$f" ] || continue
-            orphan_cmds=$((orphan_cmds + 1))
+            n=$((n + 1))
         done
-        if [ "$orphan_cmds" -gt 0 ]; then
+        if [ "$n" -gt 0 ]; then
             found=true
-            bad "$orphan_cmds Kurama command(s) in $cmds_dir with no install receipt"
+            bad "$n Kurama command(s) in $cmds_dir with no install receipt"
+        fi
+    fi
+
+    # An orchestrator block still merged into a shared prompt file: it keeps
+    # steering the agent, and no receipt records it for removal.
+    if [ -n "$prompt" ] && [ -f "$prompt" ] && grep -qF 'BEGIN:kurama' "$prompt" 2>/dev/null; then
+        found=true
+        bad "kurama orchestrator block still merged into $prompt with no install receipt"
+    fi
+
+    if [ "$agent" = "claude-code" ]; then
+        if [ "$scope" = "project" ]; then hooks_dir="$base/.claude/hooks/kurama"
+        else hooks_dir="$(home_dir)/.claude/hooks/kurama"; fi
+        if [ -d "$hooks_dir" ]; then
+            found=true
+            bad "Kurama hook scripts in $hooks_dir with no install receipt"
+        fi
+    fi
+
+    # OpenCode routes through opencode.json, not through files on disk: agents
+    # left there keep every /sdd-* command pointing at Kurama.
+    if [ "$agent" = "opencode" ] && [ "$scope" != "project" ]; then
+        cfg="$(home_dir)/.config/opencode/opencode.json"
+        if [ -f "$cfg" ] && grep -q '"sdd-' "$cfg" 2>/dev/null; then
+            found=true
+            bad "$cfg still registers Kurama sdd-* agents with no install receipt"
         fi
     fi
 
     if $found; then
+        ORPHANS_FOUND=true
         note "Re-run setup.sh to reinstall and write a receipt, or remove the stale files by hand."
-    else
-        note "No Kurama artifacts on disk either — nothing is installed."
     fi
+    return 0
 }
 
 global_prompt_path() {
@@ -174,8 +288,9 @@ manifest_field() {
 }
 
 # Emit each element of a flat receipt array — "files", "tools", … (jq or awk
-# fallback). Mirrors manifest_json_array in update.sh/uninstall.sh so every
-# script parses a receipt the same way.
+# fallback). Mirrors manifest_json_array in update.sh/uninstall.sh/install.sh
+# (and setup.sh's receipt_json_array / setup-tui.sh's copy) so every script
+# parses a receipt the same way.
 #
 # Why the opening rule handles the whole array itself instead of just setting
 # inarr: for a single-line "key": [] the array closes on the line that opened it,
@@ -316,7 +431,13 @@ check_receipt_files() {
 $files
 EOF
 
-    if [ "$missing" -gt 0 ]; then
+    if [ "$total" -eq 0 ]; then
+        # Every install records at least its skills, so an empty files[] is not a
+        # healthy target: it is the receipt setup.sh's EXIT trap flushes when a
+        # run aborts before anything landed (or a receipt someone truncated).
+        # "all 0 recorded file(s) present" read as a green light for that.
+        bad "receipt records NO files — partial or aborted install (re-run setup.sh, or uninstall.sh to clean up)"
+    elif [ "$missing" -gt 0 ]; then
         bad "$missing of $total recorded file(s) MISSING from disk (run update.sh)"
     else
         pass "all $total recorded file(s) present"
@@ -402,7 +523,17 @@ check_markers_file() {
     if [ "$b" -eq "$e" ] && [ "$b" -ge 1 ]; then
         pass "orchestrator markers balanced ($b pair) in $prompt"
     elif [ "$b" -eq 0 ] && [ "$e" -eq 0 ]; then
-        soft "no kurama markers in $prompt (orchestrator not merged?)"
+        # #23: markers are how setup.sh merges TODAY, but every OpenCode install
+        # written before this release had its AGENTS.md copied whole, without
+        # them — so this branch flagged perfectly healthy installs as unmerged.
+        # Verify by content before warning: the orchestrator IS there, it just
+        # predates the marker merge (re-running setup.sh adds the markers and
+        # makes it updatable/removable again).
+        if grep -qF '## Kurama Orchestrator' "$prompt" 2>/dev/null; then
+            note "orchestrator present but unmarked in $prompt (pre-marker install — re-run setup.sh to make it updatable)"
+        else
+            soft "no kurama markers in $prompt (orchestrator not merged?)"
+        fi
     else
         bad "UNBALANCED kurama markers in $prompt (BEGIN=$b END=$e)"
     fi
@@ -528,11 +659,11 @@ check_tooling() {
 diagnose_target() {
     local receipt_dir="$1"
     local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
-    local scope tools tool_label
+    local scope raw_tools tools tool_label t slug
     scope="$(manifest_field "$manifest" "scope")"; [ -n "$scope" ] || scope="global"
     # A project-scope receipt can record several harnesses; report them all.
-    tools="$(manifest_tools "$manifest")"
-    tool_label="$(fmt_tool_list "$tools")"
+    raw_tools="$(manifest_tools "$manifest")"
+    tool_label="$(fmt_tool_list "$raw_tools")"
 
     header "Diagnosing ${tool_label:-unknown} ($scope) — $receipt_dir"
     if [ ! -f "$manifest" ]; then
@@ -540,6 +671,34 @@ diagnose_target() {
         return 0
     fi
     pass "receipt found: $manifest"
+
+    # #23: normalize every recorded tool to the slug setup.sh uses, BEFORE any
+    # path is resolved from it. install.sh records the DISPLAY name ("Claude
+    # Code"); update.sh normalizes, doctor did not — so path resolution fell
+    # through to the empty string, check_markers `continue`d on it and
+    # check_hooks returned early, and doctor printed "All checks passed —
+    # healthy" over an install with no orchestrator, no agents and no hooks.
+    # An unresolvable value (a dropped harness, a corrupted receipt) is a hard
+    # FAIL: doctor cannot diagnose a target whose paths it cannot resolve.
+    tools=""
+    while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        slug="$(tool_to_slug "$t")"
+        if [ -z "$slug" ]; then
+            bad "unrecognized tool in receipt: '$t' — its paths cannot be resolved (dropped harness, or a corrupted receipt)"
+            continue
+        fi
+        tools="$tools$slug
+"
+    done <<TOOLS
+$raw_tools
+TOOLS
+    tools="$(printf '%s' "$tools" | awk 'NF && !seen[$0]++')"
+    if [ -z "$tools" ]; then
+        bad "receipt records no usable tool — nothing else can be verified for this target"
+        return 0
+    fi
+
     check_receipt_files "$receipt_dir" "$tools"
     check_version "$manifest"
     check_markers "$tools" "$scope" "$receipt_dir"
@@ -585,23 +744,48 @@ done
 echo ""
 echo -e "${CYAN}${BOLD}Kurama — Doctor${NC}"
 
+# #23: every branch that finds no receipt now scans for orphans instead of
+# assuming absence. A receipt-less target is either a clean machine or a fully
+# wired install nothing manages, and only the disk can tell the two apart.
 if [ "$SCOPE" = "project" ]; then
     TARGET_PATH="${TARGET_PATH:-$PWD}"
-    diagnose_target "$TARGET_PATH"
+    if [ -f "$TARGET_PATH/$INSTALL_MANIFEST_NAME" ]; then
+        diagnose_target "$TARGET_PATH"
+    else
+        header "Diagnosing project scope — $TARGET_PATH"
+        bad "no install receipt at $TARGET_PATH"
+        for agent in $ALL_AGENTS; do
+            check_orphans "$agent" project "$TARGET_PATH"
+        done
+        $ORPHANS_FOUND || note "No Kurama artifacts in $TARGET_PATH either — nothing is installed there."
+    fi
 elif [ -n "$AGENT" ]; then
     dir="$(global_skills_path "$AGENT")"
-    [ -n "$dir" ] || { bad "unknown agent: $AGENT"; }
-    [ -n "$dir" ] && diagnose_target "$dir"
+    if [ -z "$dir" ]; then
+        bad "unknown agent: $AGENT"
+    elif [ -f "$dir/$INSTALL_MANIFEST_NAME" ]; then
+        diagnose_target "$dir"
+    else
+        header "Diagnosing $AGENT (global) — $dir"
+        bad "no install receipt at $dir"
+        check_orphans "$AGENT" global ""
+        $ORPHANS_FOUND || note "No Kurama artifacts on disk either — nothing is installed."
+    fi
 else
     any=false
     for agent in $ALL_AGENTS; do
         dir="$(global_skills_path "$agent")"
         [ -n "$dir" ] || continue
-        if [ -f "$dir/$INSTALL_MANIFEST_NAME" ]; then any=true; diagnose_target "$dir"; fi
+        if [ -f "$dir/$INSTALL_MANIFEST_NAME" ]; then
+            any=true
+            diagnose_target "$dir"
+        else
+            check_orphans "$agent" global ""
+        fi
     done
     if ! $any; then
         note "No global install receipts found."
-        check_orphans
+        $ORPHANS_FOUND || note "No Kurama artifacts on disk either — nothing is installed."
     fi
 fi
 
