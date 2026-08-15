@@ -119,6 +119,24 @@ tool_to_slug() {
 # installed" (a clean machine) from "unmanaged artifacts" (a broken one).
 ORPHANS_FOUND=false
 
+# Locations check_orphans has already inspected in this run. Several harnesses
+# share one location — in project scope claude-code, codex and opencode all
+# resolve to <repo>/.claude/skills, and claude-code and codex share
+# <repo>/CLAUDE.md — so a per-agent scan would report the same artifact once per
+# harness that maps to it: four real problems printed as "8 failure(s)". Dedup by
+# RESOLVED PATH, exactly as check_markers does for prompt files.
+ORPHANS_SEEN=""
+
+# True (and remembers the path) the FIRST time a path is offered; false after.
+orphan_first_sight() {
+    local path="$1"
+    [ -n "$path" ] || return 1
+    printf '%s\n' "$ORPHANS_SEEN" | grep -Fxq -- "$path" && return 1
+    ORPHANS_SEEN="$ORPHANS_SEEN
+$path"
+    return 0
+}
+
 # Where each harness keeps the artifacts a receipt would have recorded. Mirrors
 # setup.sh's scoped_* resolution; an empty answer means the harness ships none of
 # that kind (codex has no native agents, only two harnesses have command files).
@@ -190,7 +208,7 @@ check_orphans() {
 
     # Kurama-owned native agents (sdd-* / jd-*) wired with no receipt behind them.
     n=0
-    if [ -n "$agents_dir" ] && [ -d "$agents_dir" ]; then
+    if [ -n "$agents_dir" ] && [ -d "$agents_dir" ] && orphan_first_sight "$agents_dir"; then
         for f in "$agents_dir"/sdd-*.md "$agents_dir"/jd-*.md; do
             [ -f "$f" ] || continue
             n=$((n + 1))
@@ -213,12 +231,12 @@ check_orphans() {
 
     # Skills still on disk with nothing recording them: update.sh cannot refresh
     # them and uninstall.sh will not remove them.
-    if [ -n "$skills_dir" ] && [ -d "$skills_dir/sdd-init" ]; then
+    if [ -n "$skills_dir" ] && [ -d "$skills_dir/sdd-init" ] && orphan_first_sight "$skills_dir"; then
         found=true
         bad "Kurama skills in $skills_dir with no install receipt"
     fi
 
-    if [ -n "$cmds_dir" ] && [ -d "$cmds_dir" ]; then
+    if [ -n "$cmds_dir" ] && [ -d "$cmds_dir" ] && orphan_first_sight "$cmds_dir"; then
         n=0
         for f in "$cmds_dir"/sdd-*.md; do
             [ -f "$f" ] || continue
@@ -232,7 +250,8 @@ check_orphans() {
 
     # An orchestrator block still merged into a shared prompt file: it keeps
     # steering the agent, and no receipt records it for removal.
-    if [ -n "$prompt" ] && [ -f "$prompt" ] && grep -qF 'BEGIN:kurama' "$prompt" 2>/dev/null; then
+    if [ -n "$prompt" ] && [ -f "$prompt" ] && orphan_first_sight "$prompt" \
+        && grep -qF 'BEGIN:kurama' "$prompt" 2>/dev/null; then
         found=true
         bad "kurama orchestrator block still merged into $prompt with no install receipt"
     fi
@@ -240,7 +259,7 @@ check_orphans() {
     if [ "$agent" = "claude-code" ]; then
         if [ "$scope" = "project" ]; then hooks_dir="$base/.claude/hooks/kurama"
         else hooks_dir="$(home_dir)/.claude/hooks/kurama"; fi
-        if [ -d "$hooks_dir" ]; then
+        if [ -d "$hooks_dir" ] && orphan_first_sight "$hooks_dir"; then
             found=true
             bad "Kurama hook scripts in $hooks_dir with no install receipt"
         fi
@@ -250,7 +269,7 @@ check_orphans() {
     # left there keep every /sdd-* command pointing at Kurama.
     if [ "$agent" = "opencode" ] && [ "$scope" != "project" ]; then
         cfg="$(home_dir)/.config/opencode/opencode.json"
-        if [ -f "$cfg" ] && grep -q '"sdd-' "$cfg" 2>/dev/null; then
+        if [ -f "$cfg" ] && orphan_first_sight "$cfg" && grep -q '"sdd-' "$cfg" 2>/dev/null; then
             found=true
             bad "$cfg still registers Kurama sdd-* agents with no install receipt"
         fi
