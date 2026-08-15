@@ -34,6 +34,15 @@ an `openspec/changes/<name>/state.yaml` outside `archive/`, or a
 `.kurama/sdd/<name>/state.md` without an `archive-report.md`. The moment a change is
 archived, the guard steps aside.
 
+Both markers are on disk in **every** artifact-store mode. `.kurama/sdd/<name>/state.md`
+used to appear only when Engram was unreachable, so in the flagship configuration
+(Claude Code + Engram) state lived in Engram alone, no filesystem marker existed, and this
+guard silently never fired. The persistence contract now makes
+`.kurama/sdd/<change>/{state,verify-report,archive-report}.md` **mode-independent cycle
+markers** — harness infrastructure written in every mode, like `.kurama/skill-registry.md`
+— so both hooks see the same three files whichever store the project chose. `sdd-archive`
+writing `archive-report.md` is what retires the cycle; nothing else clears the guard.
+
 ### 2. Archive gate (no PASS, no archive)
 
 `sdd-archive` Step 0 says: never archive a change whose verification report is
@@ -43,6 +52,17 @@ broken work corrupts the baseline. The archive gate mirrors Step 0 mechanically:
 reads the persisted `verify-report.md`, extracts the `### Verdict`, and refuses the
 archive unless the verdict is `PASS` or `PASS WITH WARNINGS`. It fails **closed** —
 a missing report or an unfilled template verdict counts as "not passing".
+
+Failing closed only works if a legitimately verified change can actually open the gate.
+The gate reads two paths and no others: `openspec/changes/<change>/verify-report.md` and
+`.kurama/sdd/<change>/verify-report.md`. It cannot query Engram. So `sdd-verify` writes the
+**complete** report to `.kurama/sdd/<change>/verify-report.md` in **every** mode — including
+`engram`, where the Engram save still happens and the disk copy is an additional mechanical
+mirror. Before that rule existed, the flagship configuration had the report in Engram only,
+the gate found nothing, and it blocked every legitimate archive while pointing at
+`KURAMA_ARCHIVE_OVERRIDE=1` — a fail-closed gate that fails on the happy path teaches the
+model to disable it. A stub or summary is not enough: the gate parses the `### Verdict` line
+and the Content Binding `Tree-Hash:` line out of that exact file.
 
 **Content binding — the "trust the verdict blindly" gap is now closed.** A verdict
 gate on its own has a hole: it trusts the `PASS` without checking whether the code is
@@ -121,5 +141,23 @@ by human/CI review — which is the fallback the whole framework is designed aro
   verify report reached a wrong conclusion about code that has not since changed, the
   gate is wrong with it — which is why `sdd-verify` must produce the verdict from real
   execution. Binding proves *what* was reviewed; only `sdd-verify` proves it *works*.
+- **The write guard only sees the file-writing tools it is wired to.** It is a
+  `PreToolUse` hook on `Edit`/`Write`/`MultiEdit`, and it identifies its target through the
+  payload's `file_path` field. A write performed through **`Bash`** — `cat > file`,
+  `sed -i`, `tee`, `>>`, `git checkout -- .`, a script that edits files — carries no
+  `file_path`, is not matched by the hook's tool filter, and passes untouched. Wiring the
+  guard to `Bash` as well is not a fix: the target of an arbitrary shell command is not
+  mechanically knowable, so the hook would have to either block all shell use mid-cycle or
+  guess. The delegate-only rule therefore remains **prose for the `Bash` path** and mechanism
+  for the editing tools. If you see the orchestrator reaching for `cat >` on repository code
+  during a cycle, that is the rule being evaded, not a gap in the contract.
+- **The override env vars are inside the model's reach.** `KURAMA_ARCHIVE_OVERRIDE=1`,
+  `KURAMA_GUARD_BYPASS=1`, and `KURAMA_ORCHESTRATOR_GUARD=0` are read from the hook's
+  environment, and an agent that can run shell commands can export them itself. They are
+  escape hatches for a **human**, and the skills say never to self-authorize one — but that
+  restraint is prose, exactly like the rules the hooks exist to backstop. Treat these gates as
+  protection against forgetting and drift, not against a model that decides to route around
+  them. If it matters for your project, keep the variables out of the agent's environment,
+  or gate archives in CI where the agent cannot set them.
 - **Structural only.** Neither hook inspects code quality. They are guardrails, not
   reviewers.
