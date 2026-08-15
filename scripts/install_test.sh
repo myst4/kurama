@@ -4624,6 +4624,91 @@ run_test "cycle markers are mandated in every mode" test_cycle_markers_written_i
 echo ""
 
 # ============================================================================
+# #34 — build guards (scripts/build-examples.sh)
+#
+# Self-contained section: helpers, tests and the run_test calls all live here so
+# the block can move as one piece. Every case runs build-examples.sh against a
+# THROWAWAY copy of the repo, so nothing here can write into the real examples/.
+# ============================================================================
+
+# Stage the minimum tree build-examples.sh needs: it reads
+# $REPO/examples/_templates/*.md, writes only under $REPO/examples/, and derives
+# $REPO from its own location — so a copy of the script plus the templates is a
+# complete, disposable build.
+stage_build_examples_repo() {
+    local dest="$1"
+    mkdir -p "$dest/scripts" "$dest/examples/_templates" || return 1
+    cp "$SCRIPT_DIR/build-examples.sh" "$dest/scripts/build-examples.sh" || return 1
+    cp "$REPO_DIR"/examples/_templates/*.md "$dest/examples/_templates/" || return 1
+    return 0
+}
+
+# A @@TOKEN@@ that nobody registered in $TOKENS has no extracted block file, and
+# awk's `getline < f` returns -1 for it. That used to drop the line silently:
+# five orchestrators shipping with a section missing, exit 0, CI green.
+test_build_examples_rejects_unknown_placeholder() {
+    local repo="$TEST_TMPDIR/build-unknown-token"
+    stage_build_examples_repo "$repo" \
+        || { echo "could not stage the throwaway build tree"; return 1; }
+
+    # A contributor adds a placeholder to core.md and forgets to register it.
+    printf '\n@@NOT_A_REGISTERED_TOKEN@@\n' >> "$repo/examples/_templates/core.md"
+
+    local output status
+    output="$(bash "$repo/scripts/build-examples.sh" 2>&1)" && status=0 || status=$?
+
+    if [[ $status -eq 0 ]]; then
+        echo "build-examples exited 0 on an unregistered @@TOKEN@@ (silent drop)"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    if ! printf '%s\n' "$output" | grep -q 'NOT_A_REGISTERED_TOKEN'; then
+        echo "the failure never names the offending token:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    # A loud failure must not leave a half-substituted orchestrator behind.
+    if [[ -f "$repo/examples/claude-code/CLAUDE.md" ]]; then
+        echo "build-examples wrote an output file despite failing"
+        return 1
+    fi
+    return 0
+}
+
+# The other direction: the committed templates must still build, and build to
+# exactly what is committed — so the new error path cannot fire on a good tree.
+test_build_examples_rebuilds_committed_outputs_byte_for_byte() {
+    local repo="$TEST_TMPDIR/build-clean"
+    stage_build_examples_repo "$repo" \
+        || { echo "could not stage the throwaway build tree"; return 1; }
+
+    local output status
+    output="$(bash "$repo/scripts/build-examples.sh" 2>&1)" && status=0 || status=$?
+    if [[ $status -ne 0 ]]; then
+        echo "build-examples failed on the committed templates (exit $status):"
+        printf '%s\n' "$output"
+        return 1
+    fi
+
+    local rel
+    for rel in examples/claude-code/CLAUDE.md examples/codex/agents.md \
+               examples/opencode/AGENTS.md examples/pi/AGENTS.md \
+               examples/omp/AGENTS.md; do
+        assert_file_not_empty "$repo/$rel" 1000 || return 1
+        if ! cmp -s "$repo/$rel" "$REPO_DIR/$rel"; then
+            echo "rebuilt $rel differs from the committed file"
+            return 1
+        fi
+    done
+    return 0
+}
+
+echo -e "${BOLD}#34 — build guards (unknown template placeholders)${NC}"
+run_test "an unregistered @@TOKEN@@ fails loudly, naming it" test_build_examples_rejects_unknown_placeholder
+run_test "the committed templates rebuild byte-for-byte" test_build_examples_rebuilds_committed_outputs_byte_for_byte
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 
