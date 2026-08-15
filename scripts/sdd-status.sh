@@ -137,18 +137,107 @@ os_has_artifacts() {
   [ -d "${_d}specs" ]           && return 0
   return 1
 }
-# .kurama/sdd change dir holds any recognizable artifact?
-kurama_has_artifacts() {
+# .kurama/sdd change dir holds a real SDD ARTIFACT (not just a cycle marker)?
+# state.md / verify-report.md / archive-report.md are written in EVERY mode, so
+# they are deliberately excluded here: only these files mean SDD content itself
+# landed on disk under .kurama/.
+kurama_has_nonmarker_artifacts() {
   _d="$1"
-  [ -f "${_d}state.md" ]           && return 0
   [ -f "${_d}explore.md" ]         && return 0
   [ -f "${_d}proposal.md" ]        && return 0
   [ -f "${_d}spec.md" ]            && return 0
   [ -f "${_d}design.md" ]          && return 0
   [ -f "${_d}tasks.md" ]           && return 0
   [ -f "${_d}apply-progress.md" ]  && return 0
-  [ -f "${_d}verify-report.md" ]   && return 0
   return 1
+}
+# .kurama/sdd change dir holds any recognizable artifact OR cycle marker?
+kurama_has_artifacts() {
+  _d="$1"
+  [ -f "${_d}state.md" ]           && return 0
+  [ -f "${_d}verify-report.md" ]   && return 0
+  kurama_has_nonmarker_artifacts "$_d"
+}
+
+# --- artifact store resolution ----------------------------------------------
+# Sets STORE_MODE (one of engram|openspec|hybrid, or empty when not provable)
+# and STORE_NOTE (a human-only qualifier, never part of the machine value).
+#
+# Marker presence is NOT evidence of a store. `.kurama/sdd/<change>/state.md` is
+# written in EVERY mode (persistence-contract.md -> Hook-visible cycle markers),
+# so it proves a cycle exists and nothing else — labelling every such cycle
+# "engram (fallback)" called a fully conforming cycle degraded, and upgraded a
+# plain openspec cycle to "hybrid" off the same non-evidence.
+#
+# Real evidence, in order: the change's own state file (the state artifact
+# records `artifact_store.mode` — engram-convention.md), then
+# openspec/config.yaml (the settings home for openspec/hybrid), then the store
+# the artifact files themselves prove.
+resolve_store() {
+  _flavor="$1"
+  _sbase="$2"
+  _sstatef="$3"
+  STORE_MODE=""
+  STORE_NOTE=""
+
+  _m="$(yaml_scalar "$_sstatef" 'artifact_store\.mode')"
+  [ -n "$_m" ] || _m="$(yaml_scalar "$root/openspec/config.yaml" 'artifact_store\.mode')"
+  case "$_m" in
+    engram|openspec|hybrid) STORE_MODE="$_m" ;;
+  esac
+
+  if [ -z "$STORE_MODE" ]; then
+    if [ "$_flavor" = "openspec" ]; then
+      # openspec/changes/<change>/ artifacts ARE the filesystem store. hybrid
+      # writes the same files, so with no recorded mode `openspec` is the
+      # provable floor — never infer hybrid from a .kurama/ marker.
+      STORE_MODE="openspec"
+    else
+      STORE_NOTE="cycle markers only"
+    fi
+  elif [ "$STORE_MODE" = "engram" ] && [ "$_flavor" = "kurama" ] \
+    && kurama_has_nonmarker_artifacts "$_sbase"; then
+    # engram never writes SDD artifacts to the repo; finding them under
+    # .kurama/sdd/ IS evidence the Engram writes fell back (persistence-
+    # contract.md -> Write Failure Recovery).
+    STORE_NOTE="artifacts on disk — Engram degraded"
+  fi
+}
+
+# --- canonical DAG helpers --------------------------------------------------
+# Rank a phase on the canonical DAG so the two independent readings — the
+# recorded state marker and the artifact probes — can be compared instead of
+# contradicting each other in the same report. -1 = unrecognized.
+phase_rank() {
+  case "$1" in
+    none)        printf '0'  ;;
+    explore)     printf '1'  ;;
+    propose)     printf '2'  ;;
+    spec|design) printf '3'  ;;
+    spec+design) printf '4'  ;;
+    tasks)       printf '5'  ;;
+    apply)       printf '6'  ;;
+    verify)      printf '7'  ;;
+    archive)     printf '8'  ;;
+    *)           printf -- '-1' ;;
+  esac
+}
+
+# Set NEXT_PHASE / NEXT_NOTE from a completed phase, per the canonical DAG.
+set_next_from_phase() {
+  NEXT_NOTE=""
+  case "$1" in
+    explore)     NEXT_PHASE="propose" ;;
+    propose)     NEXT_PHASE="spec"; NEXT_NOTE="spec and design both pending" ;;
+    spec)        NEXT_PHASE="design" ;;
+    design)      NEXT_PHASE="spec" ;;
+    spec+design) NEXT_PHASE="tasks" ;;
+    tasks)       NEXT_PHASE="apply" ;;
+    apply)       NEXT_PHASE="verify" ;;
+    verify)      NEXT_PHASE="archive" ;;
+    archive)     NEXT_PHASE="none"; NEXT_NOTE="cycle archived" ;;
+    *)           NEXT_PHASE="explore"; NEXT_NOTE="explore optional — propose may follow" ;;
+  esac
 }
 # openspec spec delta present? (specs/<domain>/spec.md, or any *.md under specs/)
 dir_has_spec() {
@@ -162,14 +251,15 @@ dir_has_spec() {
 
 # --- per-change processing --------------------------------------------------
 # Appends a text block to TEXT_BUF and a JSON object to JSON_BUF, sets FOUND=1.
-# Args: name  store_label  flavor(openspec|kurama)  base_dir(trailing /)  state_file
+# Args: name  flavor(openspec|kurama)  base_dir(trailing /)  state_file
 process_change() {
   name="$1"
-  store="$2"
-  flavor="$3"
-  base="$4"
-  statef="$5"
+  flavor="$2"
+  base="$3"
+  statef="$4"
   FOUND=1
+
+  resolve_store "$flavor" "$base" "$statef"
 
   HAS_EXPLORE=0; HAS_PROPOSAL=0; HAS_SPEC=0; HAS_DESIGN=0; HAS_TASKS=0
   HAS_VERIFY=0; HAS_ARCHIVE=0; HAS_APPLY_PROGRESS=0
@@ -210,6 +300,10 @@ process_change() {
     APPLY_COMPLETE=1
   fi
 
+  # --- recorded phase (the orchestrator's own statement of where the cycle is) ---
+  recorded_phase=""
+  [ -f "$statef" ] && recorded_phase="$(yaml_scalar "$statef" phase)"
+
   # --- derive last / next phase from the canonical DAG ---
   NEXT_NOTE=""
   if [ "$HAS_ARCHIVE" = 1 ]; then
@@ -238,10 +332,22 @@ process_change() {
     LAST_PHASE="none"; NEXT_PHASE="explore"; NEXT_NOTE="explore optional — propose may follow"
   fi
 
-  # --- recorded phase + settings ---
-  recorded_phase=""
-  [ -f "$statef" ] && recorded_phase="$(yaml_scalar "$statef" phase)"
+  # The recorded phase WINS when it is further along than the artifact probes. A
+  # conforming engram cycle leaves no artifact FILES at all — only the markers —
+  # so probing alone printed "Last phase: none / Next phase: explore" two lines
+  # above "Recorded phase: tasks", contradicting itself in one report. Taking the
+  # more advanced of the two readings also keeps the probes authoritative where
+  # they are more current (e.g. apply in progress after "phase: tasks").
+  if [ -n "$recorded_phase" ]; then
+    rec_rank="$(phase_rank "$recorded_phase")"
+    art_rank="$(phase_rank "$LAST_PHASE")"
+    if [ "$rec_rank" -gt "$art_rank" ]; then
+      LAST_PHASE="$recorded_phase"
+      set_next_from_phase "$recorded_phase"
+    fi
+  fi
 
+  # --- settings ---
   cm=""; em=""; td=""
   if [ "$flavor" = "openspec" ]; then
     cfg="$root/openspec/config.yaml"
@@ -260,7 +366,11 @@ process_change() {
   # --- text block ---
   blk="$(
     printf 'Change: %s\n' "$name"
-    printf '  Store:            %s\n' "$store"
+    if [ -n "$STORE_NOTE" ]; then
+      printf '  Store:            %s  (%s)\n' "${STORE_MODE:-unknown}" "$STORE_NOTE"
+    else
+      printf '  Store:            %s\n' "${STORE_MODE:-unknown}"
+    fi
     printf '  Last phase:       %s\n' "$LAST_PHASE"
     if [ -n "$NEXT_NOTE" ]; then
       printf '  Next phase:       %s  (%s)\n' "$NEXT_PHASE" "$NEXT_NOTE"
@@ -288,14 +398,17 @@ process_change() {
     tasks_json="null"
   fi
 
+  # `store` / `artifact_store` carry a LEGAL mode (engram|openspec|hybrid) or
+  # null — never a prose label. A qualifier like "cycle markers only" belongs to
+  # the human report, not to a field a consumer would compare against a mode.
   item="$(printf '{"name":%s,"store":%s,"last_phase":%s,"next_phase":%s,"next_note":%s,"recorded_phase":%s,"settings":{"artifact_store":%s,"compliance_mode":%s,"execution_mode":%s,"tdd_enabled":%s},"tasks":%s,"state_file":%s}' \
     "$(json_str "$name")" \
-    "$(json_str "$store")" \
+    "$(json_str_or_null "$STORE_MODE")" \
     "$(json_str "$LAST_PHASE")" \
     "$(json_str "$NEXT_PHASE")" \
     "$(json_str_or_null "$NEXT_NOTE")" \
     "$(json_str_or_null "$recorded_phase")" \
-    "$(json_str "$store")" \
+    "$(json_str_or_null "$STORE_MODE")" \
     "$(json_str_or_null "$cm")" \
     "$(json_str_or_null "$em")" \
     "$(json_bool_or_null "$td")" \
@@ -364,17 +477,13 @@ if [ -d "$os_changes" ]; then
     os_has_artifacts "$d" || continue
     [ -f "${d}archive-report.md" ] && continue
     name="$(basename "$d")"
-    store="openspec"
-    if [ -d "$kurama_root/$name" ] \
-      && kurama_has_artifacts "$kurama_root/$name/" \
-      && [ ! -f "$kurama_root/$name/archive-report.md" ]; then
-      store="hybrid"
-    fi
-    process_change "$name" "$store" "openspec" "$d" "${d}state.yaml"
+    process_change "$name" "openspec" "$d" "${d}state.yaml"
   done
 fi
 
-# .kurama/sdd changes not already covered by an openspec entry (degraded engram).
+# .kurama/sdd changes not already covered by an openspec entry. EVERY mode lands
+# here (the markers are mode-independent), so this loop is not "the degraded
+# engram loop" — resolve_store decides what each cycle actually is.
 if [ -d "$kurama_root" ]; then
   for d in "$kurama_root"/*/; do
     [ -d "$d" ] || continue
@@ -384,7 +493,7 @@ if [ -d "$kurama_root" ]; then
     if [ -d "$os_changes/$name" ] && os_has_artifacts "$os_changes/$name/"; then
       continue
     fi
-    process_change "$name" "engram (fallback)" "kurama" "$d" "${d}state.md"
+    process_change "$name" "kurama" "$d" "${d}state.md"
   done
 fi
 
