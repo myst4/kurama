@@ -21,9 +21,15 @@ This example ships two OpenCode configs — install exactly one per project:
 
 When delegating, target the `sdd-<phase>` agents in multi mode and the `general` subagent in single mode.
 
+OpenCode ships no review-layer agents: in BOTH modes run each review lens (`review-*`, `jd-*`) as a `general` subtask with that lens's skill rules injected. Both configs allow `general` for exactly this.
+
+### `/sdd-status` (OpenCode only)
+
+Read-only report of every active SDD cycle — last completed phase, next phase, task progress. It runs no phase work, and no other harness installs it: never assume it exists elsewhere.
+
 ### Named model profiles (optional)
 
-A **profile** is a named parallel set of agents that share the SDD prompts and vary only their `model`. Installing one (`setup.sh --agent opencode --opencode-profile NAME[:provider/model]`) splices a `kurama-orchestrator` agent (`mode:primary`) plus suffixed `sdd-<phase>-NAME` subagents (`mode:subagent`, `hidden`) into `opencode.json`, all referencing the shared `~/.config/opencode/prompts/sdd/sdd-<phase>.md` prompt files. In the OpenCode TUI press **Tab** to cycle among the `mode:primary` orchestrators. The `/sdd-*` slash commands stay frontmatter-pinned to the base agents (executor commands → `sdd-<phase>`, meta commands → `sdd-orchestrator`), so they ignore the selected primary and run at their default models. To use a profile's per-phase models, select `kurama-orchestrator` and drive the flow with a **freeform** (non-slash) request; it delegates only to its own `sdd-<phase>-NAME` subagents, each carrying the profile's configured model. Models are edited by hand in `opencode.json` (or set once via the flag's `:provider/model`) — there is no picker. See `docs/opencode-profiles.md`.
+A **profile** is a named parallel agent set that shares the SDD prompts and varies only its `model`. Installing one (`setup.sh --agent opencode --opencode-profile NAME[:provider/model]`) splices a `kurama-orchestrator` primary plus hidden `sdd-<phase>-NAME` subagents into `opencode.json`, all referencing the shared `~/.config/opencode/prompts/sdd/` prompt files. Press **Tab** in the TUI to cycle primaries. The `/sdd-*` slash commands stay frontmatter-pinned to the base agents, so they ignore the selected primary and run at their default models; to use a profile's per-phase models, select `kurama-orchestrator` and drive the flow with a **freeform** (non-slash) request, which delegates only to its own `sdd-<phase>-NAME` subagents. Models are hand-edited in `opencode.json` (or set once via the flag's `:provider/model`) — there is no picker. See `docs/opencode-profiles.md`.
 
 <!-- @@MODEL_ASSIGNMENTS_SECTION@@ -->
 <!-- gentle-ai:sdd-model-assignments -->

@@ -15,9 +15,9 @@ CONTEXT:
 - Working directory: !`echo -n "$(pwd)"`
 - Current project: !`echo -n "$(basename $(pwd))"`
 - Change name: $ARGUMENTS
-- Artifact store mode: engram
+- Artifact store mode: resolve it from the persisted settings (`artifact_store.mode` in `openspec/config.yaml` or the `sdd-init/{project}` settings bundle) and propagate the resolved value to every sub-agent you launch. Never assume `engram`.
 
-ENGRAM NOTE:
-Sub-agents handle persistence automatically. Each phase saves its artifact to engram with topic_key "sdd/$ARGUMENTS/{type}".
+PERSISTENCE NOTE:
+Sub-agents handle persistence automatically for the mode you propagate — each phase saves its artifact under "sdd/$ARGUMENTS/{type}" (engram topic_key, or the equivalent openspec path per skills/_shared/openspec-convention.md).
 
 Read the orchestrator instructions to coordinate this workflow. Do NOT execute phase work inline — delegate to sub-agents.
