@@ -3371,6 +3371,91 @@ test_setup_empty_claude_json_engram_not_blanked() {
     return 0
 }
 
+test_install_refuses_setup_managed_receipt() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local before
+    before="$(cat "$manifest")"
+
+    local output status=0
+    output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "install.sh silently took over a target setup.sh manages"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'setup.sh' || { echo "no message naming setup.sh"; return 1; }
+    printf '%s\n' "$output" | grep -q 'update.sh' || { echo "no pointer to update.sh"; return 1; }
+
+    # The receipt survives byte-for-byte: hooks, prompts, settings and tools[] are
+    # records of files install.sh never wrote and cannot reproduce.
+    assert_eq "$before" "$(cat "$manifest")" "the setup.sh receipt must be left untouched" || return 1
+    grep -q '"settings"' "$manifest" || { echo "settings[] lost"; return 1; }
+    grep -q 'hooks/kurama/archive-gate.sh' "$manifest" || { echo "hook file entries lost"; return 1; }
+    return 0
+}
+
+test_install_without_group_removes_excluded_skills() {
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1 || { echo "first install failed"; return 1; }
+    assert_dir_exists "$HOME/.claude/skills/review-risk" || return 1
+
+    bash "$INSTALL_SCRIPT" --agent claude-code --without review > /dev/null 2>&1 \
+        || { echo "re-install with --without review failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if grep -q 'review-risk' "$manifest"; then echo "receipt still lists the excluded skill"; return 1; fi
+    # Dropping it from the receipt without removing it is the bug: the skill keeps
+    # loading in the agent while nothing records it.
+    if [ -e "$HOME/.claude/skills/review-risk/SKILL.md" ]; then
+        echo "excluded skill left on disk and now unmanaged: review-risk/SKILL.md"; return 1
+    fi
+    assert_file_exists "$HOME/.claude/skills/sdd-apply/SKILL.md" || return 1
+    return 0
+}
+
+test_install_incomplete_checkout_aborts_early() {
+    # A checkout with skills/ but no examples/ — the shape the OpenCode command
+    # glob used to die on, midway through an all-global run.
+    local fake="$TEST_TMPDIR/partial-repo"
+    mkdir -p "$fake/scripts"
+    cp "$INSTALL_SCRIPT" "$fake/scripts/install.sh"
+    ln -s "$REPO_DIR/skills" "$fake/skills"
+    cp "$REPO_DIR/VERSION" "$fake/VERSION"
+
+    local output status=0
+    output=$(bash "$fake/scripts/install.sh" --agent all-global 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then echo "install.sh reported success on an incomplete checkout"; return 1; fi
+    printf '%s\n' "$output" | grep -q 'examples' || {
+        echo "the abort never names examples/ as the missing piece"; return 1; }
+    # It aborts up front, instead of after installing three targets out of five.
+    if [ -d "$HOME/.claude/skills" ]; then echo "targets were written before the abort"; return 1; fi
+    return 0
+}
+
+test_install_flag_without_value_shows_usage() {
+    local output status=0
+    output=$(bash "$INSTALL_SCRIPT" --agent 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then echo "a valueless --agent must not exit 0"; return 1; fi
+    if printf '%s\n' "$output" | grep -q 'unbound variable'; then
+        echo "raw bash error leaked instead of a usage message:"
+        printf '%s\n' "$output" | tail -3
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'usage' || { echo "no usage message"; return 1; }
+    return 0
+}
+
+test_setup_flag_without_value_shows_usage() {
+    local output status=0
+    output=$(bash "$SETUP_SCRIPT" --agent 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then echo "a valueless --agent must not exit 0"; return 1; fi
+    if printf '%s\n' "$output" | grep -q 'unbound variable'; then
+        echo "raw bash error leaked instead of a usage message:"
+        printf '%s\n' "$output" | tail -3
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'missing value' || { echo "no 'missing value' message"; return 1; }
+    return 0
+}
+
 # ============================================================================
 # Run all tests
 # ============================================================================
@@ -3650,6 +3735,11 @@ run_test "jq-less run records no settings.json it never wrote" test_nojq_receipt
 run_test "empty settings.json is merged, never blanked" test_setup_empty_settings_json_not_blanked
 run_test "empty opencode.json is created, never blanked" test_setup_empty_opencode_json_not_blanked
 run_test "empty .claude.json survives the Engram merge" test_setup_empty_claude_json_engram_not_blanked
+run_test "install.sh refuses a setup.sh-managed receipt" test_install_refuses_setup_managed_receipt
+run_test "--without removes the excluded skills from disk" test_install_without_group_removes_excluded_skills
+run_test "incomplete checkout aborts before writing" test_install_incomplete_checkout_aborts_early
+run_test "install.sh: valueless flag prints usage" test_install_flag_without_value_shows_usage
+run_test "setup.sh: valueless flag prints usage" test_setup_flag_without_value_shows_usage
 echo ""
 
 # ============================================================================

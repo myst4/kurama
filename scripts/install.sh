@@ -33,6 +33,10 @@ KNOWN_GROUPS="sdd-core quality review optional tdd lang"
 # Populated from the manifest once flags are parsed (see compute_active_skills).
 ACTIVE_SKILLS=()
 
+# Count of targets skipped because setup.sh manages their receipt (see
+# setup_managed_receipt). Non-zero makes the run exit non-zero.
+MANAGED_TARGETS_SKIPPED=0
+
 # ============================================================================
 # OS Detection
 # ============================================================================
@@ -308,6 +312,108 @@ compute_active_skills() {
     fi
 }
 
+# Emit each string element of a named JSON array (files, settings, pi_packages)
+# from an install manifest. Uses jq when available, otherwise a portable awk
+# fallback that reads the one-element-per-line arrays setup.sh/install.sh write.
+# Mirrors manifest_json_array in doctor.sh/update.sh so every script parses a
+# receipt the same way.
+#
+# Why the opening rule handles the whole array itself instead of just setting
+# inarr: for a single-line "key": [] the array closes on the line that opened it,
+# so setting inarr and skipping to the next line hands the closing-bracket check
+# a bracket that never arrives. The parser then runs to the end of the receipt,
+# printing the NEXT key's declaration line as if it were an element, followed by
+# the elements that belong to that other key. This function drives rm from
+# files[] below, so an empty files[] would migrate .claude/settings.json out of
+# settings[] and delete the file outright instead of stripping its kurama hooks
+# block. The !inarr guard is the same defense one level up: without it a later
+# "<key>" nested elsewhere in the receipt re-opens an array already closed.
+manifest_json_array() {
+    local manifest="$1" key="$2"
+    [ -f "$manifest" ] || return 0
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null
+        return 0
+    fi
+    awk -v key="$key" '
+        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
+            tail = substr($0, index($0, "[") + 1)
+            if (tail ~ /\]/) {                       # array opens and closes on this line
+                sub(/\].*/, "", tail)
+                n = split(tail, parts, ",")
+                for (i = 1; i <= n; i++) {
+                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
+                    if (parts[i] != "") print parts[i]
+                }
+                next
+            }
+            inarr = 1; next
+        }
+        inarr && /\]/ { inarr = 0 }
+        inarr {
+            line = $0
+            gsub(/^[[:space:]]+/, "", line)
+            gsub(/[[:space:]]+$/, "", line)
+            gsub(/,$/, "", line)
+            gsub(/"/, "", line)
+            if (line != "") print line
+        }
+    ' "$manifest"
+}
+
+# Top-level receipt keys only setup.sh's finalize_receipt writes. install.sh's
+# receipt is a strict subset (name/version/commit/tool/files), so seeing any of
+# these means the target is managed by setup.sh.
+SETUP_ONLY_RECEIPT_KEYS="tools scope settings prompts engram_mcp tui_plugins pi_packages"
+
+# True when the receipt at $1 was written by setup.sh. write_install_manifest
+# OVERWRITES, at the same path where setup.sh MERGES, so running install.sh over
+# a setup.sh install used to drop tools/scope/settings/prompts/engram_mcp/
+# tui_plugins and every file entry outside skills[] — hooks, native agents and
+# prompt blocks became permanently un-uninstallable. install.sh cannot rewrite
+# those records (it never wrote those files, and carrying unknown keys forward is
+# not something the jq-less path can do safely), so it refuses the target
+# instead. Detection is deliberately textual: same answer with or without jq.
+setup_managed_receipt() {
+    local receipt="$1" key
+    [ -f "$receipt" ] || return 1
+    for key in $SETUP_ONLY_RECEIPT_KEYS; do
+        if grep -q "\"$key\"[[:space:]]*:" "$receipt"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Remove files the PREVIOUS install.sh receipt recorded that this run did not
+# install — a group dropped with --without, or a skill removed from the manifest.
+# Dropping them from the receipt alone (the old behavior) left them on disk and
+# still loading in the agent, with nothing recording them: excluded skills that
+# stayed active and unmanaged. Only plain relative entries are ever touched.
+remove_stale_receipt_files() {
+    local target_dir="$1" installed="$2"
+    local manifest_path="$target_dir/$INSTALL_MANIFEST_NAME"
+    [ -f "$manifest_path" ] || return 0
+
+    local entry removed=0
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        # Absolute or ../-escaping entries are not something install.sh wrote.
+        case "$entry" in
+            /*|*..*) continue ;;
+        esac
+        if printf '%s\n' "$installed" | grep -qxF -- "$entry"; then continue; fi
+        [ -e "$target_dir/$entry" ] || continue
+        rm -f "$target_dir/$entry"
+        rmdir "$(dirname "$target_dir/$entry")" 2>/dev/null || true
+        removed=$((removed + 1))
+    done <<< "$(manifest_json_array "$manifest_path" "files")"
+
+    if [ "$removed" -gt 0 ]; then
+        print_warn "$removed file(s) from the previous install removed (no longer selected)"
+    fi
+}
+
 # Record what we installed under a target so upgrades and uninstall.sh can act on
 # an exact file list. "$files" is a newline-delimited list of target-relative
 # paths; blank lines are ignored.
@@ -360,6 +466,17 @@ validate_source() {
         print_error "Missing: skills/manifest.json (the skill list source of truth)"
         missing=$((missing + 1))
     fi
+    # examples/ is not optional: the OpenCode target installs its /sdd-* command
+    # files from it, and every target's "next step" points at a file under it.
+    # Checking it here turns an incomplete checkout into one message up front
+    # instead of an abort three targets into an all-global run.
+    if [ ! -d "$REPO_DIR/examples" ]; then
+        print_error "Missing: examples/ (agent configs and the OpenCode /sdd-* commands)"
+        missing=$((missing + 1))
+    elif [ ! -d "$REPO_DIR/examples/opencode/commands" ]; then
+        print_error "Missing: examples/opencode/commands (the OpenCode /sdd-* command files)"
+        missing=$((missing + 1))
+    fi
     if [ "$missing" -gt 0 ]; then
         echo -e "\n${RED}${BOLD}Source validation failed.${NC} Is this a complete clone of the repository?"
         echo -e "  Try: ${CYAN}git clone https://github.com/myst4/kurama.git${NC}\n"
@@ -370,6 +487,19 @@ validate_source() {
 install_skills() {
     local target_dir="$1"
     local tool_name="$2"
+
+    # A target setup.sh manages carries records install.sh cannot reproduce.
+    # Skip it whole — installing files whose receipt we refuse to write would be
+    # the same ghost install from the other direction.
+    if setup_managed_receipt "$target_dir/$INSTALL_MANIFEST_NAME"; then
+        echo -e "\n${BLUE}Skipping ${BOLD}$tool_name${NC}${BLUE}...${NC}"
+        print_warn "This target is managed by setup.sh: $target_dir"
+        print_warn "Its receipt records hooks, agents, prompt blocks and MCP registrations"
+        print_warn "that install.sh never wrote and would overwrite out of existence."
+        echo -e "  ${CYAN}Re-sync it with:${NC} scripts/update.sh    ${CYAN}(or re-run scripts/setup.sh)${NC}"
+        MANAGED_TARGETS_SKIPPED=$((MANAGED_TARGETS_SKIPPED + 1))
+        return 0
+    fi
 
     echo -e "\n${BLUE}Installing skills for ${BOLD}$tool_name${NC}${BLUE}...${NC}"
 
@@ -428,6 +558,9 @@ $skill_name/SKILL.md"
         count=$((count + 1))
     done
 
+    # Reconcile with the previous receipt BEFORE replacing it, so a group dropped
+    # with --without leaves neither a file on disk nor an entry behind.
+    remove_stale_receipt_files "$target_dir" "$installed_files"
     write_install_manifest "$target_dir" "$tool_name" "$installed_files"
 
     echo -e "\n  ${GREEN}${BOLD}$count skills installed${NC} → $target_dir"
@@ -440,10 +573,19 @@ install_opencode_commands() {
 
     echo -e "\n${BLUE}Installing OpenCode commands...${NC}"
 
+    if [ ! -d "$commands_src" ]; then
+        print_warn "OpenCode commands source not found: $commands_src (skipped)"
+        return 0
+    fi
+
     mkdir -p "$commands_target"
 
     local count=0
     for cmd_file in "$commands_src"/sdd-*.md; do
+        # An unmatched glob expands to the pattern itself: without this guard an
+        # incomplete checkout made `cp` fail and killed the run under `set -e`,
+        # mid-way through all-global (setup.sh's equivalent loop has the guard).
+        [ -f "$cmd_file" ] || continue
         local cmd_name
         cmd_name=$(basename "$cmd_file")
         cp "$cmd_file" "$commands_target/$cmd_name"
@@ -577,12 +719,27 @@ setup_colors
 # Parse arguments
 AGENT=""
 CUSTOM_PATH=""
+
+# Every value-taking flag goes through this first: under `set -u` a bare
+# `--agent` at the end of the line used to abort with a raw
+# "install.sh: line NNN: $2: unbound variable" instead of telling the user what
+# the flag wants.
+require_flag_value() {
+    local flag="$1" value="${2:-}"
+    if [ -z "$value" ]; then
+        print_error "Missing value for $flag"
+        echo ""
+        show_help
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --agent)   AGENT="$2"; shift 2 ;;
-        --path)    CUSTOM_PATH="$2"; shift 2 ;;
-        --with)    validate_group_name "$2"; enable_group "$2"; shift 2 ;;
-        --without) validate_group_name "$2"; disable_group "$2"; shift 2 ;;
+        --agent)   require_flag_value --agent "${2:-}";   AGENT="$2"; shift 2 ;;
+        --path)    require_flag_value --path "${2:-}";    CUSTOM_PATH="$2"; shift 2 ;;
+        --with)    require_flag_value --with "${2:-}";    validate_group_name "$2"; enable_group "$2"; shift 2 ;;
+        --without) require_flag_value --without "${2:-}"; validate_group_name "$2"; disable_group "$2"; shift 2 ;;
         --version) print_version; exit 0 ;;
         -h|--help) show_help; exit 0 ;;
         *)  echo "Unknown option: $1"; show_help; exit 1 ;;
@@ -599,6 +756,14 @@ if [[ -n "$AGENT" ]]; then
 else
     # Interactive mode
     interactive_menu
+fi
+
+# Targets skipped because setup.sh manages them are a non-zero outcome: the user
+# asked for an install and did not get one there.
+if [ "$MANAGED_TARGETS_SKIPPED" -gt 0 ]; then
+    echo -e "\n${RED}${BOLD}Nothing installed for $MANAGED_TARGETS_SKIPPED target(s)${NC} — they are managed by setup.sh."
+    echo -e "  Re-sync them with: ${CYAN}scripts/update.sh${NC}\n"
+    exit 1
 fi
 
 echo -e "\n${GREEN}${BOLD}Done!${NC} Start using SDD with: ${CYAN}/sdd-init${NC} in your project\n"

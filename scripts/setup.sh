@@ -1321,11 +1321,23 @@ setup_opencode() {
     fi
 
     # Merge opencode.json agent config (idempotent: replaces sdd-* agents, preserves user model choices).
-    # -s, not -f: a 0-byte opencode.json has nothing to merge and nothing to lose,
-    # so it takes the "create from template" branch instead of feeding jq an empty
-    # input that yields an empty merge result.
+    # Three states, decided explicitly instead of by `[ -f ]`: a config with real
+    # content is merged into; an absent or blank one is created from the template
+    # (feeding jq an empty input yields an empty result, which used to be written
+    # straight over the file); one we cannot read stops the run — never clobber
+    # what we cannot see.
     if command -v jq &>/dev/null && [ -f "$example_config" ]; then
-        if [ -s "$config_file" ]; then
+        local config_state="create"
+        if [ -e "$config_file" ]; then
+            if [ ! -r "$config_file" ]; then
+                fail "Cannot read $config_file — the SDD agents were NOT merged"
+                info "Fix its permissions and re-run: ./setup.sh --agent opencode"
+                exit 1
+            fi
+            if grep -q '[^[:space:]]' "$config_file"; then config_state="merge"; fi
+        fi
+
+        if [ "$config_state" = "merge" ]; then
             local example_agents
             example_agents=$(jq '.agent // {}' "$example_config")
 
@@ -2105,6 +2117,18 @@ STARTUP_LOGO=""            # "yes" (via --with-logo) installs the Kurama startup
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
 ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
 
+# Every value-taking flag goes through this first: under `set -u` a bare
+# `--agent` at the end of the line used to abort with a raw
+# "setup.sh: line NNN: $2: unbound variable" instead of naming the flag.
+require_flag_value() {
+    local flag="$1" value="${2:-}"
+    if [ -z "$value" ]; then
+        echo "Missing value for $flag"
+        echo "Run: setup.sh --help"
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --agent)
@@ -2113,6 +2137,7 @@ while [[ $# -gt 0 ]]; do
             # and a bare `mkdir: : No such file or directory` — which is exactly
             # what a stale `--agent gemini-cli|cursor|vscode|antigravity` in a
             # script or CI job now produces. Fail here, by name, instead.
+            require_flag_value --agent "${2:-}"
             case "$2" in
                 claude-code|opencode|codex|pi|omp) AGENT="$2"; shift 2 ;;
                 *)
@@ -2125,17 +2150,19 @@ while [[ $# -gt 0 ]]; do
         --all)            ALL=true; shift ;;
         --non-interactive) NON_INTERACTIVE=true; ALL=true; shift ;;
         --scope)
+            require_flag_value --scope "${2:-}"
             case "$2" in
                 global|project) SCOPE="$2"; shift 2 ;;
                 *) echo "Invalid scope: $2 (use 'global' or 'project')"; exit 1 ;;
             esac
             ;;
-        --path)           TARGET_PATH="$2"; shift 2 ;;
+        --path)           require_flag_value --path "${2:-}"; TARGET_PATH="$2"; shift 2 ;;
         --with-pi-packages)    PI_PACKAGES="yes"; shift ;;
         --without-pi-packages) PI_PACKAGES="no"; shift ;;
         --with-engram)         ENGRAM="yes"; shift ;;
         --without-engram)      ENGRAM="no"; shift ;;
         --opencode-mode)
+            require_flag_value --opencode-mode "${2:-}"
             if [[ "$2" == "single" || "$2" == "multi" ]]; then
                 OPENCODE_MODE="$2"; shift 2
             else
@@ -2145,6 +2172,7 @@ while [[ $# -gt 0 ]]; do
         --opencode-profile)
             # Grammar: NAME[:provider/model]. Split on the FIRST colon so the
             # model's own "/" survives; an empty NAME defaults to "kurama".
+            require_flag_value --opencode-profile "${2:-}"
             _prof_val="$2"
             _prof_name="${_prof_val%%:*}"
             _prof_rest="${_prof_val#*:}"
