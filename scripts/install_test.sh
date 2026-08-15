@@ -3129,6 +3129,146 @@ test_doctor_reports_engram_mcp() {
 }
 
 # ============================================================================
+# Tests — validate_skills.sh frontmatter linter (#31)
+#
+# The linter's job is to be the thing that notices a SKILL.md a harness cannot
+# read. It reported PASS on three malformed inputs: a frontmatter fence that is
+# never closed (so the ENTIRE file is frontmatter to anything that parses it),
+# an empty `name:`, and an empty `description:` — the last two being exactly the
+# fields Claude Code and OpenCode index skills by.
+#
+# validate_skills.sh has no self-test mechanism and lints the repo it lives in,
+# resolved from its own location. So the fixtures below are driven through a
+# throwaway repo with a copy of the SHIPPED script in it: same code, same code
+# path, a skills tree we control. The other checks fail against a bare fixture
+# tree by design (no manifest, no installers) — every case here reads the
+# frontmatter check's own lines, never the exit code.
+# ============================================================================
+
+# Build a throwaway repo at $1 that validate_skills.sh will lint: a copy of the
+# real script under scripts/, and an empty skills/ for the fixtures.
+make_linter_fixture_repo() {
+    local root="$1"
+    mkdir -p "$root/scripts" "$root/skills"
+    cp "$VALIDATE_SCRIPT" "$root/scripts/validate_skills.sh"
+}
+
+# Write stdin as skills/$2/SKILL.md inside the fixture repo $1.
+write_fixture_skill() {
+    local root="$1" name="$2"
+    mkdir -p "$root/skills/$name"
+    cat > "$root/skills/$name/SKILL.md"
+}
+
+# Echo the frontmatter section of the linter's report for fixture repo $1. The
+# section ends at the next `== ... ==` header, so a later check's output can
+# never be mistaken for a frontmatter verdict.
+lint_fixture_frontmatter_report() {
+    local root="$1" output status=0
+    output=$(bash "$root/scripts/validate_skills.sh" 2>&1) || status=$?
+    printf '%s\n' "$output" | awk '
+        /^== SKILL\.md frontmatter ==$/ { on = 1; next }
+        on && /^== / { exit }
+        on { print }
+    '
+}
+
+test_validate_skills_rejects_unclosed_frontmatter_fence() {
+    local root="$TEST_TMPDIR/lint-unclosed"
+    make_linter_fixture_repo "$root"
+    write_fixture_skill "$root" unclosed <<'MD'
+---
+name: unclosed
+description: the closing fence never arrives, so this whole file is frontmatter
+MD
+    local report
+    report="$(lint_fixture_frontmatter_report "$root")"
+    printf '%s\n' "$report" | grep -q '\[FAIL\].*unclosed' || {
+        echo "the linter accepted a SKILL.md whose frontmatter fence is never closed:"
+        printf '%s\n' "$report"
+        return 1
+    }
+    return 0
+}
+
+test_validate_skills_rejects_empty_name() {
+    local root="$TEST_TMPDIR/lint-emptyname"
+    make_linter_fixture_repo "$root"
+    write_fixture_skill "$root" emptyname <<'MD'
+---
+name:
+description: a real description, but the name a harness indexes by is blank
+---
+
+Body.
+MD
+    local report
+    report="$(lint_fixture_frontmatter_report "$root")"
+    printf '%s\n' "$report" | grep -q '\[FAIL\].*emptyname' || {
+        echo "the linter accepted a SKILL.md with an empty name:"
+        printf '%s\n' "$report"
+        return 1
+    }
+    return 0
+}
+
+test_validate_skills_rejects_empty_description() {
+    local root="$TEST_TMPDIR/lint-emptydesc"
+    make_linter_fixture_repo "$root"
+    write_fixture_skill "$root" emptydesc <<'MD'
+---
+name: emptydesc
+description:
+---
+
+Body.
+MD
+    local report
+    report="$(lint_fixture_frontmatter_report "$root")"
+    printf '%s\n' "$report" | grep -q '\[FAIL\].*emptydesc' || {
+        echo "the linter accepted a SKILL.md with an empty description:"
+        printf '%s\n' "$report"
+        return 1
+    }
+    return 0
+}
+
+test_validate_skills_accepts_wellformed_frontmatter() {
+    # The other half of the contract: tightening a linter is only useful if it
+    # still passes what is correct. A multi-line folded description is in here
+    # because that is the shape several shipped skills use.
+    local root="$TEST_TMPDIR/lint-good"
+    make_linter_fixture_repo "$root"
+    write_fixture_skill "$root" wellformed <<'MD'
+---
+name: wellformed
+description: >-
+  A folded description that continues
+  onto a second line.
+---
+
+Body with a horizontal rule below, which is NOT a frontmatter fence.
+
+---
+
+More body.
+MD
+    local report
+    report="$(lint_fixture_frontmatter_report "$root")"
+    if printf '%s\n' "$report" | grep -q '\[FAIL\]'; then
+        echo "the linter rejected a well-formed SKILL.md:"
+        printf '%s\n' "$report"
+        return 1
+    fi
+    printf '%s\n' "$report" | grep -q '\[ OK \]' || {
+        echo "the frontmatter check never reported a verdict at all:"
+        printf '%s\n' "$report"
+        return 1
+    }
+    return 0
+}
+
+# ============================================================================
 # Tests — jq-less host (the awk fallbacks actually work)
 #
 # Kurama advertises itself as zero-dependency, but every restricted-PATH farm in
@@ -4810,6 +4950,13 @@ run_test "project scope writes .mcp.json inside the repo" test_engram_project_sc
 run_test "non-interactive never invokes brew (guide only)" test_engram_brew_not_invoked_noninteractive
 run_test "uninstall strips the Engram MCP registration, rest intact" test_engram_uninstall_removes_registration
 run_test "doctor mentions the Engram MCP registration" test_doctor_reports_engram_mcp
+echo ""
+
+echo -e "${BOLD}validate_skills.sh — frontmatter linter${NC}"
+run_test "an unclosed --- fence is a failure" test_validate_skills_rejects_unclosed_frontmatter_fence
+run_test "an empty name: is a failure" test_validate_skills_rejects_empty_name
+run_test "an empty description: is a failure" test_validate_skills_rejects_empty_description
+run_test "well-formed frontmatter still passes" test_validate_skills_accepts_wellformed_frontmatter
 echo ""
 
 echo -e "${BOLD}jq-less host (awk fallbacks, restricted-PATH farm without jq)${NC}"
