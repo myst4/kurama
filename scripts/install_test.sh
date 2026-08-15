@@ -2271,8 +2271,10 @@ test_scope_project_uninstall_clean() {
 # single-line "key": [] itself — a copy that only set inarr would walk past the
 # empty array into the NEXT key, which is the defect
 # test_nojq_receipt_parser_ignores_single_line_empty_array exists to catch. This
-# is the sixth copy of that parser; they are kept in sync by convention, so an
-# edit here belongs in the other five too.
+# is the SEVENTH copy of that parser — setup.sh, install.sh, update.sh,
+# uninstall.sh, doctor.sh, setup-tui.sh and this file — and they are kept in sync
+# by convention, so an edit here belongs in the other six too (issue #37 tracks
+# the shared library that would end this).
 receipt_array_values() {
     local manifest="$1" key="$2"
     [ -f "$manifest" ] || return 0
@@ -3266,7 +3268,8 @@ test_setup_survives_hooks_merge_failure() {
     if grep -q 'settings.json' "$manifest"; then
         echo "receipt claims a settings.json that was never merged"; return 1
     fi
-    printf '%s\n' "$output" | grep -q 'hooks' || { echo "the failure was never reported to the user"; return 1; }
+    printf '%s\n' "$output" | grep -q 'hooks not registered' || {
+        echo "the failure was never reported to the user"; return 1; }
     return 0
 }
 
@@ -3322,6 +3325,11 @@ test_nojq_receipt_omits_unwritten_settings() {
     assert_file_exists "$manifest" || return 1
     # Without jq the hooks block is printed as manual steps and nothing is written,
     # so nothing may be recorded either.
+    #
+    # Forward guard, not a co-assertion: no jq-less path writes a settings.json
+    # today, so this cannot fail on the current tree. It is here so that a future
+    # "write it with sed/awk when jq is missing" shortcut trips a test instead of
+    # silently editing user JSON with a line editor.
     if [ -f "$repo/.claude/settings.json" ]; then
         echo "jq-less run wrote a settings.json it has no parser for"; return 1
     fi
@@ -3383,7 +3391,8 @@ test_install_refuses_setup_managed_receipt() {
     if [ "$status" -eq 0 ]; then
         echo "install.sh silently took over a target setup.sh manages"; return 1
     fi
-    printf '%s\n' "$output" | grep -q 'setup.sh' || { echo "no message naming setup.sh"; return 1; }
+    printf '%s\n' "$output" | grep -q 'managed by setup.sh' || {
+        echo "no message naming setup.sh as the owner of this target"; return 1; }
     printf '%s\n' "$output" | grep -q 'update.sh' || { echo "no pointer to update.sh"; return 1; }
 
     # The receipt survives byte-for-byte: hooks, prompts, settings and tools[] are
@@ -3459,7 +3468,7 @@ test_install_incomplete_checkout_aborts_early() {
     local output status=0
     output=$(bash "$fake/scripts/install.sh" --agent all-global 2>&1) || status=$?
     if [ "$status" -eq 0 ]; then echo "install.sh reported success on an incomplete checkout"; return 1; fi
-    printf '%s\n' "$output" | grep -q 'examples' || {
+    printf '%s\n' "$output" | grep -q 'Missing: examples' || {
         echo "the abort never names examples/ as the missing piece"; return 1; }
     # It aborts up front, instead of after installing three targets out of five.
     if [ -d "$HOME/.claude/skills" ]; then echo "targets were written before the abort"; return 1; fi
@@ -3489,6 +3498,526 @@ test_setup_flag_without_value_shows_usage() {
         return 1
     fi
     printf '%s\n' "$output" | grep -qi 'missing value' || { echo "no 'missing value' message"; return 1; }
+    return 0
+}
+
+# ============================================================================
+# Tests — #22: the OpenCode install is fully recorded in the receipt
+#
+# setup_opencode wrote four things no receipt mentioned: the nine /sdd-* command
+# files, the global AGENTS.md, the sdd-* block of opencode.json, and the resolved
+# mode/profile. The two maintenance paths then lied about the result — update
+# re-ran setup with neither mode nor profile (a multi+profile install collapsed
+# from 20 agents to 1 while printing "no recorded file changed"), and uninstall
+# reported "Done." with all twelve files still on disk.
+# ============================================================================
+
+OPENCODE_RECEIPT_REL="skills/.kurama-install-manifest.json"
+
+test_opencode_receipt_records_commands_prompt_and_config() {
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
+    local manifest="$HOME/.config/opencode/$OPENCODE_RECEIPT_REL"
+    assert_file_exists "$manifest" || return 1
+
+    # The nine command files carry Kurama-owned names and Kurama-owned content →
+    # files[], the array uninstall removes outright.
+    local n
+    n=$(receipt_array_values "$manifest" "files" | grep -c 'commands/sdd-.*\.md' || true)
+    assert_eq "9" "$n" "the receipt must record all nine OpenCode command files" || return 1
+
+    # AGENTS.md is a SHARED prompt file: recorded in prompts[] so uninstall strips
+    # our block instead of deleting a file the user may also write in.
+    receipt_array_values "$manifest" "prompts" | grep -q 'AGENTS\.md' || {
+        echo "the receipt does not record the OpenCode orchestrator prompt"; return 1; }
+
+    # opencode.json is the user's config we merge into → its own array, whose
+    # reversal is "strip Kurama's agents", never rm.
+    receipt_array_values "$manifest" "opencode_configs" | grep -q 'opencode\.json' || {
+        echo "the receipt does not record opencode.json"; return 1; }
+
+    # And it must NOT be in files[]: that would make uninstall delete the whole
+    # config, taking every agent the user defined with it.
+    if receipt_array_values "$manifest" "files" | grep -q 'opencode\.json'; then
+        echo "opencode.json is recorded in files[] — uninstall would delete the user's config"; return 1
+    fi
+    return 0
+}
+
+test_opencode_receipt_records_mode_and_profile() {
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "setup opencode multi+profile failed"; return 1; }
+    local manifest="$HOME/.config/opencode/$OPENCODE_RECEIPT_REL"
+    grep -q '"opencode_mode": "multi"' "$manifest" || {
+        echo "the resolved --opencode-mode is not recorded"; return 1; }
+    grep -q '"opencode_profile": "testp"' "$manifest" || {
+        echo "the resolved --opencode-profile is not recorded"; return 1; }
+    grep -q '"opencode_profile_model": "prov/model"' "$manifest" || {
+        echo "the profile model is not recorded"; return 1; }
+    return 0
+}
+
+test_setup_receipt_omits_opencode_keys_for_other_agents() {
+    # The keys are per-target, not global state: a claude-code receipt that
+    # carried them would make update.sh re-pass an OpenCode mode to a harness
+    # that has none.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if grep -q 'opencode_mode' "$manifest"; then
+        echo "a claude-code receipt records an OpenCode mode"; return 1
+    fi
+    return 0
+}
+
+test_update_preserves_opencode_mode_and_profile() {
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "setup opencode multi+profile failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    local before
+    before=$(jq -r '[.agent | keys[]] | length' "$cfg")
+    [ "$before" -ge 19 ] || { echo "precondition: expected the multi+profile agent set, got $before"; return 1; }
+    # Multi mode also rewrites each subtask command's `agent:` line — the other
+    # half of the install a mode-less re-sync silently reverted.
+    grep -q '^agent: sdd-apply$' "$HOME/.config/opencode/commands/sdd-apply.md" || {
+        echo "precondition: multi-mode command routing missing"; return 1; }
+
+    bash "$UPDATE_SCRIPT" --agent opencode > /dev/null 2>&1 || { echo "update.sh failed"; return 1; }
+
+    assert_eq "$before" "$(jq -r '[.agent | keys[]] | length' "$cfg")" \
+        "the re-sync dropped agents (mode/profile not carried over)" || return 1
+    jq -e '.agent["sdd-apply-testp"]' "$cfg" > /dev/null 2>&1 || {
+        echo "the profile's suffixed subagents did not survive the re-sync"; return 1; }
+    jq -e '.agent["kurama-orchestrator"]' "$cfg" > /dev/null 2>&1 || {
+        echo "the profile orchestrator did not survive the re-sync"; return 1; }
+    grep -q '^agent: sdd-apply$' "$HOME/.config/opencode/commands/sdd-apply.md" || {
+        echo "the re-sync reverted the multi-mode command routing"; return 1; }
+    return 0
+}
+
+test_update_preserves_hand_edited_profile_model() {
+    # The recorded model documents the install-time choice; update deliberately
+    # re-passes the profile in its BARE form, because "NAME:provider/model" is
+    # documented as overriding hand edits — an update must not revert them.
+    run_setup_opencode --opencode-mode multi --opencode-profile testp:prov/model \
+        || { echo "setup opencode multi+profile failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    local edited
+    edited=$(jq '.agent["sdd-apply-testp"].model = "HAND/EDITED"' "$cfg")
+    printf '%s\n' "$edited" > "$cfg"
+
+    bash "$UPDATE_SCRIPT" --agent opencode > /dev/null 2>&1 || { echo "update.sh failed"; return 1; }
+    assert_eq "HAND/EDITED" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
+        "update.sh reverted a hand-edited profile model" || return 1
+    return 0
+}
+
+test_update_refuses_opencode_receipt_without_mode() {
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
+    local manifest="$HOME/.config/opencode/$OPENCODE_RECEIPT_REL"
+    local cfg="$HOME/.config/opencode/opencode.json"
+    # Every receipt written before #22 (and every install.sh receipt) looks like
+    # this: OpenCode recorded, mode not.
+    local stripped
+    stripped=$(grep -v '"opencode_mode"' "$manifest")
+    printf '%s\n' "$stripped" > "$manifest"
+    local before
+    before=$(jq -cS '.agent' "$cfg")
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent opencode 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "update.sh re-synced OpenCode with no recorded mode (silent downgrade)"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q -- '--opencode-mode' || {
+        echo "the refusal never says how to make the target re-syncable"; return 1; }
+    assert_eq "$before" "$(jq -cS '.agent' "$cfg")" \
+        "a refused re-sync must leave opencode.json byte-identical" || return 1
+    return 0
+}
+
+test_uninstall_removes_every_opencode_artifact() {
+    run_setup_opencode --opencode-mode multi --opencode-profile testp \
+        || { echo "setup opencode multi+profile failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    # A user-defined agent that must survive the removal.
+    local with_own
+    with_own=$(jq '.agent["my-own"] = {"mode":"subagent"}' "$cfg")
+    printf '%s\n' "$with_own" > "$cfg"
+
+    bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages > /dev/null 2>&1
+
+    local left
+    left=$(find "$HOME/.config/opencode/commands" -name 'sdd-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "0" "$left" "the nine /sdd-* command files survived the uninstall" || return 1
+
+    local agents_md="$HOME/.config/opencode/AGENTS.md"
+    if [ -f "$agents_md" ] && grep -q 'Kurama Orchestrator' "$agents_md"; then
+        echo "the orchestrator prompt survived the uninstall"; return 1
+    fi
+
+    local n
+    n=$(jq -r '[(.agent // {}) | keys[] | select(startswith("sdd-") or . == "kurama-orchestrator")] | length' "$cfg")
+    assert_eq "0" "$n" "opencode.json still routes to sdd-* agents that no longer exist" || return 1
+    jq -e '.agent["my-own"]' "$cfg" > /dev/null 2>&1 || {
+        echo "the uninstall removed a user-defined agent"; return 1; }
+    return 0
+}
+
+test_uninstall_sweeps_legacy_opencode_artifacts() {
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
+    local manifest="$HOME/.config/opencode/$OPENCODE_RECEIPT_REL"
+    # Rewrite the receipt into its pre-#22 shape — no command entries, no
+    # prompts[], no opencode_configs[] — which is what every OpenCode install
+    # already on a user's machine looks like.
+    local legacy
+    legacy=$(jq '.files = [.files[] | select(test("commands/sdd-") | not)]
+                 | .prompts = [] | .opencode_configs = []' "$manifest")
+    printf '%s\n' "$legacy" > "$manifest"
+    # …and the AGENTS.md that install wrote: the example copied whole, no markers.
+    cp "$REPO_DIR/examples/opencode/AGENTS.md" "$HOME/.config/opencode/AGENTS.md"
+
+    bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages > /dev/null 2>&1
+
+    local left
+    left=$(find "$HOME/.config/opencode/commands" -name 'sdd-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "0" "$left" "legacy receipt: the /sdd-* commands were left behind" || return 1
+    if [ -f "$HOME/.config/opencode/AGENTS.md" ]; then
+        echo "legacy receipt: the wholesale AGENTS.md was left behind"; return 1
+    fi
+    local n
+    n=$(jq -r '[(.agent // {}) | keys[] | select(startswith("sdd-"))] | length' \
+        "$HOME/.config/opencode/opencode.json")
+    assert_eq "0" "$n" "legacy receipt: opencode.json still routes to sdd-* agents" || return 1
+    return 0
+}
+
+test_uninstall_leaves_foreign_agents_md_alone() {
+    # The sweep may only delete an AGENTS.md Kurama wrote every byte of. A file
+    # the user owns is reported, never removed.
+    run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
+    local manifest="$HOME/.config/opencode/$OPENCODE_RECEIPT_REL"
+    local legacy
+    legacy=$(jq '.prompts = []' "$manifest")
+    printf '%s\n' "$legacy" > "$manifest"
+    printf '# My own AGENTS.md\n\nMy notes.\n' > "$HOME/.config/opencode/AGENTS.md"
+
+    bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages > /dev/null 2>&1
+    grep -q 'My notes' "$HOME/.config/opencode/AGENTS.md" 2>/dev/null || {
+        echo "the uninstall deleted a user-written AGENTS.md"; return 1; }
+    return 0
+}
+
+test_uninstall_claude_code_never_touches_opencode() {
+    # The sweep is gated on the receipt recording opencode. Without that gate,
+    # removing claude-code would reach into ~/.config/opencode.
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode failed"; return 1; }
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages > /dev/null 2>&1
+
+    local left
+    left=$(find "$HOME/.config/opencode/commands" -name 'sdd-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    assert_eq "9" "$left" "uninstalling claude-code removed OpenCode's command files" || return 1
+    jq -e '[(.agent // {}) | keys[] | select(startswith("sdd-"))] | length > 0' \
+        "$HOME/.config/opencode/opencode.json" > /dev/null 2>&1 || {
+        echo "uninstalling claude-code stripped OpenCode's agents"; return 1; }
+    return 0
+}
+
+# ============================================================================
+# Tests — #23: doctor verdicts it actually verified
+#
+# Three independent false verdicts: an orphan scan that only ran when NOT ONE of
+# the five harnesses had a receipt (and only looked at claude-code paths), a
+# display-name receipt that skipped every path-derived check in silence, and a
+# marker check that flagged every healthy OpenCode install as unmerged.
+# ============================================================================
+
+test_doctor_orphan_scan_runs_per_agent() {
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
+    # claude-code loses its receipt while opencode keeps one — the exact shape
+    # that used to skip the orphan scan entirely and exit 0 "Healthy".
+    rm -f "$HOME/.claude/skills/.kurama-install-manifest.json"
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "doctor was green over a fully wired claude-code install with no receipt"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'no install receipt' || {
+        echo "the orphaned claude-code artifacts are never named"; return 1; }
+    printf '%s\n' "$output" | grep -q 'hooks/kurama with no install receipt' || {
+        echo "the orphaned hooks are never reported"; return 1; }
+    printf '%s\n' "$output" | grep -q 'Diagnosing opencode' || {
+        echo "the receipt-backed opencode target was not diagnosed"; return 1; }
+    return 0
+}
+
+test_doctor_orphan_scan_covers_opencode() {
+    # The scan used to inspect claude-code paths only, so an orphaned OpenCode
+    # install (commands + agents in opencode.json) was invisible.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode failed"; return 1; }
+    rm -f "$HOME/.config/opencode/$OPENCODE_RECEIPT_REL"
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "doctor was green over an orphaned OpenCode install"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Kurama command(s)' || {
+        echo "the orphaned /sdd-* commands are never named"; return 1; }
+    printf '%s\n' "$output" | grep -q 'opencode.json still registers' || {
+        echo "the orphaned opencode.json agents are never named"; return 1; }
+    return 0
+}
+
+test_doctor_normalizes_display_name_receipt() {
+    # install.sh records the DISPLAY name ("Claude Code"); doctor used it
+    # verbatim, resolved every path to empty, and skipped the marker and hooks
+    # checks without a word.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local renamed
+    renamed=$(sed -e 's/"tool": "claude-code"/"tool": "Claude Code"/' \
+                  -e 's/^    "claude-code"/    "Claude Code"/' "$manifest")
+    printf '%s\n' "$renamed" > "$manifest"
+    # Break something ONLY a path-derived check can see (the recorded files are
+    # all still on disk, so check_receipt_files stays green).
+    printf '{}\n' > "$HOME/.claude/settings.json"
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "doctor passed an install with no hooks block (display-name receipt)"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'hooks block missing' || {
+        echo "the hooks check never ran for a display-name receipt"; return 1; }
+    printf '%s\n' "$output" | grep -q 'markers balanced' || {
+        echo "the marker check never ran for a display-name receipt"; return 1; }
+    return 0
+}
+
+test_doctor_unresolvable_tool_is_hard_fail() {
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    # A receipt from one of the dropped harnesses: no path can be resolved from
+    # it, so there is nothing doctor can honestly verify.
+    local renamed
+    renamed=$(sed -e 's/"tool": "claude-code"/"tool": "gemini-cli"/' \
+                  -e 's/^    "claude-code"/    "gemini-cli"/' "$manifest")
+    printf '%s\n' "$renamed" > "$manifest"
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "a receipt naming a dropped harness was diagnosed as healthy"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'gemini-cli' || {
+        echo "the unrecognized tool is never named"; return 1; }
+    return 0
+}
+
+test_doctor_green_on_healthy_opencode() {
+    # The inverse false verdict: global opencode's AGENTS.md is now marker-merged
+    # like every other harness, so a correct install must be green.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode failed"; return 1; }
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent opencode 2>&1) || status=$?
+    if printf '%s\n' "$output" | grep -q 'orchestrator not merged'; then
+        echo "a healthy OpenCode install is still flagged as unmerged"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'markers balanced' || {
+        echo "the OpenCode orchestrator block carries no markers"; return 1; }
+    assert_eq "0" "$status" "doctor must be green on a fresh, correct OpenCode install" || return 1
+    return 0
+}
+
+test_doctor_unmarked_orchestrator_is_recognized_by_content() {
+    # A pre-marker OpenCode install (AGENTS.md copied whole) is healthy, not
+    # unmerged — doctor must say so by content instead of warning.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
+    cp "$REPO_DIR/examples/opencode/AGENTS.md" "$HOME/.config/opencode/AGENTS.md"
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent opencode 2>&1) || status=$?
+    if printf '%s\n' "$output" | grep -q 'orchestrator not merged'; then
+        echo "a pre-marker OpenCode install is reported as unmerged"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'present but unmarked' || {
+        echo "doctor does not report the unmarked orchestrator honestly"; return 1; }
+    assert_eq "0" "$status" "a pre-marker install is not a failure" || return 1
+    return 0
+}
+
+test_doctor_partial_receipt_is_not_reported_healthy() {
+    # setup.sh's EXIT trap now flushes a receipt even when the run aborts before
+    # anything landed. doctor must not read the resulting empty arrays as
+    # "0 of 0 files present — healthy".
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    local dir="$HOME/.claude/skills"
+    mkdir -p "$dir"
+    cat > "$dir/.kurama-install-manifest.json" <<'JSON'
+{
+  "name": "kurama",
+  "version": "0.0.0-test",
+  "tool": "claude-code",
+  "tools": [
+    "claude-code"
+  ],
+  "scope": "global",
+  "engram": "no",
+  "files": [
+  ],
+  "settings": [
+  ],
+  "pi_packages": [
+  ],
+  "engram_mcp": [
+  ],
+  "prompts": [
+  ],
+  "tui_plugins": [
+  ]
+}
+JSON
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) || status=$?
+    if printf '%s\n' "$output" | grep -q 'integer expression expected'; then
+        echo "doctor emitted a bash error on a partial receipt"; return 1
+    fi
+    if [ "$status" -eq 0 ]; then
+        echo "a receipt recording zero files was reported healthy"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'records NO files' || {
+        echo "doctor never says the receipt records nothing"; return 1; }
+    return 0
+}
+
+# ============================================================================
+# Tests — #25 + the OpenCode template invariants
+#
+# The named-profile orchestrator hard-assigned its task permission, dropping the
+# review layer the multi-mode orchestrator is allowed to delegate to. Template
+# and installer must agree, in both directions.
+# ============================================================================
+
+test_opencode_profile_permission_allows_review_layer() {
+    run_setup_opencode --opencode-mode multi --opencode-profile testp \
+        || { echo "setup opencode profile install failed"; return 1; }
+    local cfg="$HOME/.config/opencode/opencode.json"
+    assert_eq "deny" "$(jq -r '.agent["kurama-orchestrator"].permission.task["*"]' "$cfg")" \
+        "the profile orchestrator must still deny by default" || return 1
+    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["sdd-*-testp"]' "$cfg")" \
+        "the profile orchestrator must delegate to its own suffixed subagents" || return 1
+    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["general"]' "$cfg")" \
+        "the profile orchestrator cannot delegate to general" || return 1
+    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["review-*"]' "$cfg")" \
+        "the profile orchestrator cannot delegate the review lenses" || return 1
+    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["jd-*"]' "$cfg")" \
+        "the profile orchestrator cannot delegate Judgment Day" || return 1
+    # The base sdd-* pattern must NOT leak in: the profile only drives its own
+    # suffixed subagents.
+    assert_eq "null" "$(jq -r '.agent["kurama-orchestrator"].permission.task["sdd-*-kurama"]' "$cfg")" \
+        "the template's placeholder suffix was not renamed" || return 1
+    return 0
+}
+
+test_opencode_templates_allow_the_review_layer() {
+    local multi="$REPO_DIR/examples/opencode/opencode.multi.json"
+    local prof="$REPO_DIR/examples/opencode/opencode.profile.template.json"
+    assert_eq "allow" "$(jq -r '.agent["sdd-orchestrator"].permission.task["general"]' "$multi")" \
+        "opencode.multi.json denies the general agent" || return 1
+    local key
+    for key in "review-*" "jd-*" "general"; do
+        assert_eq "allow" "$(jq -r --arg k "$key" '.agent["kurama-orchestrator"].permission.task[$k]' "$prof")" \
+            "the profile template denies $key" || return 1
+    done
+    return 0
+}
+
+test_opencode_commands_never_hardcode_engram_mode() {
+    # Every executor command must RESOLVE the artifact store, never assume it.
+    if grep -rl 'Artifact store mode: engram' "$REPO_DIR/examples/opencode/commands" > /dev/null 2>&1; then
+        echo "an OpenCode command hardcodes 'Artifact store mode: engram'"; return 1
+    fi
+    return 0
+}
+
+test_opencode_executor_commands_name_the_envelope_fields() {
+    local f n=0
+    for f in "$REPO_DIR"/examples/opencode/commands/sdd-*.md; do
+        grep -q '^subtask:' "$f" || continue
+        n=$((n + 1))
+        grep -q 'risks' "$f" || {
+            echo "$(basename "$f") never names the risks envelope field"; return 1; }
+        grep -q 'skill_resolution' "$f" || {
+            echo "$(basename "$f") never names skill_resolution"; return 1; }
+    done
+    [ "$n" -ge 5 ] || { echo "expected at least 5 executor commands, found $n"; return 1; }
+    return 0
+}
+
+test_skills_declare_no_tools_frontmatter() {
+    # Skills are instructions, not agents: a tools:/allowed-tools: key there is
+    # ignored by every harness and reads as an enforced boundary that is not one.
+    local f
+    for f in "$REPO_DIR"/skills/*/SKILL.md; do
+        [ -f "$f" ] || continue
+        if grep -Eq '^(tools|allowed-tools):' "$f"; then
+            echo "$(basename "$(dirname "$f")")/SKILL.md declares a tools: key"; return 1
+        fi
+    done
+    return 0
+}
+
+test_codex_template_declares_no_task_tool() {
+    local f="$REPO_DIR/examples/_templates/codex.md"
+    assert_file_exists "$f" || return 1
+    # shellcheck disable=SC2016  # the backticks are markdown in the file we grep, not a subshell
+    grep -qF 'no `task` tool' "$f" || {
+        echo "the codex overlay no longer states that Codex has no task tool"; return 1; }
+    if grep -Eqi 'use the .?task.? tool|delegate (it |them |this )?via the .?task.? tool' "$f"; then
+        echo "the codex overlay instructs delegation through a task tool Codex does not have"; return 1
+    fi
+    return 0
+}
+
+test_cycle_markers_written_in_every_mode() {
+    # #30. The two hooks read only the filesystem. If a skill stops mandating the
+    # .kurama/sdd/ markers, engram mode silently loses both gates again.
+    local pc="$REPO_DIR/skills/_shared/persistence-contract.md"
+    grep -qi 'Hook-visible cycle markers' "$pc" \
+        || { echo "the cycle-marker contract disappeared"; return 1; }
+    grep -q '.kurama/sdd/{change-name}/verify-report.md' "$REPO_DIR/skills/sdd-verify/SKILL.md" \
+        || { echo "sdd-verify no longer writes the verify-report marker"; return 1; }
+    grep -q '.kurama/sdd/{change-name}/archive-report.md' "$REPO_DIR/skills/sdd-archive/SKILL.md" \
+        || { echo "sdd-archive no longer writes the archive-report marker"; return 1; }
+    # The paths must still be the ones the shipped hooks actually check.
+    # shellcheck disable=SC2016  # "$change" is the literal shell variable name inside the hook
+    grep -qF '.kurama/sdd/$change/verify-report.md' \
+        "$REPO_DIR/examples/claude-code/hooks/archive-gate.sh" \
+        || { echo "archive-gate no longer reads the mandated path"; return 1; }
+    grep -q 'archive-report.md' \
+        "$REPO_DIR/examples/claude-code/hooks/orchestrator-write-guard.sh" \
+        || { echo "write-guard no longer retires on archive-report.md"; return 1; }
     return 0
 }
 
@@ -3777,6 +4306,39 @@ run_test "--without removes the excluded skills from disk" test_install_without_
 run_test "incomplete checkout aborts before writing" test_install_incomplete_checkout_aborts_early
 run_test "install.sh: valueless flag prints usage" test_install_flag_without_value_shows_usage
 run_test "setup.sh: valueless flag prints usage" test_setup_flag_without_value_shows_usage
+echo ""
+
+echo -e "${BOLD}#22 — the OpenCode install is fully recorded${NC}"
+run_test "receipt records commands, prompt and opencode.json" test_opencode_receipt_records_commands_prompt_and_config
+run_test "receipt records the resolved mode + profile" test_opencode_receipt_records_mode_and_profile
+run_test "a non-OpenCode receipt carries no OpenCode keys" test_setup_receipt_omits_opencode_keys_for_other_agents
+run_test "update re-syncs multi+profile without downgrading" test_update_preserves_opencode_mode_and_profile
+run_test "update preserves a hand-edited profile model" test_update_preserves_hand_edited_profile_model
+run_test "update refuses an OpenCode receipt with no mode" test_update_refuses_opencode_receipt_without_mode
+run_test "uninstall removes every OpenCode artifact" test_uninstall_removes_every_opencode_artifact
+run_test "uninstall sweeps a pre-#22 OpenCode receipt" test_uninstall_sweeps_legacy_opencode_artifacts
+run_test "the sweep never deletes a user-written AGENTS.md" test_uninstall_leaves_foreign_agents_md_alone
+run_test "uninstalling claude-code never touches OpenCode" test_uninstall_claude_code_never_touches_opencode
+echo ""
+
+echo -e "${BOLD}#23 — doctor verdicts it actually verified${NC}"
+run_test "orphan scan runs per agent lacking a receipt" test_doctor_orphan_scan_runs_per_agent
+run_test "orphan scan covers OpenCode, not just claude-code" test_doctor_orphan_scan_covers_opencode
+run_test "display-name receipt still runs every check" test_doctor_normalizes_display_name_receipt
+run_test "an unresolvable tool is a hard failure" test_doctor_unresolvable_tool_is_hard_fail
+run_test "a healthy OpenCode install is green" test_doctor_green_on_healthy_opencode
+run_test "a pre-marker orchestrator is verified by content" test_doctor_unmarked_orchestrator_is_recognized_by_content
+run_test "a partial receipt is never reported healthy" test_doctor_partial_receipt_is_not_reported_healthy
+echo ""
+
+echo -e "${BOLD}#25 — profile permissions + OpenCode template invariants${NC}"
+run_test "profile orchestrator may delegate the review layer" test_opencode_profile_permission_allows_review_layer
+run_test "both templates allow general/review-*/jd-*" test_opencode_templates_allow_the_review_layer
+run_test "no command hardcodes the engram artifact store" test_opencode_commands_never_hardcode_engram_mode
+run_test "executor commands name risks + skill_resolution" test_opencode_executor_commands_name_the_envelope_fields
+run_test "no SKILL.md declares a tools: key" test_skills_declare_no_tools_frontmatter
+run_test "the codex overlay claims no task tool" test_codex_template_declares_no_task_tool
+run_test "cycle markers are mandated in every mode" test_cycle_markers_written_in_every_mode
 echo ""
 
 # ============================================================================
