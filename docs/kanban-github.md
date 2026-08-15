@@ -57,7 +57,7 @@ never fatal, and you can re-run `/sdd-init` once it is in place.
 There is also a module-presence preflight (parallel to TDD's): because `kanban-github`
 ships in the excludable `optional` group, `sdd-init` confirms `kanban-github/SKILL.md`
 resolves before offering the question. If the module was excluded with
-`--without optional`, `sdd-init` does not offer activation and records
+`install.sh --without optional`, `sdd-init` does not offer activation and records
 `kanban.enabled: false` with a note to reinstall.
 
 ## Onboarding — `sdd-init` caches the board wiring

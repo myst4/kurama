@@ -60,6 +60,7 @@ Sub-agents are also instructed to save discoveries, decisions, and bug fixes to 
 | File | Purpose |
 |------|---------|
 | `sdd-phase-common.md` | Sections A-D: skill loading, artifact retrieval, persistence, and the return envelope. Loaded directly by every SDD phase skill. |
+| `orchestrator-sdd-protocol.md` | The orchestrator's session-level SDD procedure: the four-value session preflight, routing a natural-language request into the pipeline, and the `auto`-mode phase gate. Loaded when a cycle starts, not before — the orchestrator prompt carries the trigger, this file carries the procedure. |
 | `persistence-contract.md` | Mode resolution rules, sub-agent context protocol, skill registry loading protocol |
 | `engram-convention.md` | Supplementary reference for deterministic naming (`sdd/{change-name}/{artifact-type}`) and two-step recovery. Critical calls are inlined in skills. |
 | `openspec-convention.md` | Filesystem paths for each artifact, directory structure, config.yaml reference, and archive layout. **Not** the upstream OpenSpec CLI format — see the note at the top of that file. |

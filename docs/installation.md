@@ -207,11 +207,13 @@ cp -r skills/_shared \
 
 > That is the full **24-skill default set** (12 `sdd-*`, the 5 `review-*` lenses,
 > `skill-registry`, `skill-creator`, `branch-pr`, `issue-creation`, `judgment-day`,
-> `tdd`, `kanban-github`). Copy all of them: omitting the `review-*` lenses leaves the
-> orchestrator's review triage with nothing to select, and omitting `tdd`/`kanban-github`
-> breaks the phases that resolve them. `skills/go-testing` is deliberately **not** in the
-> list — it is the opt-in `lang` group. `skills/manifest.json` is installer metadata, not
-> a skill.
+> `tdd`, `kanban-github`). Copy all of them unless you deliberately want a reduced set:
+> omitting the `review-*` lenses leaves the orchestrator's review triage with nothing to
+> select, and omitting `tdd`/`kanban-github` leaves those modules impossible to activate
+> — `sdd-init` records `enabled: false` and the phases that would use them degrade with a
+> WARNING rather than failing. `skills/go-testing` is deliberately **not** in the list —
+> it is the opt-in `lang` group. `skills/manifest.json` is installer metadata, not a
+> skill.
 
 **2. Add orchestrator to `~/.claude/CLAUDE.md`:**
 

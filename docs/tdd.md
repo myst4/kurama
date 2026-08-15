@@ -79,7 +79,7 @@ scenario→test traceability and RED evidence. Because the orchestrator reads th
 flag once and propagates it into every phase, planning and execution always agree.
 
 Make sure the module is on disk first. It installs by default, but if it was
-excluded with `--without tdd`, reinstall before enabling — otherwise `sdd-init`
+excluded with `install.sh --without tdd`, reinstall before enabling — otherwise `sdd-init`
 declines to record `enabled: true` and `sdd-tasks`/`sdd-apply`/`sdd-verify` degrade
 gracefully with a WARNING (see [Installation vs activation](#installation-vs-activation)).
 

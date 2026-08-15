@@ -367,8 +367,8 @@ to add the module. (Phase 8 folded `tdd` into the default set, so this exclusion
 longer applies — see the Phase 8 section below.)
 
 **Action required**: none under the current (Phase 8) default — `tdd` installs without
-a flag. The historical `--with tdd` command still works but is now redundant; pass
-`--without tdd` to keep the module off disk.
+a flag. The historical `install.sh --with tdd` command still works but is now redundant;
+pass `install.sh --without tdd` to keep the module off disk.
 
 ### RED/GREEN/REFACTOR subtask expansion
 
@@ -616,7 +616,7 @@ ships available on disk, and each project opts into the RED → GREEN → REFACT
 cycle on its own terms (see [docs/tdd.md](tdd.md)).
 
 **Action required**: none functionally. Re-run `setup.sh`/`install.sh` once to land
-the module in the default set (or pass `--without tdd` to keep it off disk). No
+the module in the default set (or pass `install.sh --without tdd` to keep it off disk). No
 config migration — a project's `tdd.enabled` value is untouched, and projects that
 never opted in stay inactive.
 
@@ -655,8 +655,8 @@ default install now lands **25 skills** (was 24); `--without tdd` lands **24**, 
 project through the explicit `kanban.enabled` flag, exactly like the TDD switch.
 
 **Action required**: none functionally. Re-run `setup.sh`/`install.sh` once to land
-the module in the default set (or pass `--without optional` to keep the `optional`
-group off disk). No config migration — projects that never opt in are unaffected,
+the module in the default set (or pass `install.sh --without optional` to keep the
+`optional` group off disk). No config migration — projects that never opt in are unaffected,
 and the board stays inactive until `kanban.enabled: true` is set.
 
 ### Activating the board requires a configured `gh`
