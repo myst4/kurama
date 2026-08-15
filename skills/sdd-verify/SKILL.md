@@ -32,6 +32,7 @@ From the orchestrator:
 - **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks`. Save as `sdd/{change-name}/verify-report`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Save to `openspec/changes/{change-name}/verify-report.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write `verify-report.md` to filesystem.
+- **EVERY mode, in addition**: write the full report to `.kurama/sdd/{change-name}/verify-report.md`. This is not a fallback and not conditional on the save above failing — it is the cycle marker `archive-gate.sh` reads. See Step 7 and `persistence-contract.md` → *Hook-visible cycle markers*.
 
 **Required artifacts**: `spec` (the compliance matrix cannot be built without it) and
 `tasks` (completeness cannot be checked without it) are REQUIRED. `proposal` and `design`
@@ -307,9 +308,10 @@ rm -f "$tmp_index"
 
 Record `tree_hash` and the changed-file list in the report's **Content Binding** section
 (Step 8), and SURFACE `tree_hash` in your return envelope (`Reviewed-Tree: {tree_hash}`) so the
-orchestrator can stamp it into the `sdd/{change-name}/state` artifact. In `engram` mode
-the report is not on disk, so the state artifact is where sdd-archive Step 0 reads the recorded
-hash back.
+orchestrator can stamp it into the `sdd/{change-name}/state` artifact. The report itself lands on
+disk in every mode (Step 7), so `sdd-archive` Step 0 and `archive-gate.sh` both read the recorded
+hash from the `Tree-Hash:` line of `.kurama/sdd/{change-name}/verify-report.md` (or the `openspec/`
+copy); the state artifact carries the same value as a cross-check.
 
 **This pathspec and procedure MUST stay byte-identical to sdd-archive Step 0 and
 `examples/claude-code/hooks/archive-gate.sh`** — any drift makes every archive read as stale.
@@ -321,6 +323,25 @@ Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - topic_key: `sdd/{change-name}/verify-report`
 - type: `architecture`
 - capture_prompt: `false` — the verify report is an automated SDD artifact, not a human note; never capture the user prompt (see `skills/_shared/engram-convention.md`)
+
+**Then, in EVERY mode, also write the report to disk at
+`.kurama/sdd/{change-name}/verify-report.md`.** This is MANDATORY and unconditional — not a
+fallback for a failed `mem_save`, and not something `engram` mode skips:
+
+- `archive-gate.sh` is a deterministic hook. It cannot query Engram; it looks for
+  `openspec/changes/{change-name}/verify-report.md` or
+  `.kurama/sdd/{change-name}/verify-report.md` and nothing else. With the report only in
+  Engram the gate finds nothing and blocks EVERY archive, and its printed remedy points at
+  `KURAMA_ARCHIVE_OVERRIDE=1` — bypassing the pipeline's most important gate. Writing this file is
+  what keeps the flagship configuration (Claude Code + Engram) working.
+- Write the **complete** report from Step 8 — same bytes as the persisted artifact, not a summary.
+  The gate parses the first non-empty line after the `### Verdict` heading and the
+  `Tree-Hash:` line inside **Content Binding**; a stub or a truncated copy reads as "not passing".
+- `.kurama/` is harness state: gitignored, exempt from the persistence-mode gates
+  (`persistence-contract.md` → *Hook-visible cycle markers*), and excluded from the Step 6b
+  pathspec, so writing it can never invalidate the receipt you just stamped.
+- If this write fails, do NOT fail the phase — record it in `risks` naming the path, and say the
+  archive gate will block until the report reaches disk.
 
 ### Step 8: Return Summary
 
@@ -461,5 +482,6 @@ Also surface the same hash to the orchestrator in the return envelope so it is s
 - SUGGESTIONS = improvements, not blockers
 - DO NOT fix any issues — only report them. The orchestrator decides what to do.
 - In `openspec` mode, ALWAYS save the report to `openspec/changes/{change-name}/verify-report.md` — this persists the verification for sdd-archive and the audit trail
+- In EVERY mode, ALWAYS also write the full report to `.kurama/sdd/{change-name}/verify-report.md` (Step 7). The archive gate reads only the filesystem; skipping this write blocks every legitimate archive and pushes the model toward the override env var
 - Apply any `rules.verify` from `openspec/config.yaml`
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

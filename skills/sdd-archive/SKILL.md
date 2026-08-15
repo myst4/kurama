@@ -57,6 +57,12 @@ BEFORE any merge or move, retrieve the verification report and gate on it. Archi
 - **engram**: `mem_search("sdd/{change-name}/verify-report")` → `mem_get_observation(id)`.
 - **openspec**: read `openspec/changes/{change-name}/verify-report.md`.
 - **hybrid**: read file-first (`openspec/changes/{change-name}/verify-report.md`), fall back to Engram if absent.
+- **EVERY mode**: `sdd-verify` Step 7 also writes the full report to
+  `.kurama/sdd/{change-name}/verify-report.md`. Read it when the mode's primary store does not
+  produce the report — and note that this is the exact file `archive-gate.sh` gates on, so if it
+  is missing the hook will refuse the archive no matter what you found in Engram. A missing marker
+  with a report present in the backend is a `risks` entry naming the path, not a reason to
+  self-authorize an override.
 
 **Gate:**
 - If the verify report is MISSING (not found in any store / not provided) → return `status: blocked`, name the missing `verify-report`, set `next_recommended: sdd-verify`. Do NOT archive.
@@ -79,9 +85,10 @@ live_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
 rm -f "$tmp_index"
 ```
 
-- Read the RECORDED hash from the report's `Tree-Hash` line (openspec/hybrid). In `engram`
-  mode the report is not on disk — read it from the `sdd/{change-name}/state` artifact (the
-  orchestrator stamped `Reviewed-Tree` there) or from the value the orchestrator passed inline.
+- Read the RECORDED hash from the report's `Tree-Hash` line — `openspec/changes/{change-name}/verify-report.md`
+  in openspec/hybrid, `.kurama/sdd/{change-name}/verify-report.md` in every mode including `engram`.
+  If the report carries no such line, fall back to the `sdd/{change-name}/state` artifact (the
+  orchestrator stamped `Reviewed-Tree` there) or to the value the orchestrator passed inline.
 - If `live_tree` ≠ the recorded hash → the code changed after verification → return
   `status: blocked`, `executive_summary: "verify receipt stale — re-run sdd-verify"`,
   `next_recommended: sdd-verify`. Do NOT archive. (The `openspec/` and `.kurama/` exclusions mean
@@ -169,6 +176,12 @@ Use today's date in ISO format (e.g., `2026-02-16`).
 
 **IF mode is `engram`:** Confirm each affected `sdd-specs/{project}/{domain}` main spec was upserted, and all artifact observation IDs — including `explore` (if present) and `verify-report` — are recorded in the archive report.
 
+**IN EVERY mode:** confirm the cycle markers on disk with `test -f` or Read — never a finder, since `.kurama/` is hidden AND gitignored:
+- [ ] `.kurama/sdd/{change-name}/verify-report.md` is present (written by `sdd-verify` Step 7)
+- [ ] `.kurama/sdd/{change-name}/archive-report.md` — Step 5 writes it next; the cycle is not closed until it exists
+
+Those two files are what the hooks read. An archive that leaves them wrong is not finished, whatever the backend says.
+
 ### Step 5: Persist Archive Report
 
 **This step is MANDATORY — do NOT skip it.**
@@ -180,6 +193,21 @@ Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - capture_prompt: `false` — the archive report is an automated SDD artifact; never capture the user prompt (see `skills/_shared/engram-convention.md`)
 
 Per E2, if `mem_save` of the archive report or a merged main spec fails, retry once; if it still fails, write a filesystem fallback copy under `.kurama/sdd/{change-name}/` and report it as a concern in `risks`. Do NOT silently drop the merge or the report.
+
+**Then, in EVERY mode, also write the archive report to
+`.kurama/sdd/{change-name}/archive-report.md`.** Unconditional, exactly like the verify report
+(`sdd-verify` Step 7) — and it is the marker that CLOSES the cycle for the deterministic hooks:
+
+- `orchestrator-write-guard.sh` treats `.kurama/sdd/{change-name}/state.md` **without** an
+  `archive-report.md` beside it as an active cycle. Skip this write and the guard keeps blocking
+  the orchestrator's every code edit forever, long after the change was archived — there is no
+  other way for it to learn the cycle ended.
+- `archive-gate.sh` skips any `.kurama/sdd/<dir>/` that holds an `archive-report.md` when it
+  auto-detects the change to gate, so this write also stops a closed change from being re-gated.
+- Do NOT delete `state.md` instead: the marker pair (`state.md` + `archive-report.md`) is what both
+  hooks read, and it is the change's on-disk audit trail after the cycle closes.
+- If this write fails, record it in `risks` naming the path and warn that the write guard will keep
+  firing until the file exists. Never delete `.kurama/sdd/{change-name}/` to work around it.
 
 ### Step 6: Return Summary
 
@@ -218,6 +246,7 @@ Ready for the next change.
 
 - ALWAYS run Step 0 first: NEVER archive when the verify report is missing or its verdict is `FAIL` / has unresolved CRITICAL issues, UNLESS an explicit user-authorized override is passed — and when it is, record the override verbatim in the archive report
 - ALWAYS revalidate the **content binding** in Step 0 when the report carries a `Tree-Hash`: recompute the live reviewed-tree hash (throwaway index, excluding `openspec/` and `.kurama/` — byte-identical to sdd-verify Step 6b and archive-gate.sh) and BLOCK on a mismatch with `"verify receipt stale — re-run sdd-verify"`. Only the same explicit override bypasses it; a legacy report with no `Tree-Hash` falls back to the verdict gate alone
+- ALWAYS write `.kurama/sdd/{change-name}/archive-report.md` on a successful archive, in EVERY mode (Step 5). It is the only signal that retires the cycle for `orchestrator-write-guard.sh`; without it the guard blocks the orchestrator indefinitely after the change is closed
 - ALWAYS sync delta specs BEFORE moving to archive
 - In engram mode, main specs ARE the `sdd-specs/{project}/{domain}` artifacts — merge deltas there exactly as openspec merges into `openspec/specs/{domain}/spec.md`; never skip the merge
 - When merging into existing specs, PRESERVE requirements not mentioned in the delta

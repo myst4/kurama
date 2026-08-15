@@ -138,6 +138,10 @@ File was already written during the phase's main step. No additional action need
 
 Do BOTH: write the file to the filesystem AND call `mem_save` as above. The filesystem file is authoritative and the Engram entry is a searchable mirror; stamp `last_updated` (ISO 8601) in the artifact frontmatter and follow the same failure-recovery rule if the mirror write fails. See `persistence-contract.md` → *Hybrid Mode*.
 
+### Cycle markers — every mode, and NOT a fallback
+
+Two artifacts are ALSO written to `.kurama/sdd/{change-name}/` unconditionally, in every mode above including `engram`: `verify-report.md` (`sdd-verify` Step 7) and `archive-report.md` (`sdd-archive` Step 5), alongside the orchestrator's `state.md`. The deterministic hooks read only the filesystem — they cannot query Engram — so these disk copies are what make the archive gate and the write guard work outside `openspec` mode. This is *in addition to* the mode's own persistence, never a replacement, and it is unrelated to the `mem_save`-failure recovery rule above: the marker is written whether or not the save succeeded. Full contract: `persistence-contract.md` → *Hook-visible cycle markers*.
+
 ## D. Return Envelope
 
 This envelope is the **ONLY** return contract for every SDD phase (including `sdd-init`). It is authoritative: where any per-skill "Return Summary" wording differs in field names or shape, **this section wins** — treat a phase's own summary format as the human-readable content that goes inside `detailed_report`, not as a second contract. Do not emit two competing return shapes.
