@@ -3394,6 +3394,42 @@ test_install_refuses_setup_managed_receipt() {
     return 0
 }
 
+test_install_refuse_writes_nothing_for_opencode() {
+    # "Refused" has to mean the whole target, not just its skills dir: the
+    # OpenCode branch writes command files after install_skills, and those are
+    # files setup.sh owns too (multi mode rewrites the `agent:` line of every
+    # subtask command). Rewriting them from the repo copies silently reverts that
+    # routing on a target install.sh claims not to touch.
+    run_setup_opencode || { echo "setup opencode exited non-zero"; return 1; }
+    local cmd_dir="$HOME/.config/opencode/commands"
+    local before_count
+    before_count=$(find "$cmd_dir" -name 'sdd-*.md' | wc -l | tr -d ' ')
+    [ "$before_count" -gt 0 ] || { echo "setup installed no commands — nothing to protect"; return 1; }
+
+    # Stand in for any per-target edit setup.sh made that install.sh's copies do
+    # not carry. A plain byte compare would pass today by coincidence.
+    printf 'agent: sdd-apply-multi-routing\n' >> "$cmd_dir/sdd-apply.md"
+
+    # Backdate the commands AND a reference file to 2000, so "was this rewritten?"
+    # is answered by a 26-year gap rather than by clock granularity.
+    local ref="$TEST_TMPDIR/mtime-ref"
+    touch -t 200001010000 "$ref"
+    touch -t 200001010000 "$cmd_dir"/sdd-*.md
+
+    local status=0
+    bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1 || status=$?
+    if [ "$status" -eq 0 ]; then echo "install.sh did not refuse the managed target"; return 1; fi
+
+    grep -q 'sdd-apply-multi-routing' "$cmd_dir/sdd-apply.md" || {
+        echo "the refused run rewrote sdd-apply.md and reverted setup.sh's edit"; return 1; }
+    local touched
+    touched=$(find "$cmd_dir" -name 'sdd-*.md' -newer "$ref" | wc -l | tr -d ' ')
+    assert_eq "0" "$touched" "a refused target must have zero files rewritten" || return 1
+    assert_eq "$before_count" "$(find "$cmd_dir" -name 'sdd-*.md' | wc -l | tr -d ' ')" \
+        "the refused run must not add command files either" || return 1
+    return 0
+}
+
 test_install_without_group_removes_excluded_skills() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1 || { echo "first install failed"; return 1; }
     assert_dir_exists "$HOME/.claude/skills/review-risk" || return 1
@@ -3736,6 +3772,7 @@ run_test "empty settings.json is merged, never blanked" test_setup_empty_setting
 run_test "empty opencode.json is created, never blanked" test_setup_empty_opencode_json_not_blanked
 run_test "empty .claude.json survives the Engram merge" test_setup_empty_claude_json_engram_not_blanked
 run_test "install.sh refuses a setup.sh-managed receipt" test_install_refuses_setup_managed_receipt
+run_test "a refused target gets no OpenCode command writes" test_install_refuse_writes_nothing_for_opencode
 run_test "--without removes the excluded skills from disk" test_install_without_group_removes_excluded_skills
 run_test "incomplete checkout aborts before writing" test_install_incomplete_checkout_aborts_early
 run_test "install.sh: valueless flag prints usage" test_install_flag_without_value_shows_usage

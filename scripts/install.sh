@@ -37,6 +37,12 @@ ACTIVE_SKILLS=()
 # setup_managed_receipt). Non-zero makes the run exit non-zero.
 MANAGED_TARGETS_SKIPPED=0
 
+# Set by install_skills for the target it just handled: true when that target was
+# refused. "Refused" must mean the WHOLE target, so every per-target write that
+# runs after install_skills — today only the OpenCode command files, which
+# setup.sh also owns and rewrites per mode — is gated on this.
+LAST_TARGET_REFUSED=false
+
 # ============================================================================
 # OS Detection
 # ============================================================================
@@ -487,11 +493,14 @@ validate_source() {
 install_skills() {
     local target_dir="$1"
     local tool_name="$2"
+    LAST_TARGET_REFUSED=false
 
     # A target setup.sh manages carries records install.sh cannot reproduce.
     # Skip it whole — installing files whose receipt we refuse to write would be
-    # the same ghost install from the other direction.
+    # the same ghost install from the other direction. Callers must skip their
+    # follow-up writes for this target too; see LAST_TARGET_REFUSED.
     if setup_managed_receipt "$target_dir/$INSTALL_MANIFEST_NAME"; then
+        LAST_TARGET_REFUSED=true
         echo -e "\n${BLUE}Skipping ${BOLD}$tool_name${NC}${BLUE}...${NC}"
         print_warn "This target is managed by setup.sh: $target_dir"
         print_warn "Its receipt records hooks, agents, prompt blocks and MCP registrations"
@@ -613,6 +622,9 @@ install_for_agent() {
             ;;
         opencode)
             install_skills "$(get_tool_path opencode)" "OpenCode"
+            # Refused target: no command files, and no "add the agent config"
+            # banner either — setup.sh already did that and still owns it.
+            if $LAST_TARGET_REFUSED; then return 0; fi
             install_opencode_commands
             echo ""
             echo -e "${YELLOW}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -646,7 +658,8 @@ install_for_agent() {
         all-global)
             install_skills "$(get_tool_path claude-code)" "Claude Code"
             install_skills "$(get_tool_path opencode)" "OpenCode"
-            install_opencode_commands
+            # Same rule per target: a refused OpenCode gets no command files.
+            $LAST_TARGET_REFUSED || install_opencode_commands
             install_skills "$(get_tool_path codex)" "Codex"
             install_skills "$(get_tool_path pi)" "Pi"
             install_skills "$(get_tool_path omp)" "omp"
