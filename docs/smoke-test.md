@@ -60,6 +60,13 @@ land there rather than in `openspec/`. Note that Step 1 still
 writes `.kurama/skill-registry.md` in every mode — that file is harness
 infrastructure, not an SDD artifact, and is written in **every** mode (see Step 1).
 
+The same is true of three **cycle markers**, and it applies to Pass A and Pass B as much
+as to Pass C: `.kurama/sdd/<change>/state.md` (orchestrator, after every phase
+transition), `verify-report.md` (Step 6) and `archive-report.md` (Step 7) are written in
+**every** mode. They are what the two deterministic hooks read — neither can query Engram
+— so their presence is checked in the relevant steps below regardless of which pass you
+are running. In Pass A they are additional to the Engram artifacts, never a replacement.
+
 ---
 
 ## Set up the toy project (once per pass)
@@ -202,7 +209,7 @@ never the implementation.
   - **B**: `- [x]` marks in `openspec/changes/add-sum/tasks.md`.
   - **A/C**: the `tasks` artifact shows the boxes checked; an `apply-progress`
     artifact exists (`sdd/add-sum/apply-progress` / `.kurama/sdd/add-sum/apply-progress.md`).
-- **Write-guard (Claude Code hooks installed) — Pass B and Pass C only**: the
+- **Write-guard (Claude Code hooks installed) — all three passes**: the
   orchestrator did **not** hand-edit code from the main thread — it delegated to
   `sdd-apply`. To prove the guard bites, ask the orchestrator to edit `index.js`
   directly mid-cycle; the `orchestrator-write-guard.sh` `PreToolUse` hook should
@@ -210,11 +217,16 @@ never the implementation.
   `openspec/` stay allowed.
   - **Scope**: the guard recognizes an active cycle **only from an on-disk cycle
     marker** — `openspec/changes/<change>/state.yaml` (Pass B) or
-    `.kurama/sdd/<change>/state.md` (Pass C degraded). In **Pass A (pure engram)**
-    the orchestrator persists DAG state to Engram via `mem_save`, so **no
-    filesystem cycle marker exists**; the hook reads "no active cycle" and **allows
-    the edit (`exit 0`)**. This is expected, not a bug — run the write-guard proof
-    in Pass B or Pass C, where the marker is on disk.
+    `.kurama/sdd/<change>/state.md` (Passes A and C). The orchestrator now writes
+    that `state.md` in **every** mode, alongside the mode's own state write, so the
+    marker exists in **Pass A (pure engram)** too and the guard fires there as well:
+    ```bash
+    test -f .kurama/sdd/add-sum/state.md && echo "cycle marker present"
+    ```
+    Use `test -f`, never `fd`/`rg` — `.kurama/` is hidden AND gitignored, so finders
+    skip it even with hidden flags. If the marker is missing in Pass A, that is the
+    bug this check exists to catch: the guard would read "no active cycle" and allow
+    the edit (`exit 0`).
 
 ### Step 5 — post-apply review lens (part of the flow)
 
@@ -241,6 +253,16 @@ actual results, and stamps the **Content Binding** receipt.
   the orchestrator stamps it into the `state` artifact.
   - **B**: `grep -E 'Verdict|Tree-Hash' openspec/changes/add-sum/verify-report.md`
   - **A/C**: read `sdd/add-sum/verify-report` / `.kurama/sdd/add-sum/verify-report.md`.
+- **The on-disk report exists in every pass, Pass A included.** `sdd-verify` writes the
+  full report to `.kurama/sdd/add-sum/verify-report.md` in every mode — in Pass A that is
+  *in addition to* the Engram save, not instead of it. It is the only file
+  `archive-gate.sh` can read, so this check is what proves Step 7 will not dead-end:
+  ```bash
+  grep -E '### Verdict|Tree-Hash' .kurama/sdd/add-sum/verify-report.md
+  ```
+  It must be the complete report (verdict + Content Binding), not a stub. If it is
+  missing in Pass A, the archive gate will block every archive and point at
+  `KURAMA_ARCHIVE_OVERRIDE=1` — do **not** take that hint; the missing file is the bug.
 - The hash is computed over a **throwaway** git index (the real index is untouched)
   excluding `openspec/` and `.kurama/` — confirm your working index is unchanged:
   ```bash
@@ -267,6 +289,15 @@ never auto-run, even in `auto`.
   - **A**: the cross-change main spec `sdd-specs/kurama-smoke/<domain>` was upserted
     and an `sdd/add-sum/archive-report` observation records the observation IDs.
   - **C**: the archive report is returned/written under `.kurama/sdd/add-sum/`.
+- **The cycle is retired on disk, in every pass**:
+  ```bash
+  test -f .kurama/sdd/add-sum/archive-report.md && echo "cycle retired"
+  ```
+  `sdd-archive` writes this marker in every mode. It is what tells
+  `orchestrator-write-guard.sh` the cycle is over — with `state.md` still there and no
+  `archive-report.md` beside it, the guard would keep blocking the orchestrator's code
+  edits indefinitely after the change closed. Prove it: after the archive, ask the
+  orchestrator to edit `index.js` again; the write must now be **allowed** (`exit 0`).
 
 ---
 

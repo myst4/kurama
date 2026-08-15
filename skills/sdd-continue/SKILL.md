@@ -35,6 +35,11 @@ Recover the DAG state for the change using the **Recovery Rule** and **State Per
 - `openspec` → read `openspec/changes/{change-name}/state.yaml`
 - `hybrid` → filesystem `state.yaml` first (authoritative), Engram mirror as fallback
 
+`.kurama/sdd/{change-name}/state.md` exists in EVERY mode (it is the cycle marker the write guard
+reads), so it is always available as a recovery fallback when the mode's primary store cannot be
+reached. Check it with `test -f` or Read — never a finder; `.kurama/` is hidden AND gitignored.
+When you advance the DAG, re-write it alongside the mode's own state write.
+
 Also read the pipeline settings (`artifact_store.mode`, `execution_mode`, `compliance_mode`,
 `tdd.enabled`, `tdd.single_test_command`) once and propagate them into every sub-agent prompt
 (propagated value wins). `execution_mode` (`supervised` | `auto`, default `supervised`) decides

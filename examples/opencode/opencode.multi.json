@@ -8,7 +8,10 @@
       "permission": {
         "task": {
           "*": "deny",
-          "sdd-*": "allow"
+          "sdd-*": "allow",
+          "review-*": "allow",
+          "jd-*": "allow",
+          "general": "allow"
         }
       },
       "tools": {

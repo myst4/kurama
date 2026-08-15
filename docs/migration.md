@@ -213,9 +213,9 @@ were never merged anywhere. If you need that history, re-derive it from each
 change's archived `spec` artifact (`sdd/{change-name}/spec`) rather than
 expecting a pre-existing main spec.
 
-### `.kurama/sdd/` fallback store (new)
+### `.kurama/sdd/` fallback store **and cycle markers** (new)
 
-`.kurama/` — already used for `.kurama/skill-registry.md` — gains a second role:
+`.kurama/` — already used for `.kurama/skill-registry.md` — gains a second role.
 `.kurama/sdd/{change-name}/` is the filesystem fallback for SDD artifacts when
 Engram is unreachable at the start of a cycle (the orchestrator checks with
 one cheap Engram call and degrades the whole cycle to this fallback, with a
@@ -223,8 +223,22 @@ warning), or when a single `mem_save` fails mid-cycle in `engram` mode (one
 retry, then a fallback file written under this path, reported as a concern in
 the phase's return envelope).
 
-No action required — this only activates when Engram is unavailable or fails;
-it never contends with `openspec`/`hybrid` project files.
+The same directory is **also** the home of three **cycle markers** written on
+**every** cycle in **every** mode, `engram` included — `state.md` (orchestrator,
+after each phase transition), `verify-report.md` (`sdd-verify`) and
+`archive-report.md` (`sdd-archive`, on success). These are not a degradation
+signal: the deterministic Claude Code hooks read only the filesystem and cannot
+query Engram, so without them the archive gate blocks every legitimate archive
+and the write guard never fires. See
+[persistence-contract.md](../skills/_shared/persistence-contract.md) →
+*Hook-visible cycle markers* and [docs/hooks.md](hooks.md).
+
+No action required, but two expectations change. First, `.kurama/sdd/` now
+appears on every cycle, not only when Engram is unavailable or fails — a
+directory there does **not** mean something degraded. Second, it never contends
+with `openspec`/`hybrid` project files: `.kurama/` is gitignored harness state,
+exempt from the persistence-mode gates, and excluded from the verify→archive
+content-binding hash, so the markers cannot make a verify receipt read as stale.
 
 ### Return envelope unification
 
@@ -526,8 +540,10 @@ per [docs/installation.md](installation.md).
 A dependency-light (`bash 3.2` / POSIX, no `jq`) status inspector: `scripts/sdd-status.sh
 [project]` lists active SDD cycles with store, last/next phase (derived from the canonical
 DAG), visible settings, and task progress; `--json` emits a parseable object. Reads
-`openspec/` and the `.kurama/sdd/` fallback from disk. Pure-engram cycles with nothing on
-disk are intentionally not queryable offline.
+`openspec/` and the `.kurama/sdd/` cycle markers from disk. Because those markers are
+written in **every** mode (see *`.kurama/sdd/` fallback store and cycle markers* above),
+`engram` cycles are listed too; only a cycle started before the markers existed, and not
+advanced since, leaves nothing on disk and stays invisible offline.
 
 **Action required**: none — it is a read-only diagnostic.
 

@@ -11,7 +11,6 @@ license: MIT
 metadata:
   author: gentleman-programming
   version: "1.0"
-tools: Read, Grep, Glob
 ---
 
 ## Role

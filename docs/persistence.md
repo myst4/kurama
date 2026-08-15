@@ -94,7 +94,12 @@ infrastructure, not an SDD project artifact:
 - `.kurama/sdd/{change-name}/` — the Engram fallback store, used when Engram is
   unreachable at cycle start (whole-cycle degradation, see above) or when a
   mid-cycle `mem_save` fails after one retry (single-artifact fallback write,
-  reported as a concern in the phase's return envelope).
+  reported as a concern in the phase's return envelope) — and, in **every** mode,
+  the home of the three cycle markers (`state.md`, `verify-report.md`,
+  `archive-report.md`) the deterministic hooks read. Those are written whichever
+  store the project chose, because the hooks cannot query Engram; see
+  [persistence-contract.md](../skills/_shared/persistence-contract.md) →
+  *Hook-visible cycle markers* and [docs/hooks.md](hooks.md).
 
 ## OpenSpec File Structure
 
