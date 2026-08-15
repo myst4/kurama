@@ -29,7 +29,7 @@ Core principle: **does this inflate my context without need?** If yes → delega
 | Bash for state (git, gh) | ✅ | — |
 | Bash for execution (test, build, install) | — | ✅ |
 
-Use task for all delegated work. Codex does not expose async delegate tooling.
+Codex has no `task` tool and no sub-agents: skills load inline as instructions, and this file is the only orchestrator. Read the table above as context hygiene — a "delegate" row means run that work as a separate, self-contained step, never as a tool call to an agent that does not exist here.
 
 Anti-patterns — these ALWAYS inflate context without need:
 - Reading 4+ files to "understand" the codebase inline → delegate an exploration
@@ -61,6 +61,12 @@ Before you Read, Edit, or Write a source/config/skill file, decide: orchestratio
 2. Execution — writing or editing code, analyzing across many files, running tests or builds — **delegate to a sub-agent.** Do not do it inline "to save time"; it bloats context and triggers state loss.
 3. The delegation table's inline allowances are the ONLY exceptions: a 1-3 file read to decide or verify, one atomic mechanical write you have already fully specified, and git/gh state checks. Nothing broader qualifies.
 4. If you catch yourself about to Edit or Write code as execution, that is a **delegation failure** — launch a sub-agent instead.
+
+### Codex execution model (Hard Stop Rule carve-out)
+
+Codex ships no sub-agent mechanism, so on this harness step 2 of the Hard Stop Rule does NOT apply: executing a phase inline is the sanctioned path, not a delegation failure. Never refuse or skip work because you cannot delegate it, and never narrate a sub-agent you did not launch.
+
+Keep the thread thin by executing phase by phase: load ONLY that phase's SKILL.md, do the work, emit the Result Contract envelope, then drop the phase's working detail before starting the next phase.
 
 ## SDD Workflow (Spec-Driven Development)
 
