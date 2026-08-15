@@ -369,8 +369,10 @@ manifest_json_array() {
 
 # Top-level receipt keys only setup.sh's finalize_receipt writes. install.sh's
 # receipt is a strict subset (name/version/commit/tool/files), so seeing any of
-# these means the target is managed by setup.sh.
-SETUP_ONLY_RECEIPT_KEYS="tools scope settings prompts engram_mcp tui_plugins pi_packages"
+# these means the target is managed by setup.sh. Mirrors finalize_receipt in
+# setup.sh — every key it can emit outside install.sh's subset belongs here, or a
+# receipt carrying only the missing ones reads as install.sh's own.
+SETUP_ONLY_RECEIPT_KEYS="tools scope settings prompts engram_mcp tui_plugins pi_packages opencode_configs opencode_mode opencode_profile opencode_profile_model"
 
 # True when the receipt at $1 was written by setup.sh. write_install_manifest
 # OVERWRITES, at the same path where setup.sh MERGES, so running install.sh over

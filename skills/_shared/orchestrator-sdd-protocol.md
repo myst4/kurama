@@ -86,6 +86,28 @@ with defaults the user never chose.
   results to the user in their language. Never fall through to "not initialized", never
   proceed on defaults, and never let a phase launch on the unverified reading.
 
+## Cycle State Marker (write it in EVERY mode)
+
+After EVERY phase transition, write/update `.kurama/sdd/{change-name}/state.md`. This is
+YOUR write — no phase skill does it for you, and no mode exempts you from it: `engram`,
+`openspec`, and `hybrid` all write this file *in addition to* the mode's own state
+persistence (`persistence-contract.md` → *Hook-visible cycle markers* and *State
+Persistence (Orchestrator)*).
+
+It is not bookkeeping. `orchestrator-write-guard.sh` runs outside the model and can read
+only the filesystem — it cannot query Engram — so this file is the ONLY thing that tells
+it a cycle is active. Skip it in `engram` mode and the guard silently never engages.
+
+- Content mirrors the state artifact: `change`, `phase` (the phase just completed),
+  `artifact_store.mode`, `artifacts`, `tasks_progress`, `last_updated`
+  (`engram-convention.md` → the `sdd/{change-name}/state` artifact).
+- It is also the recovery floor after a compaction, and what `scripts/sdd-status.sh`
+  reads to report the cycle.
+- It stays until `sdd-archive` writes `.kurama/sdd/{change-name}/archive-report.md`,
+  which RETIRES the cycle. Never delete it by hand.
+- A failed marker write goes in the phase's `risks`; where `.kurama/sdd/` is only the
+  mirror that is a WARNING and the cycle continues.
+
 ## SDD Entry Routing
 
 A natural-language SDD request starts the pipeline at its ENTRY, never at a loose

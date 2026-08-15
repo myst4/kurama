@@ -22,9 +22,11 @@ Installing a profile named `NAME` splices these entries into
 `~/.config/opencode/opencode.json` (existing agents and their user-edited models
 are preserved):
 
-- **`kurama-orchestrator`** — `mode:primary`. The profile conductor. Its `task`
-  permission is scoped to `sdd-*-NAME`, so it only delegates to its own suffixed
-  subagents. Prompt: `{file:./AGENTS.md}`.
+- **`kurama-orchestrator`** — `mode:primary`. The profile conductor. Installing a
+  profile RENAMES the template's `sdd-*-kurama` grant to `sdd-*-NAME` and leaves the
+  `review-*`, `jd-*` and `general` grants untouched, so it delegates SDD phases to
+  its own suffixed subagents and the review lenses to `general` — exactly like the
+  base `sdd-orchestrator`. Prompt: `{file:./AGENTS.md}`.
 - **`sdd-<phase>-NAME`** — one `mode:subagent`, `hidden` agent per SDD phase
   (`init`, `explore`, `propose`, `spec`, `design`, `tasks`, `apply`, `verify`,
   `archive`). Each references the shared prompt file
@@ -78,9 +80,10 @@ freeform (non-slash) request to the selected primary:
    `kurama-orchestrator` is the selected primary.
 3. Type a freeform request — e.g. `run the SDD apply phase for change X` or
    `start a new SDD change: <description>`. As the selected primary,
-   `kurama-orchestrator` handles the message directly and delegates only to its
-   `sdd-<phase>-NAME` subagents, each of which carries the profile's configured
-   model.
+   `kurama-orchestrator` handles the message directly and delegates each SDD phase
+   to its `sdd-<phase>-NAME` subagents, each of which carries the profile's
+   configured model. The review lenses (`review-*`, `jd-*`) still run as `general`
+   subtasks, as on the base agent — a profile changes models, not the pipeline.
 
 ## Editing models by hand
 

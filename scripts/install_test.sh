@@ -1620,6 +1620,82 @@ test_sdd_status_json_parses_on_empty() {
     return 0
 }
 
+test_sdd_status_conforming_engram_cycle_is_not_degraded() {
+    # A post-#30 engram cycle writes the mandated cycle marker and NOTHING else
+    # to disk. Labelling it "engram (fallback)" called a fully conforming cycle
+    # degraded, and probing artifact files alone printed "Last phase: none /
+    # Next phase: explore" two lines above "Recorded phase: tasks".
+    local proj="$TEST_TMPDIR/engram-project"
+    mkdir -p "$proj/.kurama/sdd/my-change"
+    cat > "$proj/.kurama/sdd/my-change/state.md" <<'EOF'
+change: my-change
+phase: tasks
+artifact_store.mode: engram
+last_updated: 2026-08-15
+EOF
+    local output
+    output=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" 2>&1) || {
+        echo "sdd-status.sh failed on an engram cycle"; return 1; }
+
+    if printf '%s\n' "$output" | grep -qi 'fallback'; then
+        echo "a conforming engram cycle is still labelled a fallback"; return 1
+    fi
+    printf '%s\n' "$output" | grep -qE '^  Store: +engram$' || {
+        echo "the store label is not the recorded mode:"; printf '%s\n' "$output"; return 1; }
+    printf '%s\n' "$output" | grep -qE '^  Last phase: +tasks$' || {
+        echo "the recorded phase did not win over the artifact probes"; return 1; }
+    printf '%s\n' "$output" | grep -qE '^  Next phase: +apply' || {
+        echo "next phase does not follow the recorded phase"; return 1; }
+
+    local json
+    json=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" --json 2>&1) || {
+        echo "sdd-status.sh --json failed"; return 1; }
+    if command -v jq > /dev/null 2>&1; then
+        assert_eq "engram" "$(printf '%s' "$json" | jq -r '.changes[0].store')" \
+            "JSON store is not a legal artifact-store mode" || return 1
+        assert_eq "tasks" "$(printf '%s' "$json" | jq -r '.changes[0].last_phase')" \
+            "JSON last_phase contradicts recorded_phase" || return 1
+    fi
+    return 0
+}
+
+test_sdd_status_marker_only_openspec_cycle_is_not_hybrid() {
+    # The .kurama/ markers are written in EVERY mode, so their presence is not
+    # evidence of a second store — upgrading on it made "openspec" unreachable.
+    local proj="$TEST_TMPDIR/openspec-project"
+    mkdir -p "$proj/openspec/changes/my-change" "$proj/.kurama/sdd/my-change"
+    printf 'schema: spec-driven\n' > "$proj/openspec/config.yaml"
+    printf '# proposal\n' > "$proj/openspec/changes/my-change/proposal.md"
+    printf 'change: my-change\nphase: propose\n' > "$proj/.kurama/sdd/my-change/state.md"
+
+    local output
+    output=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" 2>&1) || {
+        echo "sdd-status.sh failed on an openspec cycle"; return 1; }
+    printf '%s\n' "$output" | grep -qE '^  Store: +openspec$' || {
+        echo "a marker-only openspec cycle is not labelled openspec:"; printf '%s\n' "$output"; return 1; }
+    return 0
+}
+
+test_sdd_status_unprovable_store_is_labelled_unknown() {
+    # No recorded mode anywhere: say so instead of guessing engram.
+    local proj="$TEST_TMPDIR/unknown-store-project"
+    mkdir -p "$proj/.kurama/sdd/my-change"
+    printf 'change: my-change\nphase: explore\n' > "$proj/.kurama/sdd/my-change/state.md"
+
+    local output
+    output=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" 2>&1) || {
+        echo "sdd-status.sh failed"; return 1; }
+    printf '%s\n' "$output" | grep -qE '^  Store: +unknown +\(cycle markers only\)$' || {
+        echo "an unprovable store is not labelled honestly:"; printf '%s\n' "$output"; return 1; }
+    if command -v jq > /dev/null 2>&1; then
+        local json
+        json=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" --json 2>&1)
+        printf '%s' "$json" | jq -e '.changes[0].store == null' > /dev/null 2>&1 || {
+            echo "JSON store must be null, never a prose label"; return 1; }
+    fi
+    return 0
+}
+
 test_pi_example_generated() {
     # G9: Pi is the 8th generated harness; its orchestrator lands at examples/pi/AGENTS.md.
     assert_file_exists "$REPO_DIR/examples/pi/AGENTS.md" || return 1
@@ -3635,6 +3711,51 @@ test_update_refuses_opencode_receipt_without_mode() {
     return 0
 }
 
+test_update_refusal_does_not_abort_the_other_targets() {
+    # A refusal is about ONE receipt. Under `set -euo pipefail` the bare
+    # resync_target call let that `return 1` kill the whole run, so every target
+    # QUEUED BEHIND the mode-less OpenCode receipt (codex, pi, omp — ALL_AGENTS
+    # order puts opencode second) was never touched and the run ended with no
+    # summary. install.sh already skips-and-continues; update must match.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
+    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup codex failed"; return 1; }
+
+    # Make the OpenCode receipt mode-less: every pre-#22 receipt looks like this.
+    local manifest="$HOME/.config/opencode/$OPENCODE_RECEIPT_REL"
+    local stripped
+    stripped=$(grep -v '"opencode_mode"' "$manifest")
+    printf '%s\n' "$stripped" > "$manifest"
+
+    # Drift a recorded file in the target queued AFTER opencode: only a re-sync
+    # that actually reached codex restores it.
+    local codex_skill="$HOME/.codex/skills/sdd-apply/SKILL.md"
+    assert_file_exists "$codex_skill" || return 1
+    printf 'clobbered\n' > "$codex_skill"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" 2>&1) || status=$?
+
+    # The refused target still makes the run fail — silence would hide it.
+    if [ "$status" -eq 0 ]; then
+        echo "a refused target must still make the run exit non-zero"; return 1
+    fi
+    # ...but the targets behind it were updated anyway.
+    if grep -q '^clobbered$' "$codex_skill"; then
+        echo "codex was never re-synced — the OpenCode refusal aborted the loop"; return 1
+    fi
+    # ...and the run closes with an honest summary naming the skipped target.
+    printf '%s\n' "$output" | grep -q 'Not updated' || {
+        echo "the run printed no end-of-run summary of the skipped target(s)"; return 1; }
+    printf '%s\n' "$output" | grep -qi 'opencode' || {
+        echo "the summary never names the refused target"; return 1; }
+    printf '%s\n' "$output" | grep -q -- '--opencode-mode' || {
+        echo "the summary never states the remedy"; return 1; }
+    return 0
+}
+
 test_uninstall_removes_every_opencode_artifact() {
     run_setup_opencode --opencode-mode multi --opencode-profile testp \
         || { echo "setup opencode multi+profile failed"; return 1; }
@@ -4076,6 +4197,26 @@ test_opencode_templates_allow_the_review_layer() {
     return 0
 }
 
+test_no_prose_claims_profile_delegation_is_exclusive() {
+    # The config allows review-*/jd-*/general (see the two tests above), but the
+    # prose said the profile orchestrator "delegates only to its own sdd-*-NAME
+    # subagents" — and the copy inside the SHIPPED prompt contradicted the review
+    # rule three paragraphs above it. Being the more specific sentence, it read as
+    # the governing exception and the review layer got skipped. Any wording that
+    # narrows the profile's delegation to sdd-*-NAME is a lie about the map.
+    local f
+    for f in "$REPO_DIR/docs/opencode-profiles.md" \
+             "$REPO_DIR/examples/_templates/opencode.md" \
+             "$REPO_DIR/examples/opencode/AGENTS.md"; do
+        assert_file_exists "$f" || return 1
+        if grep -nEi 'delegates only|only delegates' "$f"; then
+            echo "$f claims the profile orchestrator delegates only to its own subagents"
+            return 1
+        fi
+    done
+    return 0
+}
+
 test_opencode_commands_never_hardcode_engram_mode() {
     # Every executor command must RESOLVE the artifact store, never assume it.
     if grep -rl 'Artifact store mode: engram' "$REPO_DIR/examples/opencode/commands" > /dev/null 2>&1; then
@@ -4133,6 +4274,15 @@ test_cycle_markers_written_in_every_mode() {
         || { echo "sdd-verify no longer writes the verify-report marker"; return 1; }
     grep -q '.kurama/sdd/{change-name}/archive-report.md' "$REPO_DIR/skills/sdd-archive/SKILL.md" \
         || { echo "sdd-archive no longer writes the archive-report marker"; return 1; }
+    # The third marker is the orchestrator's, and the contract that ASSIGNS it is not
+    # the file the orchestrator is routed to. With the mandate only in
+    # persistence-contract.md, engram mode wrote no state.md at all and the write
+    # guard stayed inert — lock the orchestrator's own rulebook to it.
+    local osp="$REPO_DIR/skills/_shared/orchestrator-sdd-protocol.md"
+    grep -q '.kurama/sdd/' "$osp" \
+        || { echo "orchestrator-sdd-protocol.md never names .kurama/sdd/"; return 1; }
+    grep -q 'state\.md' "$osp" \
+        || { echo "orchestrator-sdd-protocol.md never mandates the state.md marker"; return 1; }
     # The paths must still be the ones the shipped hooks actually check.
     # shellcheck disable=SC2016  # "$change" is the literal shell variable name inside the hook
     grep -qF '.kurama/sdd/$change/verify-report.md' \
@@ -4319,6 +4469,9 @@ echo -e "${BOLD}Phase 6 surface (G9 Pi + sdd-status.sh)${NC}"
 run_test "sdd-status.sh exists and is executable" test_sdd_status_exists_and_executable
 run_test "sdd-status.sh exits 0 on an empty project" test_sdd_status_empty_dir_exit_zero
 run_test "sdd-status.sh --json parses on an empty project" test_sdd_status_json_parses_on_empty
+run_test "a conforming engram cycle is not called degraded" test_sdd_status_conforming_engram_cycle_is_not_degraded
+run_test "a marker-only openspec cycle is not hybrid" test_sdd_status_marker_only_openspec_cycle_is_not_hybrid
+run_test "an unprovable store is labelled unknown" test_sdd_status_unprovable_store_is_labelled_unknown
 run_test "examples/pi/AGENTS.md is generated" test_pi_example_generated
 echo ""
 
@@ -4438,6 +4591,7 @@ run_test "a non-OpenCode receipt carries no OpenCode keys" test_setup_receipt_om
 run_test "update re-syncs multi+profile without downgrading" test_update_preserves_opencode_mode_and_profile
 run_test "update preserves a hand-edited profile model" test_update_preserves_hand_edited_profile_model
 run_test "update refuses an OpenCode receipt with no mode" test_update_refuses_opencode_receipt_without_mode
+run_test "a refused target never aborts the other targets" test_update_refusal_does_not_abort_the_other_targets
 run_test "uninstall removes every OpenCode artifact" test_uninstall_removes_every_opencode_artifact
 run_test "uninstall sweeps a pre-#22 OpenCode receipt" test_uninstall_sweeps_legacy_opencode_artifacts
 run_test "the sweep never deletes a user-written AGENTS.md" test_uninstall_leaves_foreign_agents_md_alone
@@ -4461,6 +4615,7 @@ echo ""
 echo -e "${BOLD}#25 — profile permissions + OpenCode template invariants${NC}"
 run_test "profile orchestrator may delegate the review layer" test_opencode_profile_permission_allows_review_layer
 run_test "both templates allow general/review-*/jd-*" test_opencode_templates_allow_the_review_layer
+run_test "no prose narrows profile delegation to sdd-*-NAME" test_no_prose_claims_profile_delegation_is_exclusive
 run_test "no command hardcodes the engram artifact store" test_opencode_commands_never_hardcode_engram_mode
 run_test "executor commands name risks + skill_resolution" test_opencode_executor_commands_name_the_envelope_fields
 run_test "no SKILL.md declares a tools: key" test_skills_declare_no_tools_frontmatter
