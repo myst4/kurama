@@ -117,9 +117,11 @@ bash/`jq` equivalent:
 - **External-profile-file auto-detection** (`profiles/*.json` strategy switching).
   Kurama ships only the generated single-profile overlay.
 
-The `background-agents.ts` delegation plugin is retained (unchanged by profiles):
-its disk-persisted async `delegate` survives compaction, which is an advantage over
-the native `task` tool.
+Background execution is unchanged by profiles: Kurama no longer ships the
+`background-agents.ts` plugin (third-party code observed hanging the OpenCode TUI
+at startup). OpenCode's own `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`
+switch covers background sub-agents now — see
+[sub-agents.md](sub-agents.md#per-agent-model-routing).
 
 gentle-ai's `home_logo` TUI plugin **is** ported, as the opt-in `--with-logo`
 flag (which also installs Pi's startup header) — it is orthogonal to profiles
