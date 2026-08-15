@@ -39,6 +39,10 @@ TARGET_PATH=""      # repo root when SCOPE=project (validated; never the Kurama 
 HOOKS_SRC="$EXAMPLES_DIR/claude-code/hooks"
 HOOK_SCRIPTS="orchestrator-write-guard.sh archive-gate.sh README.md"
 
+# Set by merge_hooks_settings: true only when a merged settings.json really
+# reached disk. install_hooks records the file in the receipt only then.
+HOOKS_SETTINGS_WRITTEN=false
+
 # Receipt accumulators — filled across install_skills / install_hooks / Pi steps
 # and flushed ONCE by finalize_receipt() at the end of setup_agent, so a single
 # receipt records skills, agents, hooks, the touched settings.json, and any Pi
@@ -412,7 +416,8 @@ validate_project_target() {
             exit 1
         fi
         warn "Project target is not a git repository: $TARGET_PATH"
-        read -rp "  Install anyway? [y/N]: " ans
+        # Tolerate EOF (piped/closed stdin) under `set -e`: default to the safe NO.
+        read -rp "  Install anyway? [y/N]: " ans || ans="N"
         [[ "${ans:-N}" =~ ^[Yy] ]] || { info "Aborted."; exit 0; }
     fi
 
@@ -827,6 +832,35 @@ atomic_replace() {
     mv "$tmp" "$target"
 }
 
+# Read a JSON config so it can be piped into a merge. An absent file — or one
+# holding nothing but whitespace, a realistic state on a fresh machine or after a
+# user clears a config — yields "{}" so the merge starts from an empty object.
+# An existing file we cannot READ is an error, never a "{}" degrade: the previous
+# `{ cat file || printf '{}'; }` construct turned an unreadable config into an
+# empty object and rewrote the user's file from scratch.
+read_json_for_merge() {
+    local file="$1" content
+    [ -e "$file" ] || { printf '{}'; return 0; }
+    [ -r "$file" ] || return 1
+    content="$(cat "$file")" || return 1
+    case "$content" in
+        *[![:space:]]*) printf '%s' "$content" ;;
+        *)              printf '{}' ;;
+    esac
+}
+
+# Guard a jq merge result before it is allowed to overwrite a user's config.
+# jq exits 0 and prints NOTHING when its input is empty or whitespace-only
+# (`printf '\n' | jq '.hooks = (.hooks // {})'` → no output, rc 0), so the usual
+# `merged=$(… | jq …) || fail` never fires and the empty $merged lands on the
+# user's file while the log prints a success line. Every merge site runs its
+# result through this: empty output, or output that is not valid JSON, means
+# "leave the file alone".
+jq_merge_ok() {
+    [ -n "$1" ] || return 1
+    printf '%s\n' "$1" | jq -e . >/dev/null 2>&1
+}
+
 # Abort if a marker pair is unbalanced (BEGIN present without END, or vice
 # versa). Without this guard the awk rewrite below sets skip=1 on BEGIN and never
 # clears it, silently deleting everything after BEGIN when the mv overwrites.
@@ -899,18 +933,30 @@ $(receipt_rel "$dest")"
         gate_cmd="$hooks_dir/archive-gate.sh"
     fi
 
-    # 3. Merge the PreToolUse block into settings.json (idempotent).
-    merge_hooks_settings "$settings_file" "$guard_cmd" "$gate_cmd"
-    RECEIPT_SETTINGS="$RECEIPT_SETTINGS
+    # 3. Merge the PreToolUse block into settings.json (idempotent). NON-FATAL:
+    #    the skills, agents and hook scripts are already on disk, so aborting here
+    #    (a jq failure on a settings.json the user broke by hand used to kill the
+    #    installer under `set -e`) would leave every one of them unrecorded.
+    merge_hooks_settings "$settings_file" "$guard_cmd" "$gate_cmd" \
+        || warn "hooks not registered in $settings_file — fix it and re-run, the rest of the install stands"
+
+    # Record the settings.json ONLY when one was really written. The jq-less path
+    # prints manual instructions and writes nothing; recording it anyway pointed
+    # uninstall/doctor at a file that does not exist.
+    if $HOOKS_SETTINGS_WRITTEN; then
+        RECEIPT_SETTINGS="$RECEIPT_SETTINGS
 $(receipt_rel "$settings_file")"
+    fi
 }
 
 # Careful JSON merge of the Kurama PreToolUse hooks into a settings.json. Removes
 # any prior kurama entries (matched by the "hooks/kurama/" substring) before
 # re-adding, so it is fully idempotent. Backs up + writes atomically. Degrades to
 # printed manual instructions when jq is unavailable — never sed on JSON.
+# Returns non-zero when the hooks were NOT registered; the caller keeps going.
 merge_hooks_settings() {
     local settings_file="$1" guard_cmd="$2" gate_cmd="$3"
+    HOOKS_SETTINGS_WRITTEN=false
     mkdir -p "$(dirname "$settings_file")"
 
     if ! command -v jq >/dev/null 2>&1; then
@@ -921,9 +967,12 @@ merge_hooks_settings() {
         return 0
     fi
 
-    local merged
+    local input merged
+    input="$(read_json_for_merge "$settings_file")" \
+        || { fail "Cannot read $settings_file — hooks left unregistered"; return 1; }
+
     merged=$(
-        { [ -f "$settings_file" ] && cat "$settings_file" || printf '{}'; } | \
+        printf '%s\n' "$input" | \
         jq --arg guard "$guard_cmd" --arg gate "$gate_cmd" '
             .hooks = (.hooks // {}) |
             .hooks.PreToolUse = ((.hooks.PreToolUse // [])
@@ -939,8 +988,12 @@ merge_hooks_settings() {
         '
     ) || { fail "Failed to merge hooks into $settings_file (left unchanged)"; return 1; }
 
+    jq_merge_ok "$merged" \
+        || { fail "Hook merge produced no usable JSON — $settings_file left unchanged"; return 1; }
+
     if [ -f "$settings_file" ]; then make_backup "$settings_file"; fi
     printf '%s\n' "$merged" | atomic_replace "$settings_file"
+    HOOKS_SETTINGS_WRITTEN=true
     ok "hooks merged into $settings_file"
 }
 
@@ -1101,7 +1154,9 @@ ask_opencode_mode() {
     echo "  1) Single model  — one agent handles all phases (simple, recommended)"
     echo "  2) Multi-model   — one agent per phase, each with its own model"
     echo ""
-    read -rp "  Choice [1]: " mode_choice
+    # Tolerate EOF (piped/closed stdin) under `set -e`: fall through to the
+    # documented default instead of killing an install already half on disk.
+    read -rp "  Choice [1]: " mode_choice || mode_choice=""
     mode_choice="${mode_choice:-1}"
 
     case "$mode_choice" in
@@ -1160,8 +1215,8 @@ install_opencode_profile() {
         warn "Profile template not found: $template (skipped)"
         return 0
     fi
-    if [ ! -f "$config_file" ]; then
-        warn "opencode.json missing — cannot splice the '$name' profile"
+    if [ ! -s "$config_file" ]; then
+        warn "opencode.json missing or empty — cannot splice the '$name' profile"
         return 0
     fi
 
@@ -1205,6 +1260,9 @@ install_opencode_profile() {
         else . end
     ' "$config_file") || { warn "Failed to splice profile into $config_file"; return 0; }
 
+    jq_merge_ok "$merged" \
+        || { warn "Profile splice produced no usable JSON — $config_file left unchanged"; return 0; }
+
     make_backup "$config_file"
     printf '%s\n' "$merged" | atomic_replace "$config_file"
     ok "OpenCode profile '$name' installed (kurama-orchestrator + 9 sdd-<phase>-$name agents)"
@@ -1229,7 +1287,7 @@ setup_opencode() {
     ask_opencode_profile
     local profile_saved="{}"
     if [ "$OPENCODE_PROFILE" != "no" ] && [ -n "$OPENCODE_PROFILE" ] \
-        && command -v jq &>/dev/null && [ -f "$config_file" ]; then
+        && command -v jq &>/dev/null && [ -s "$config_file" ]; then
         profile_saved=$(jq -c --arg name "$OPENCODE_PROFILE" --arg re "$OPENCODE_MODEL_RE" '
             def isprof(k): (k == "kurama-orchestrator")
                 or ((k|startswith("sdd-")) and (k|endswith("-" + $name)));
@@ -1238,6 +1296,8 @@ setup_opencode() {
                 | select(.value.model | strings | test($re))) as $e
                 ({}; . + {($e.key): $e.value.model})
         ' "$config_file") || profile_saved="{}"
+        # jq prints nothing (rc 0) on an empty input; an empty snapshot is "{}".
+        [ -n "$profile_saved" ] || profile_saved="{}"
     fi
 
     # Install commands
@@ -1260,9 +1320,24 @@ setup_opencode() {
         ok "$count OpenCode commands installed ($OPENCODE_MODE mode)"
     fi
 
-    # Merge opencode.json agent config (idempotent: replaces sdd-* agents, preserves user model choices)
+    # Merge opencode.json agent config (idempotent: replaces sdd-* agents, preserves user model choices).
+    # Three states, decided explicitly instead of by `[ -f ]`: a config with real
+    # content is merged into; an absent or blank one is created from the template
+    # (feeding jq an empty input yields an empty result, which used to be written
+    # straight over the file); one we cannot read stops the run — never clobber
+    # what we cannot see.
     if command -v jq &>/dev/null && [ -f "$example_config" ]; then
-        if [ -f "$config_file" ]; then
+        local config_state="create"
+        if [ -e "$config_file" ]; then
+            if [ ! -r "$config_file" ]; then
+                fail "Cannot read $config_file — the SDD agents were NOT merged"
+                info "Fix its permissions and re-run: ./setup.sh --agent opencode"
+                exit 1
+            fi
+            if grep -q '[^[:space:]]' "$config_file"; then config_state="merge"; fi
+        fi
+
+        if [ "$config_state" = "merge" ]; then
             local example_agents
             example_agents=$(jq '.agent // {}' "$example_config")
 
@@ -1307,7 +1382,22 @@ setup_opencode() {
 
                 # 4. Clean up stale "agents" plural key
                 del(.agents)
-            ' "$config_file")
+            ' "$config_file") || {
+                # Without this guard jq's raw parse error was the only message and
+                # jq's own exit code (5) became the installer's — after 25 skills
+                # were already on disk. The EXIT trap in setup_agent records them.
+                fail "Could not parse $config_file — the SDD agents were NOT merged"
+                fail "opencode.json must be strict JSON: no comments, no trailing commas."
+                info "Fix it (or move it aside) and re-run: ./setup.sh --agent opencode"
+                info "Your config was left unchanged."
+                exit 1
+            }
+
+            jq_merge_ok "$merged" || {
+                fail "The agent merge produced no usable JSON — $config_file left unchanged"
+                info "Re-run after checking $config_file; nothing was written."
+                exit 1
+            }
 
             make_backup "$config_file"
             printf '%s\n' "$merged" | atomic_replace "$config_file"
@@ -1460,6 +1550,9 @@ $(receipt_rel "$dest")"
             || { warn "Failed to create $tui_file"; return 0; }
     fi
 
+    jq_merge_ok "$merged" \
+        || { warn "TUI plugin registration produced no usable JSON — $tui_file left unchanged"; return 0; }
+
     printf '%s\n' "$merged" | atomic_replace "$tui_file"
     RECEIPT_TUI_PLUGINS="$RECEIPT_TUI_PLUGINS
 $(receipt_rel "$tui_file")"
@@ -1520,7 +1613,8 @@ ask_pi_packages() {
     echo "  rpiv-ask-user-question, pi-web-access, rpiv-todo, pi-btw."
     echo "  (gentle-pi is intentionally excluded — it conflicts with Kurama.)"
     echo ""
-    read -rp "  Install Pi packages? [y/N]: " pi_answer
+    # Tolerate EOF (piped/closed stdin) under `set -e`: default to the safe NO.
+    read -rp "  Install Pi packages? [y/N]: " pi_answer || pi_answer="N"
     pi_answer="${pi_answer:-N}"
     if [[ "$pi_answer" =~ ^[Yy] ]]; then
         PI_PACKAGES="yes"
@@ -1708,11 +1802,17 @@ engram_merge_json() {
         return 0
     fi
 
-    local merged
+    local input merged
+    input="$(read_json_for_merge "$file")" \
+        || { fail "Cannot read $file — Engram MCP left unregistered"; return 1; }
+
     merged=$(
-        { [ -f "$file" ] && cat "$file" || printf '{}'; } | \
+        printf '%s\n' "$input" | \
         jq --arg cmd "$cmd" "$jq_prog"
     ) || { fail "Failed to register Engram MCP in $file (left unchanged)"; return 1; }
+
+    jq_merge_ok "$merged" \
+        || { fail "Engram registration produced no usable JSON — $file left unchanged"; return 1; }
 
     [ -f "$file" ] && make_backup "$file"
     printf '%s\n' "$merged" | atomic_replace "$file"
@@ -1806,6 +1906,29 @@ setup_engram() {
 # Full Setup for One Agent
 # ============================================================================
 
+# EXIT trap installed by setup_agent. finalize_receipt is the LAST step of a
+# successful run, so anything that aborted in between — a jq failure on a config
+# the user broke, a `read` hitting EOF, a full disk — used to leave a ghost
+# install: dozens of files on disk that no receipt records, invisible to
+# uninstall ("nothing recorded — skipping") and update ("No receipt … nothing to
+# update"). The trap flushes the accumulators no matter how setup_agent leaves,
+# and on a non-zero exit says how to reverse or retry.
+finalize_receipt_on_exit() {
+    local status=$?
+    trap - EXIT
+    finalize_receipt
+    if [ "$status" -ne 0 ] && [ -n "$RECEIPT_DIR" ]; then
+        local undo="--agent $RECEIPT_TOOL"
+        [ "$SCOPE" = "project" ] && undo="--scope project --path $TARGET_PATH"
+        echo ""
+        fail "Setup aborted (exit $status) — a PARTIAL install is on disk."
+        info "It is recorded in: $RECEIPT_DIR/$INSTALL_MANIFEST_NAME"
+        info "Remove it with:    $SCRIPT_DIR/uninstall.sh $undo"
+        info "Or fix the cause and re-run this command — setup is idempotent."
+    fi
+    exit "$status"
+}
+
 setup_agent() {
     local agent="$1"
     header "Setting up $agent (scope: $SCOPE)"
@@ -1818,6 +1941,10 @@ setup_agent() {
     RECEIPT_ENGRAM_MCP=""
     RECEIPT_PROMPTS=""
     RECEIPT_TUI_PLUGINS=""
+    RECEIPT_DIR=""
+
+    # From here on every abort still writes a receipt (see finalize_receipt_on_exit).
+    trap finalize_receipt_on_exit EXIT
 
     install_skills "$agent"
 
@@ -1854,12 +1981,15 @@ setup_agent() {
 
     # O5: Engram optional persistence engine — asked once, then the MCP server is
     # registered into this client (unless declined, in which case markdown
-    # persistence stays the default and is noted in the summary).
-    setup_engram "$agent"
+    # persistence stays the default and is noted in the summary). Non-fatal for
+    # the same reason as the hooks merge: the install is already on disk.
+    setup_engram "$agent" \
+        || warn "Engram registration did not complete — the rest of the install stands"
 
     # Flush the single per-agent receipt (skills + agents + hooks + settings +
     # pi packages + engram MCP) now that every step has recorded its writes.
     finalize_receipt
+    trap - EXIT
 }
 
 # ============================================================================
@@ -1920,7 +2050,15 @@ interactive_menu() {
 
     echo ""
     echo -e "${BOLD}Set up all detected agents? [Y/n]${NC} "
-    read -r answer
+    # EOF (piped/closed stdin) is not an answer: say so and change nothing,
+    # rather than dying under `set -e` or silently installing five harnesses.
+    local answer=""
+    if ! read -r answer; then
+        echo ""
+        warn "No answer available (stdin closed) — nothing was set up."
+        info "Re-run with --all to set up every detected agent, or --agent NAME for one."
+        exit 0
+    fi
     answer="${answer:-Y}"
 
     if [[ "$answer" =~ ^[Yy] ]]; then
@@ -1938,7 +2076,9 @@ interactive_menu() {
             i=$((i + 1))
         done
         echo ""
-        read -rp "Choice: " choices
+        # EOF here means "no selection": the loop below simply does nothing.
+        local choices=""
+        read -rp "Choice: " choices || choices=""
 
         for choice in $choices; do
             local idx=$((choice - 1))
@@ -1977,6 +2117,18 @@ STARTUP_LOGO=""            # "yes" (via --with-logo) installs the Kurama startup
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
 ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
 
+# Every value-taking flag goes through this first: under `set -u` a bare
+# `--agent` at the end of the line used to abort with a raw
+# "setup.sh: line NNN: $2: unbound variable" instead of naming the flag.
+require_flag_value() {
+    local flag="$1" value="${2:-}"
+    if [ -z "$value" ]; then
+        echo "Missing value for $flag"
+        echo "Run: setup.sh --help"
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --agent)
@@ -1985,6 +2137,7 @@ while [[ $# -gt 0 ]]; do
             # and a bare `mkdir: : No such file or directory` — which is exactly
             # what a stale `--agent gemini-cli|cursor|vscode|antigravity` in a
             # script or CI job now produces. Fail here, by name, instead.
+            require_flag_value --agent "${2:-}"
             case "$2" in
                 claude-code|opencode|codex|pi|omp) AGENT="$2"; shift 2 ;;
                 *)
@@ -1997,17 +2150,19 @@ while [[ $# -gt 0 ]]; do
         --all)            ALL=true; shift ;;
         --non-interactive) NON_INTERACTIVE=true; ALL=true; shift ;;
         --scope)
+            require_flag_value --scope "${2:-}"
             case "$2" in
                 global|project) SCOPE="$2"; shift 2 ;;
                 *) echo "Invalid scope: $2 (use 'global' or 'project')"; exit 1 ;;
             esac
             ;;
-        --path)           TARGET_PATH="$2"; shift 2 ;;
+        --path)           require_flag_value --path "${2:-}"; TARGET_PATH="$2"; shift 2 ;;
         --with-pi-packages)    PI_PACKAGES="yes"; shift ;;
         --without-pi-packages) PI_PACKAGES="no"; shift ;;
         --with-engram)         ENGRAM="yes"; shift ;;
         --without-engram)      ENGRAM="no"; shift ;;
         --opencode-mode)
+            require_flag_value --opencode-mode "${2:-}"
             if [[ "$2" == "single" || "$2" == "multi" ]]; then
                 OPENCODE_MODE="$2"; shift 2
             else
@@ -2017,6 +2172,7 @@ while [[ $# -gt 0 ]]; do
         --opencode-profile)
             # Grammar: NAME[:provider/model]. Split on the FIRST colon so the
             # model's own "/" survives; an empty NAME defaults to "kurama".
+            require_flag_value --opencode-profile "${2:-}"
             _prof_val="$2"
             _prof_name="${_prof_val%%:*}"
             _prof_rest="${_prof_val#*:}"

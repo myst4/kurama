@@ -3228,6 +3228,271 @@ test_nojq_receipt_parser_ignores_single_line_empty_array() {
 }
 
 # ============================================================================
+# Tests — installer correctness (#20 ghost installs, #21 empty-jq blanking,
+# #24 install.sh receipt/flag defects)
+#
+# The shared question behind this section: when a step fails halfway, does the
+# installer leave the machine in a state the shipped tooling can still see and
+# reverse? Files on disk with no receipt (a "ghost install"), a config blanked by
+# an empty jq result, or a truncated receipt all answer "no" — and all three
+# looked like a successful install from the console.
+# ============================================================================
+
+# A settings.json the user broke by hand (trailing comma). jq refuses it, so the
+# hooks merge must fail — what setup does *next* is what these cases assert.
+write_broken_settings_json() {
+    local file="$1"
+    mkdir -p "$(dirname "$file")"
+    printf '{\n  "model": "opus",\n}\n' > "$file"
+}
+
+test_setup_survives_hooks_merge_failure() {
+    write_broken_settings_json "$HOME/.claude/settings.json"
+    local output status=0
+    output=$(bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+    assert_eq "0" "$status" "a failed hooks merge must not abort an otherwise-good install" || return 1
+    assert_all_skills_installed "$HOME/.claude/skills" || return 1
+
+    # The receipt exists and records what really landed — the ghost-install fix.
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q 'sdd-apply/SKILL.md' "$manifest" || { echo "receipt does not record the installed skills"; return 1; }
+
+    # The unparseable file is the user's: left byte-for-byte alone …
+    grep -q '"model": "opus",' "$HOME/.claude/settings.json" || {
+        echo "setup rewrote the settings.json it could not parse"; return 1; }
+    # … and never claimed in the receipt, which would send uninstall after a file
+    # Kurama never touched.
+    if grep -q 'settings.json' "$manifest"; then
+        echo "receipt claims a settings.json that was never merged"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'hooks' || { echo "the failure was never reported to the user"; return 1; }
+    return 0
+}
+
+test_setup_eof_stdin_leaves_no_ghost_install() {
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+    # No --non-interactive: the prompts run and hit EOF immediately, which used to
+    # kill the script under `set -e` after the skills were already on disk.
+    local status=0
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --without-engram \
+        < /dev/null > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "closed stdin must fall back to the prompt defaults, not abort" || return 1
+    assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
+    assert_file_exists "$HOME/.config/opencode/skills/.kurama-install-manifest.json" || return 1
+    return 0
+}
+
+test_setup_unparseable_opencode_json_is_controlled() {
+    local cfg="$HOME/.config/opencode/opencode.json"
+    mkdir -p "$(dirname "$cfg")"
+    printf '{\n  // a JSONC comment opencode tolerates and jq does not\n  "theme": "kurama"\n}\n' > "$cfg"
+    local before output status=0
+    before="$(cat "$cfg")"
+    output=$(bash "$SETUP_SCRIPT" --agent opencode --without-engram --non-interactive 2>&1) || status=$?
+
+    # A Kurama-controlled exit with an explanation, not jq's own status (5) leaking
+    # out of the installer with jq's raw parse error as the only clue.
+    assert_eq "1" "$status" "setup must exit 1; jq's exit code must not become the installer's" || return 1
+    printf '%s\n' "$output" | grep -q 'opencode.json' || { echo "no message naming the offending file"; return 1; }
+    assert_eq "$before" "$(cat "$cfg")" "the config it cannot parse must be left unchanged" || return 1
+
+    # And whatever landed before the abort is recorded, so it can be removed.
+    local manifest="$HOME/.config/opencode/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q 'sdd-apply/SKILL.md' "$manifest" || {
+        echo "ghost install: skills on disk, nothing in the receipt"; return 1; }
+    return 0
+}
+
+test_nojq_receipt_omits_unwritten_settings() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    local repo="$TEST_TMPDIR/nojq-proj"
+    make_git_repo "$repo"
+
+    local status=0
+    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "a jq-less install must still complete" || return 1
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    # Without jq the hooks block is printed as manual steps and nothing is written,
+    # so nothing may be recorded either.
+    if [ -f "$repo/.claude/settings.json" ]; then
+        echo "jq-less run wrote a settings.json it has no parser for"; return 1
+    fi
+    if grep -q 'settings.json' "$manifest"; then
+        echo "receipt records a settings.json that was never written"; return 1
+    fi
+    return 0
+}
+
+test_setup_empty_settings_json_not_blanked() {
+    # A realistic state: fresh machine, or a config the user cleared.
+    mkdir -p "$HOME/.claude"
+    : > "$HOME/.claude/settings.json"
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+    local settings="$HOME/.claude/settings.json"
+    jq -e . "$settings" > /dev/null 2>&1 || {
+        echo "settings.json is not valid JSON after the merge ($(wc -c < "$settings" | tr -d ' ') bytes)"; return 1; }
+    grep -q 'hooks/kurama/' "$settings" || {
+        echo "the log claimed a merge but no kurama hooks are registered"; return 1; }
+    return 0
+}
+
+test_setup_empty_opencode_json_not_blanked() {
+    local cfg="$HOME/.config/opencode/opencode.json"
+    mkdir -p "$(dirname "$cfg")"
+    : > "$cfg"
+    run_setup_opencode || { echo "setup opencode exited non-zero"; return 1; }
+    jq -e . "$cfg" > /dev/null 2>&1 || {
+        echo "opencode.json is not valid JSON after the merge ($(wc -c < "$cfg" | tr -d ' ') bytes)"; return 1; }
+    # Mode-agnostic: single mode registers sdd-orchestrator, multi one agent per
+    # phase. Either way, zero sdd-* agents means /sdd-* silently stops working.
+    jq -e '[.agent | keys[] | select(startswith("sdd-"))] | length > 0' "$cfg" > /dev/null 2>&1 || {
+        echo "no sdd-* agents registered — /sdd-* commands would silently stop working"; return 1; }
+    return 0
+}
+
+test_setup_empty_claude_json_engram_not_blanked() {
+    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
+    make_engram_shims "$bindir" "$log"
+    : > "$HOME/.claude.json"
+    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "engram setup exited non-zero"; return 1; }
+    jq -e . "$HOME/.claude.json" > /dev/null 2>&1 || { echo ".claude.json was blanked by the merge"; return 1; }
+    jq -e '.mcpServers.engram' "$HOME/.claude.json" > /dev/null 2>&1 || {
+        echo "the Engram server was reported registered but is not in the file"; return 1; }
+    return 0
+}
+
+test_install_refuses_setup_managed_receipt() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local before
+    before="$(cat "$manifest")"
+
+    local output status=0
+    output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "install.sh silently took over a target setup.sh manages"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'setup.sh' || { echo "no message naming setup.sh"; return 1; }
+    printf '%s\n' "$output" | grep -q 'update.sh' || { echo "no pointer to update.sh"; return 1; }
+
+    # The receipt survives byte-for-byte: hooks, prompts, settings and tools[] are
+    # records of files install.sh never wrote and cannot reproduce.
+    assert_eq "$before" "$(cat "$manifest")" "the setup.sh receipt must be left untouched" || return 1
+    grep -q '"settings"' "$manifest" || { echo "settings[] lost"; return 1; }
+    grep -q 'hooks/kurama/archive-gate.sh' "$manifest" || { echo "hook file entries lost"; return 1; }
+    return 0
+}
+
+test_install_refuse_writes_nothing_for_opencode() {
+    # "Refused" has to mean the whole target, not just its skills dir: the
+    # OpenCode branch writes command files after install_skills, and those are
+    # files setup.sh owns too (multi mode rewrites the `agent:` line of every
+    # subtask command). Rewriting them from the repo copies silently reverts that
+    # routing on a target install.sh claims not to touch.
+    run_setup_opencode || { echo "setup opencode exited non-zero"; return 1; }
+    local cmd_dir="$HOME/.config/opencode/commands"
+    local before_count
+    before_count=$(find "$cmd_dir" -name 'sdd-*.md' | wc -l | tr -d ' ')
+    [ "$before_count" -gt 0 ] || { echo "setup installed no commands — nothing to protect"; return 1; }
+
+    # Stand in for any per-target edit setup.sh made that install.sh's copies do
+    # not carry. A plain byte compare would pass today by coincidence.
+    printf 'agent: sdd-apply-multi-routing\n' >> "$cmd_dir/sdd-apply.md"
+
+    # Backdate the commands AND a reference file to 2000, so "was this rewritten?"
+    # is answered by a 26-year gap rather than by clock granularity.
+    local ref="$TEST_TMPDIR/mtime-ref"
+    touch -t 200001010000 "$ref"
+    touch -t 200001010000 "$cmd_dir"/sdd-*.md
+
+    local status=0
+    bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1 || status=$?
+    if [ "$status" -eq 0 ]; then echo "install.sh did not refuse the managed target"; return 1; fi
+
+    grep -q 'sdd-apply-multi-routing' "$cmd_dir/sdd-apply.md" || {
+        echo "the refused run rewrote sdd-apply.md and reverted setup.sh's edit"; return 1; }
+    local touched
+    touched=$(find "$cmd_dir" -name 'sdd-*.md' -newer "$ref" | wc -l | tr -d ' ')
+    assert_eq "0" "$touched" "a refused target must have zero files rewritten" || return 1
+    assert_eq "$before_count" "$(find "$cmd_dir" -name 'sdd-*.md' | wc -l | tr -d ' ')" \
+        "the refused run must not add command files either" || return 1
+    return 0
+}
+
+test_install_without_group_removes_excluded_skills() {
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1 || { echo "first install failed"; return 1; }
+    assert_dir_exists "$HOME/.claude/skills/review-risk" || return 1
+
+    bash "$INSTALL_SCRIPT" --agent claude-code --without review > /dev/null 2>&1 \
+        || { echo "re-install with --without review failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if grep -q 'review-risk' "$manifest"; then echo "receipt still lists the excluded skill"; return 1; fi
+    # Dropping it from the receipt without removing it is the bug: the skill keeps
+    # loading in the agent while nothing records it.
+    if [ -e "$HOME/.claude/skills/review-risk/SKILL.md" ]; then
+        echo "excluded skill left on disk and now unmanaged: review-risk/SKILL.md"; return 1
+    fi
+    assert_file_exists "$HOME/.claude/skills/sdd-apply/SKILL.md" || return 1
+    return 0
+}
+
+test_install_incomplete_checkout_aborts_early() {
+    # A checkout with skills/ but no examples/ — the shape the OpenCode command
+    # glob used to die on, midway through an all-global run.
+    local fake="$TEST_TMPDIR/partial-repo"
+    mkdir -p "$fake/scripts"
+    cp "$INSTALL_SCRIPT" "$fake/scripts/install.sh"
+    ln -s "$REPO_DIR/skills" "$fake/skills"
+    cp "$REPO_DIR/VERSION" "$fake/VERSION"
+
+    local output status=0
+    output=$(bash "$fake/scripts/install.sh" --agent all-global 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then echo "install.sh reported success on an incomplete checkout"; return 1; fi
+    printf '%s\n' "$output" | grep -q 'examples' || {
+        echo "the abort never names examples/ as the missing piece"; return 1; }
+    # It aborts up front, instead of after installing three targets out of five.
+    if [ -d "$HOME/.claude/skills" ]; then echo "targets were written before the abort"; return 1; fi
+    return 0
+}
+
+test_install_flag_without_value_shows_usage() {
+    local output status=0
+    output=$(bash "$INSTALL_SCRIPT" --agent 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then echo "a valueless --agent must not exit 0"; return 1; fi
+    if printf '%s\n' "$output" | grep -q 'unbound variable'; then
+        echo "raw bash error leaked instead of a usage message:"
+        printf '%s\n' "$output" | tail -3
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'usage' || { echo "no usage message"; return 1; }
+    return 0
+}
+
+test_setup_flag_without_value_shows_usage() {
+    local output status=0
+    output=$(bash "$SETUP_SCRIPT" --agent 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then echo "a valueless --agent must not exit 0"; return 1; fi
+    if printf '%s\n' "$output" | grep -q 'unbound variable'; then
+        echo "raw bash error leaked instead of a usage message:"
+        printf '%s\n' "$output" | tail -3
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'missing value' || { echo "no 'missing value' message"; return 1; }
+    return 0
+}
+
+# ============================================================================
 # Run all tests
 # ============================================================================
 
@@ -3496,6 +3761,22 @@ run_test "claude-code project install needs no jq" test_nojq_setup_claude_code_p
 run_test "opencode project install needs no jq" test_nojq_setup_opencode_project_installs
 run_test "validate_skills.sh passes without jq" test_nojq_validate_skills_exits_zero
 run_test "single-line empty files[] resolves to nothing" test_nojq_receipt_parser_ignores_single_line_empty_array
+echo ""
+
+echo -e "${BOLD}Installer correctness — ghost installs, blanked configs, receipt truncation${NC}"
+run_test "a failed hooks merge still writes a receipt" test_setup_survives_hooks_merge_failure
+run_test "closed stdin installs instead of dying on read" test_setup_eof_stdin_leaves_no_ghost_install
+run_test "unparseable opencode.json: controlled exit + receipt" test_setup_unparseable_opencode_json_is_controlled
+run_test "jq-less run records no settings.json it never wrote" test_nojq_receipt_omits_unwritten_settings
+run_test "empty settings.json is merged, never blanked" test_setup_empty_settings_json_not_blanked
+run_test "empty opencode.json is created, never blanked" test_setup_empty_opencode_json_not_blanked
+run_test "empty .claude.json survives the Engram merge" test_setup_empty_claude_json_engram_not_blanked
+run_test "install.sh refuses a setup.sh-managed receipt" test_install_refuses_setup_managed_receipt
+run_test "a refused target gets no OpenCode command writes" test_install_refuse_writes_nothing_for_opencode
+run_test "--without removes the excluded skills from disk" test_install_without_group_removes_excluded_skills
+run_test "incomplete checkout aborts before writing" test_install_incomplete_checkout_aborts_early
+run_test "install.sh: valueless flag prints usage" test_install_flag_without_value_shows_usage
+run_test "setup.sh: valueless flag prints usage" test_setup_flag_without_value_shows_usage
 echo ""
 
 # ============================================================================
