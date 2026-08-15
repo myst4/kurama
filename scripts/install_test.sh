@@ -16,6 +16,12 @@ DOCTOR_SCRIPT="$SCRIPT_DIR/doctor.sh"
 TUI_SCRIPT="$SCRIPT_DIR/setup-tui.sh"
 VALIDATE_SCRIPT="$SCRIPT_DIR/validate_skills.sh"
 MANIFEST_FILE="$REPO_DIR/skills/manifest.json"
+# The two PreToolUse hooks setup.sh installs onto the user's machine. They run on
+# every Edit/Write/MultiEdit and every Task/Skill call and block with exit 2, so
+# they are tested here as the shipped artifacts, from the same path setup copies.
+HOOKS_SRC_DIR="$REPO_DIR/examples/claude-code/hooks"
+ARCHIVE_GATE_HOOK="$HOOKS_SRC_DIR/archive-gate.sh"
+WRITE_GUARD_HOOK="$HOOKS_SRC_DIR/orchestrator-write-guard.sh"
 
 # ============================================================================
 # Test state
@@ -3129,6 +3135,342 @@ test_doctor_reports_engram_mcp() {
 }
 
 # ============================================================================
+# Tests — the two shipped PreToolUse hooks (#31)
+#
+# These two scripts run on the USER's machine on every Edit/Write/MultiEdit and
+# every Task/Skill call, and they block with exit 2. Nothing in this repo had
+# ever piped a payload into either of them: their entire behaviour — what they
+# allow, what they block, and every escape hatch documented in docs/hooks.md —
+# was unverified. A broken guard fails in both directions and both are bad: one
+# stops all work, the other silently stops guarding.
+#
+# Everything below drives the SHIPPED files under examples/claude-code/hooks/
+# (the exact bytes setup.sh copies), through stdin, exactly as Claude Code does.
+# ============================================================================
+
+# The hook's combined output and exit code from the last run_hook call. Two
+# globals rather than a return value because a test needs BOTH, and a hook that
+# blocks exits 2 — which a plain command substitution would turn into an aborted
+# test body now that errexit really reaches it.
+HOOK_OUT=""
+HOOK_STATUS=0
+
+# Pipe payload $2 into hook $1 (extra args are passed to the hook, as CLI mode
+# takes a change name). Env overrides go in front of the call:
+#   KURAMA_GUARD_BYPASS=1 run_hook "$WRITE_GUARD_HOOK" "$payload"
+run_hook() {
+    local hook="$1" payload="$2"
+    shift 2
+    HOOK_STATUS=0
+    HOOK_OUT="$(printf '%s' "$payload" | bash "$hook" "$@" 2>&1)" || HOOK_STATUS=$?
+    return 0
+}
+
+# A PreToolUse Edit payload for file $2, in project $1. $3, when non-empty, is
+# the ROOT-level agent_id Claude Code sets only inside a subagent.
+edit_payload() {
+    local root="$1" file="$2" agent="${3:-}"
+    if [ -n "$agent" ]; then
+        printf '{"session_id":"s1","agent_id":"%s","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s","old_string":"a","new_string":"b"}}' \
+            "$agent" "$root" "$file"
+    else
+        printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s","old_string":"a","new_string":"b"}}' \
+            "$root" "$file"
+    fi
+}
+
+# A PreToolUse Skill payload naming skill $2, in project $1.
+skill_payload() {
+    printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"%s"}}' "$1" "$2"
+}
+
+# A git repo carrying an ACTIVE SDD cycle in engram-fallback shape: the
+# .kurama/sdd/<change>/state.md marker batch 1 made every mode write, and no
+# archive report (writing one is what retires the cycle).
+make_active_cycle_repo() {
+    local root="$1" change="${2:-add-widget}"
+    make_git_repo "$root"
+    mkdir -p "$root/src" "$root/.kurama/sdd/$change"
+    printf 'export const widget = 1;\n' > "$root/src/widget.ts"
+    printf '# Cycle state\n\nphase: apply\n' > "$root/.kurama/sdd/$change/state.md"
+}
+
+# Write a verify report for $2 under $1/.kurama/sdd/, with verdict $3 and an
+# optional Content Binding Tree-Hash $4.
+write_verify_report() {
+    local root="$1" change="$2" verdict="$3" tree="${4:-}"
+    mkdir -p "$root/.kurama/sdd/$change"
+    {
+        printf '# Verify report — %s\n\n' "$change"
+        if [ -n "$tree" ]; then
+            printf '## Content Binding\n\nTree-Hash: %s\n\n' "$tree"
+        fi
+        printf '### Verdict\n\n%s\n' "$verdict"
+    } > "$root/.kurama/sdd/$change/verify-report.md"
+}
+
+test_write_guard_allows_writes_when_no_cycle_is_active() {
+    local repo="$TEST_TMPDIR/no-cycle"
+    make_git_repo "$repo"
+    mkdir -p "$repo/src"
+    printf 'x\n' > "$repo/src/app.ts"
+    run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "src/app.ts")"
+    assert_eq "0" "$HOOK_STATUS" "a repo with no SDD cycle must not be guarded at all" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_write_guard_blocks_repo_code_during_an_active_cycle() {
+    local repo="$TEST_TMPDIR/active"
+    make_active_cycle_repo "$repo"
+    run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "src/widget.ts")"
+    assert_eq "2" "$HOOK_STATUS" "an orchestrator write to repo code during a cycle must be blocked" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    # exit 2 feeds stderr back to the model, so the message IS the remedy.
+    printf '%s\n' "$HOOK_OUT" | grep -q 'BLOCKED by kurama orchestrator-write-guard' || {
+        echo "the block carries no identifying message:"; printf '%s\n' "$HOOK_OUT"; return 1; }
+    printf '%s\n' "$HOOK_OUT" | grep -q 'DELEGATE' || {
+        echo "the block never tells the orchestrator what to do instead"; return 1; }
+    return 0
+}
+
+test_write_guard_exempts_the_sdd_artifact_paths() {
+    # The cycle cannot advance if the guard blocks the very files the phases
+    # persist their state and artifacts into.
+    local repo="$TEST_TMPDIR/exempt"
+    make_active_cycle_repo "$repo"
+    local p
+    for p in ".kurama/sdd/add-widget/state.md" "openspec/changes/add-widget/design.md"; do
+        run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "$p")"
+        assert_eq "0" "$HOOK_STATUS" "marker/artifact path '$p' must stay writable during a cycle" || {
+            printf '%s\n' "$HOOK_OUT"; return 1; }
+    done
+    # An absolute path resolves to the same exemption.
+    run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "$repo/.kurama/sdd/add-widget/state.md")"
+    assert_eq "0" "$HOOK_STATUS" "an absolute marker path must be exempt too" || return 1
+    # …and a path outside the repo is none of the guard's business.
+    run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "$TEST_TMPDIR/elsewhere/notes.md")"
+    assert_eq "0" "$HOOK_STATUS" "a write outside the project must not be guarded" || return 1
+    return 0
+}
+
+test_write_guard_stops_guarding_once_the_cycle_is_archived() {
+    # archive-report.md is what retires a cycle. Without this, a repo would stay
+    # guarded forever after its first SDD change.
+    local repo="$TEST_TMPDIR/retired"
+    make_active_cycle_repo "$repo"
+    run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "src/widget.ts")"
+    assert_eq "2" "$HOOK_STATUS" "precondition: the cycle must be active before it is retired" || return 1
+
+    printf '# Archive report\n' > "$repo/.kurama/sdd/add-widget/archive-report.md"
+    run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "src/widget.ts")"
+    assert_eq "0" "$HOOK_STATUS" "an archived cycle must stop guarding writes" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_write_guard_passes_subagent_writes_and_resists_spoofing() {
+    local repo="$TEST_TMPDIR/subagent"
+    make_active_cycle_repo "$repo"
+    # A delegated writer (sdd-apply) is the INTENDED author of repo code.
+    run_hook "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "src/widget.ts" "agent_7")"
+    assert_eq "0" "$HOOK_STATUS" "a subagent write must pass — delegation is the point" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+
+    # The hardening that matters: agent_id is read at the JSON ROOT only. Here it
+    # sits inside tool_input — the user-controlled half of the payload — which is
+    # what both parsers must refuse to honour: jq anchors to the root key, and the
+    # no-jq fallback scans only the prefix BEFORE "tool_input". A recursive
+    # descent (or an unanchored grep) finds it and hands a main-thread write the
+    # subagent pass.
+    local spoof
+    spoof=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/widget.ts","meta":{"agent_id":"forged"}}}' "$repo")
+    run_hook "$WRITE_GUARD_HOOK" "$spoof"
+    assert_eq "2" "$HOOK_STATUS" "an agent_id inside tool_input must not bypass the guard" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_write_guard_override_env_vars_open_the_gate() {
+    local repo="$TEST_TMPDIR/override"
+    make_active_cycle_repo "$repo"
+    local payload
+    payload="$(edit_payload "$repo" "src/widget.ts")"
+    run_hook "$WRITE_GUARD_HOOK" "$payload"
+    assert_eq "2" "$HOOK_STATUS" "precondition: this write must be blocked without an override" || return 1
+
+    KURAMA_GUARD_BYPASS=1 run_hook "$WRITE_GUARD_HOOK" "$payload"
+    assert_eq "0" "$HOOK_STATUS" "KURAMA_GUARD_BYPASS=1 must allow the call" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    KURAMA_ORCHESTRATOR_GUARD=0 run_hook "$WRITE_GUARD_HOOK" "$payload"
+    assert_eq "0" "$HOOK_STATUS" "KURAMA_ORCHESTRATOR_GUARD=0 must disable the guard" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_archive_gate_ignores_every_non_archive_launch() {
+    # The gate is wired on Task|Skill, which fires for every delegation in the
+    # session. Anything that is not an sdd-archive launch must pass untouched —
+    # including in a repo with no verify report anywhere.
+    local repo="$TEST_TMPDIR/gate-passthrough"
+    make_active_cycle_repo "$repo"
+    local s
+    for s in sdd-apply sdd-verify review-risk; do
+        run_hook "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" "$s")"
+        assert_eq "0" "$HOOK_STATUS" "a '$s' launch is not the gate's business" || {
+            printf '%s\n' "$HOOK_OUT"; return 1; }
+    done
+    return 0
+}
+
+test_archive_gate_blocks_an_archive_with_no_verify_report() {
+    local repo="$TEST_TMPDIR/gate-noreport"
+    make_active_cycle_repo "$repo"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)"
+    assert_eq "2" "$HOOK_STATUS" "archiving without a verify report must be blocked" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    printf '%s\n' "$HOOK_OUT" | grep -q 'no verify-report found' || {
+        echo "the block never says the report is what is missing:"; printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_archive_gate_passes_a_pass_verdict_in_the_kurama_store() {
+    # The engram-fallback store (.kurama/sdd/<change>/verify-report.md) is the
+    # every-mode location batch 1 settled on; the gate must read it, and must find
+    # the change on its own when nothing names it.
+    local repo="$TEST_TMPDIR/gate-pass"
+    make_active_cycle_repo "$repo"
+    write_verify_report "$repo" add-widget "PASS WITH WARNINGS"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)"
+    assert_eq "0" "$HOOK_STATUS" "a PASS WITH WARNINGS verdict must open the gate" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    # Same report, no KURAMA_CHANGE: the auto-detect has to land on it.
+    run_hook "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)"
+    assert_eq "0" "$HOOK_STATUS" "the gate must auto-detect the only active change" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_archive_gate_blocks_a_fail_verdict() {
+    local repo="$TEST_TMPDIR/gate-fail"
+    make_active_cycle_repo "$repo"
+    write_verify_report "$repo" add-widget "FAIL"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)"
+    assert_eq "2" "$HOOK_STATUS" "a FAIL verdict must not be archivable" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    printf '%s\n' "$HOOK_OUT" | grep -q 'verify verdict is FAIL' || {
+        echo "the block never names the FAIL verdict:"; printf '%s\n' "$HOOK_OUT"; return 1; }
+
+    # An unfilled template is not a PASS either — that is the report nobody wrote.
+    write_verify_report "$repo" add-widget "{VERDICT}"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)"
+    assert_eq "2" "$HOOK_STATUS" "an unfilled verdict template must not be archivable" || return 1
+    return 0
+}
+
+test_archive_gate_content_binding_blocks_a_stale_receipt() {
+    local repo="$TEST_TMPDIR/gate-binding"
+    make_active_cycle_repo "$repo"
+    local payload
+    payload="$(skill_payload "$repo" sdd-archive)"
+
+    # Start from a Tree-Hash that cannot be the live one. The block message
+    # reports the live hash, which is how the fresh case below gets a correct
+    # receipt WITHOUT this test reimplementing the hook's pathspec — a private
+    # copy of it here would drift silently and pass either way.
+    write_verify_report "$repo" add-widget "PASS" "0000000000000000000000000000000000000000"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$payload"
+    assert_eq "2" "$HOOK_STATUS" "a Tree-Hash that does not match the tree must block" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    printf '%s\n' "$HOOK_OUT" | grep -q 'verify receipt stale' || {
+        echo "the block never names the stale receipt:"; printf '%s\n' "$HOOK_OUT"; return 1; }
+
+    local live
+    live=$(printf '%s\n' "$HOOK_OUT" | awk '/live Tree-Hash:/ { print $NF; exit }')
+    [ -n "$live" ] || { echo "the block never reported the live Tree-Hash"; return 1; }
+
+    # A receipt bound to the current tree: fresh, so the verdict gate decides.
+    write_verify_report "$repo" add-widget "PASS" "$live"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$payload"
+    assert_eq "0" "$HOOK_STATUS" "a receipt bound to the current tree must be accepted" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+
+    # Touch repository code — and only that — and the same receipt goes stale.
+    printf 'export const widget = 2;\n' > "$repo/src/widget.ts"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$payload"
+    assert_eq "2" "$HOOK_STATUS" "a code edit after verification must invalidate the receipt" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    printf '%s\n' "$HOOK_OUT" | grep -q 'verify receipt stale' || {
+        echo "the post-edit block is not the staleness one:"; printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_archive_gate_override_env_var_opens_the_gate() {
+    local repo="$TEST_TMPDIR/gate-override"
+    make_active_cycle_repo "$repo"
+    local payload
+    payload="$(skill_payload "$repo" sdd-archive)"
+    KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$payload"
+    assert_eq "2" "$HOOK_STATUS" "precondition: no report, so the gate must be shut" || return 1
+
+    KURAMA_ARCHIVE_OVERRIDE=1 KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$payload"
+    assert_eq "0" "$HOOK_STATUS" "KURAMA_ARCHIVE_OVERRIDE=1 must open the gate" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    # The override is loud on purpose: it must say a reason has to be recorded.
+    printf '%s\n' "$HOOK_OUT" | grep -qi 'REASON' || {
+        echo "the override is silent about the reason it must be recorded with:"
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+
+    # …and it bypasses the content binding too, not only the verdict gate.
+    write_verify_report "$repo" add-widget "PASS" "0000000000000000000000000000000000000000"
+    KURAMA_ARCHIVE_OVERRIDE=1 KURAMA_CHANGE=add-widget run_hook "$ARCHIVE_GATE_HOOK" "$payload"
+    assert_eq "0" "$HOOK_STATUS" "the override must bypass the content-binding check too" || return 1
+    return 0
+}
+
+test_nojq_hooks_decide_the_same_way_without_jq() {
+    # Both hooks carry their own json_str fallback for a jq-less host, and the
+    # write guard's agent_id extraction takes a DIFFERENT code path there (a
+    # prefix scan instead of a jq root anchor). A hook that fails open without jq
+    # would guard nothing on exactly the machines this project promises to work on.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    local repo="$TEST_TMPDIR/nojq-hooks"
+    make_active_cycle_repo "$repo"
+
+    local status=0
+    printf '%s' "$(edit_payload "$repo" "src/widget.ts")" \
+        | PATH="$bindir" bash "$WRITE_GUARD_HOOK" > /dev/null 2>&1 || status=$?
+    assert_eq "2" "$status" "without jq the write guard must still block repo code" || return 1
+
+    status=0
+    printf '%s' "$(edit_payload "$repo" "src/widget.ts" "agent_7")" \
+        | PATH="$bindir" bash "$WRITE_GUARD_HOOK" > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "without jq a subagent write must still pass" || return 1
+
+    # The prefix scan is the no-jq half of the root-anchoring: an agent_id inside
+    # tool_input is user-controlled and must not read as subagent context.
+    local spoof
+    spoof=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/widget.ts","meta":{"agent_id":"forged"}}}' "$repo")
+    status=0
+    printf '%s' "$spoof" | PATH="$bindir" bash "$WRITE_GUARD_HOOK" > /dev/null 2>&1 || status=$?
+    assert_eq "2" "$status" "without jq an agent_id inside tool_input must not bypass the guard" || return 1
+
+    status=0
+    printf '%s' "$(skill_payload "$repo" sdd-archive)" \
+        | PATH="$bindir" KURAMA_CHANGE=add-widget bash "$ARCHIVE_GATE_HOOK" > /dev/null 2>&1 || status=$?
+    assert_eq "2" "$status" "without jq the archive gate must still block a missing report" || return 1
+
+    write_verify_report "$repo" add-widget "PASS"
+    status=0
+    printf '%s' "$(skill_payload "$repo" sdd-archive)" \
+        | PATH="$bindir" KURAMA_CHANGE=add-widget bash "$ARCHIVE_GATE_HOOK" > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "without jq a PASS verdict must still open the gate" || return 1
+    return 0
+}
+
+# ============================================================================
 # Tests — validate_skills.sh frontmatter linter (#31)
 #
 # The linter's job is to be the thing that notices a SKILL.md a harness cannot
@@ -3300,11 +3642,12 @@ make_nojq_farm() {
     local bindir="$1"
     mkdir -p "$bindir"
     local tool p
-    # shasum/sha1sum/cksum are doctor.sh's drift hashers. They are core tools on
-    # any real box; leaving them out would make doctor compare two empty hashes
-    # and report "no drift" without ever having looked — an absence that has
-    # nothing to do with jq, which is the only thing this farm exists to remove.
-    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date chmod rm rmdir ls awk sed tr wc find mktemp sort head tail printf test touch ln cut diff git python3 shasum sha1sum cksum; do
+    # shasum/sha1sum/cksum are doctor.sh's drift hashers and stat is archive-gate's
+    # mtime probe. They are core tools on any real box; leaving them out would make
+    # doctor compare two empty hashes and report "no drift" without ever having
+    # looked — an absence that has nothing to do with jq, which is the only thing
+    # this farm exists to remove.
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date chmod rm rmdir ls awk sed tr wc find mktemp sort head tail printf test touch ln cut diff git python3 shasum sha1sum cksum stat; do
         p="$(command -v "$tool" 2>/dev/null)" || continue
         ln -sf "$p" "$bindir/$tool"
     done
@@ -4950,6 +5293,22 @@ run_test "project scope writes .mcp.json inside the repo" test_engram_project_sc
 run_test "non-interactive never invokes brew (guide only)" test_engram_brew_not_invoked_noninteractive
 run_test "uninstall strips the Engram MCP registration, rest intact" test_engram_uninstall_removes_registration
 run_test "doctor mentions the Engram MCP registration" test_doctor_reports_engram_mcp
+echo ""
+
+echo -e "${BOLD}Shipped PreToolUse hooks (payload-driven)${NC}"
+run_test "no active cycle: every write is allowed" test_write_guard_allows_writes_when_no_cycle_is_active
+run_test "active cycle: an inline write to repo code is blocked" test_write_guard_blocks_repo_code_during_an_active_cycle
+run_test ".kurama/ and openspec/ stay writable during a cycle" test_write_guard_exempts_the_sdd_artifact_paths
+run_test "an archived cycle stops guarding" test_write_guard_stops_guarding_once_the_cycle_is_archived
+run_test "subagent writes pass; payload content cannot spoof one" test_write_guard_passes_subagent_writes_and_resists_spoofing
+run_test "both write-guard overrides open the gate" test_write_guard_override_env_vars_open_the_gate
+run_test "the gate ignores every non-archive launch" test_archive_gate_ignores_every_non_archive_launch
+run_test "no verify report: archiving is blocked" test_archive_gate_blocks_an_archive_with_no_verify_report
+run_test "a PASS report in .kurama/sdd/ opens the gate" test_archive_gate_passes_a_pass_verdict_in_the_kurama_store
+run_test "FAIL and unfilled-template verdicts are blocked" test_archive_gate_blocks_a_fail_verdict
+run_test "a stale Tree-Hash blocks; a fresh one passes" test_archive_gate_content_binding_blocks_a_stale_receipt
+run_test "KURAMA_ARCHIVE_OVERRIDE bypasses both checks" test_archive_gate_override_env_var_opens_the_gate
+run_test "both hooks decide the same way without jq" test_nojq_hooks_decide_the_same_way_without_jq
 echo ""
 
 echo -e "${BOLD}validate_skills.sh — frontmatter linter${NC}"
