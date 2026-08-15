@@ -1039,6 +1039,21 @@ merge_hooks_settings() {
 # Setup Orchestrator Prompt (idempotent with markers)
 # ============================================================================
 
+# True when a marker-less prompt file is one of our generated examples copied
+# whole: line 1 carries build-examples' GENERATED banner (a line only Kurama
+# writes) and the body carries the orchestrator heading. Byte-for-byte the same
+# fingerprint sweep_legacy_opencode_artifacts uses in uninstall.sh, so "Kurama
+# owns this entire file" means exactly the same thing on both ends of the
+# lifecycle. Harness-agnostic on purpose: OpenCode's old wholesale `cp` produced
+# this shape automatically, and every harness's manual-install instructions can
+# produce it by hand.
+prompt_is_kurama_generated_copy() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+    head -1 "$file" | grep -qF 'GENERATED FILE' || return 1
+    grep -qF 'Kurama Orchestrator' "$file"
+}
+
 setup_orchestrator() {
     local prompt_path="$1"
     local example_file="$2"
@@ -1118,6 +1133,24 @@ $(receipt_rel "$prompt_path")"
                 rm -f "$cfile"
                 fail "Failed to rewrite $prompt_path (left unchanged)"; exit 1
             fi
+        elif prompt_is_kurama_generated_copy "$prompt_path"; then
+            # A pre-marker install: one of our generated examples copied WHOLE
+            # into place (setup's old OpenCode branch did this, and the
+            # manual-install docs still tell users to). Its body carries
+            # "## Kurama Orchestrator", so the already_present branch below
+            # would warn and write NOTHING — leaving the prompt frozen forever:
+            # no markers would ever appear, the content would never refresh, and
+            # doctor/update would keep pointing at a re-run that does nothing.
+            # Kurama wrote every byte of this file, so replace it whole with the
+            # marked block (backup first). The fingerprint is deliberately the
+            # same one uninstall.sh's legacy sweep uses.
+            make_backup "$prompt_path"
+            {
+                echo "$MARKER_BEGIN"
+                echo "$content"
+                echo "$MARKER_END"
+            } | atomic_replace "$prompt_path"
+            ok "Orchestrator re-merged with markers in $prompt_path (was an unmarked full copy)"
         else
             # Check if orchestrator content already exists (no markers)
             local already_present=false
