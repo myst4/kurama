@@ -4948,9 +4948,19 @@ test_no_prose_claims_profile_delegation_is_exclusive() {
 
 test_opencode_commands_never_hardcode_engram_mode() {
     # Every executor command must RESOLVE the artifact store, never assume it.
-    if grep -rl 'Artifact store mode: engram' "$REPO_DIR/examples/opencode/commands" > /dev/null 2>&1; then
-        echo "an OpenCode command hardcodes 'Artifact store mode: engram'"; return 1
-    fi
+    #
+    # The loop counts what it read, the way its sibling below does: a check whose
+    # whole job is "no file says X" reports success just as loudly when there are
+    # no files — this test passed with examples/opencode/commands/ deleted.
+    local f n=0
+    for f in "$REPO_DIR"/examples/opencode/commands/*.md; do
+        [ -f "$f" ] || continue
+        n=$((n + 1))
+        if grep -q 'Artifact store mode: engram' "$f"; then
+            echo "$(basename "$f") hardcodes 'Artifact store mode: engram'"; return 1
+        fi
+    done
+    [ "$n" -ge 9 ] || { echo "expected at least the 9 OpenCode commands, scanned $n"; return 1; }
     return 0
 }
 
@@ -4971,13 +4981,21 @@ test_opencode_executor_commands_name_the_envelope_fields() {
 test_skills_declare_no_tools_frontmatter() {
     # Skills are instructions, not agents: a tools:/allowed-tools: key there is
     # ignored by every harness and reads as an enforced boundary that is not one.
-    local f
+    #
+    # Counted for the same reason as its siblings: with skills/ gone the glob
+    # matches nothing, every iteration is skipped and the test reports PASS. The
+    # floor is the default skill set itself, so it cannot rot out of date — every
+    # skill a default install ships must have been read for this to mean anything.
+    local f n=0
     for f in "$REPO_DIR"/skills/*/SKILL.md; do
         [ -f "$f" ] || continue
+        n=$((n + 1))
         if grep -Eq '^(tools|allowed-tools):' "$f"; then
             echo "$(basename "$(dirname "$f")")/SKILL.md declares a tools: key"; return 1
         fi
     done
+    [ "$n" -ge "${#EXPECTED_SKILLS[@]}" ] || {
+        echo "expected at least ${#EXPECTED_SKILLS[@]} SKILL.md files, scanned $n"; return 1; }
     return 0
 }
 
