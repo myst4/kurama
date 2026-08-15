@@ -76,8 +76,8 @@ launch `sdd-apply` via the `Task` tool).
 
 - `openspec` mode → a change directory under `openspec/changes/<name>/` (never
   `openspec/changes/archive/…`) that still holds a `state.yaml`.
-- `engram` filesystem fallback → a `.kurama/sdd/<name>/` directory with `state.md`
-  and **no** `archive-report.md` (archiving writes that report).
+- `.kurama/` cycle marker (**every** mode) → a `.kurama/sdd/<name>/` directory with
+  `state.md` and **no** `archive-report.md` beside it (archiving writes that report).
 
 An archived change (moved under `changes/archive/`, or with an `archive-report.md`)
 is not active, so writes flow normally again once the cycle closes.
