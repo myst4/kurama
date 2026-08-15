@@ -10,18 +10,20 @@
 # Canonical Phase DAG (single source of truth: skills/_shared/sdd-phase-common.md)
 #   explore -> propose -> (spec || design) -> tasks -> apply -> verify -> archive
 #
-# State is read from whichever artifact store left files on disk:
+# State is read from the on-disk cycle markers, which EVERY artifact-store mode
+# writes (skills/_shared/persistence-contract.md -> Hook-visible cycle markers):
 #   - openspec / hybrid : openspec/changes/<change>/state.yaml (+ artifacts)
 #                         plus openspec/config.yaml for settings
-#   - engram (degraded / filesystem fallback) : .kurama/sdd/<change>/state.md
-#                         (+ artifacts). This is the store engram uses when
-#                         Engram is unavailable or a mem_save failed.
+#   - every mode        : .kurama/sdd/<change>/state.md (+ artifacts). engram
+#                         cycles land here too: the marker is written whether or
+#                         not Engram is reachable, so they ARE listed offline —
+#                         it is not evidence that Engram degraded.
 #
-# LIMITATION — pure engram is NOT queryable offline. When a cycle's artifacts
-# live only in Engram (Engram was available, nothing was written to disk), there
-# is no engram CLI to query, so this script cannot see it. It reports on the
-# on-disk openspec/ and .kurama/sdd/ stores only. A cycle absent from both prints
-# as "no active SDD cycles".
+# LIMITATION — only a cycle that left NOTHING on disk is invisible here. Since the
+# cycle markers became mode-independent, that means a pre-existing engram cycle
+# started before the markers existed and not advanced since. There is no engram CLI
+# to query, so such a cycle prints as "no active SDD cycles"; running its next phase
+# re-writes the marker and it becomes visible again.
 #
 # Usage:
 #   scripts/sdd-status.sh [PROJECT_PATH] [--json]
@@ -58,9 +60,10 @@ Options:
   --json         emit a machine-parseable JSON object instead of text
   -h, --help     show this help and exit
 
-Reads on-disk state from openspec/changes/<change>/state.yaml (openspec/hybrid)
-and .kurama/sdd/<change>/state.md (engram filesystem fallback). Pure-engram cycles
-with nothing written to disk are not queryable offline (no engram CLI).
+Reads the on-disk cycle markers: openspec/changes/<change>/state.yaml (openspec,
+hybrid) and .kurama/sdd/<change>/state.md, which EVERY mode writes — so engram
+cycles are listed too. Only a cycle that left nothing on disk (one started before
+the markers existed) is invisible offline; there is no engram CLI to query.
 
 Exit codes: 0 success (incl. no cycles), 1 bad path, 2 usage error.
 EOF
@@ -393,7 +396,8 @@ fi
 
 if [ "$FOUND" = 0 ]; then
   printf 'No active SDD cycles under %s\n' "$root"
-  printf '(reads openspec/ and .kurama/sdd/ fallback state; pure-engram cycles are not queryable offline — no engram CLI)\n'
+  printf '(reads openspec/ and the .kurama/sdd/ cycle markers, written in every mode — engram cycles included;\n'
+  printf ' only a cycle predating those markers leaves nothing on disk, and there is no engram CLI to query it)\n'
   exit 0
 fi
 

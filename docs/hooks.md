@@ -159,5 +159,22 @@ by human/CI review — which is the fallback the whole framework is designed aro
   protection against forgetting and drift, not against a model that decides to route around
   them. If it matters for your project, keep the variables out of the agent's environment,
   or gate archives in CI where the agent cannot set them.
+- **An abandoned cycle has to be retired by a human.** `archive-report.md` is written
+  only by a *successful* `sdd-archive`, so a change you start and then walk away from
+  leaves its `state.md` behind and the write guard goes on treating the cycle as active
+  — indefinitely. The skills forbid the **model** from deleting `.kurama/sdd/<change>/`
+  or its `state.md`: that prohibition exists so an agent cannot quietly clear its own
+  gate, and — like the override variables above — it does not bind you. Two ways out:
+  - **Finish it**: run `/sdd-verify`, then `/sdd-archive`. The normal path; it merges the
+    delta spec into the source of truth and writes `archive-report.md`, which retires the
+    cycle for both hooks.
+  - **Drop it**: delete `.kurama/sdd/<change>/` yourself (plus
+    `openspec/changes/<change>/` in `openspec`/`hybrid` mode). `.kurama/` is gitignored
+    harness state, so nothing tracked is lost — but you also lose that change's artifacts,
+    so prefer finishing when the work still matters.
+
+  Either way the guard steps aside as soon as no `state.md`-without-`archive-report.md`
+  pair remains. If you are not sure which change is holding the gate,
+  `scripts/sdd-status.sh` lists the cycles that are currently active.
 - **Structural only.** Neither hook inspects code quality. They are guardrails, not
   reviewers.
