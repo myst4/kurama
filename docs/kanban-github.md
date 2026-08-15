@@ -8,7 +8,7 @@ view of where each change stands — never a control-flow gate (the sole excepti
 is the final merge; see [Failures never block the cycle](#failures-never-block-the-cycle)).
 
 Like the [TDD module](tdd.md), the module now **installs by default** (remove it
-from disk with `--without optional`), but activation is **opt-in per project** —
+from disk with `install.sh --without optional`), but activation is **opt-in per project** —
 the board stays OFF until you explicitly enable it, and nothing infers it from an
 existing project or a configured `gh`. For quick start, see the
 [main README](../README.md).
@@ -57,7 +57,7 @@ never fatal, and you can re-run `/sdd-init` once it is in place.
 There is also a module-presence preflight (parallel to TDD's): because `kanban-github`
 ships in the excludable `optional` group, `sdd-init` confirms `kanban-github/SKILL.md`
 resolves before offering the question. If the module was excluded with
-`--without optional`, `sdd-init` does not offer activation and records
+`install.sh --without optional`, `sdd-init` does not offer activation and records
 `kanban.enabled: false` with a note to reinstall.
 
 ## Onboarding — `sdd-init` caches the board wiring
@@ -218,8 +218,10 @@ Two independent things, easy to conflate:
 - **Installing the module** puts `skills/kanban-github/SKILL.md` on disk. It ships in the
   `optional` manifest group, **installed by default** — `setup.sh`/`install.sh`
   include it in the default set. Remove it with
-  `--without optional` if you never want the module on disk (this also removes the
-  it is now the only member of the group — `go-testing` moved to the opt-in `lang` group).
+  `install.sh --without optional` if you never want the module on disk — module
+  selection is an `install.sh` flag; `setup.sh` has no `--without` and rejects it.
+  `kanban-github` is now the only member of the `optional` group, so the flag drops
+  exactly that one skill (`go-testing` moved to the opt-in `lang` group).
 - **Activating the board** turns board sync on for a *specific project* via the
   explicit `kanban.enabled` flag, and requires a configured `gh`. Installing the
   module never activates it; the flag starts `false` everywhere, and no project state

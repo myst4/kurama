@@ -117,7 +117,7 @@ Hooks are a platform capability, so how far these gates reach depends on the har
 | Harness | Native hook support | How the gates apply |
 |---------|---------------------|---------------------|
 | **Claude Code** | Yes — `PreToolUse` (and other events) via `settings.json`. | Ships here. Wire `hooks.json`; both gates run automatically. |
-| **OpenCode** | Partial — plugin lifecycle, not a generic pre-tool gate. | The delegate-only rule is already structural (the orchestrator agent has no write tools in `opencode.single.json`); the archive gate can run as `archive-gate.sh <change>` from a command wrapper. |
+| **OpenCode** | Partial — plugin lifecycle, not a generic pre-tool gate. | The delegate-only rule stays **prose** here: the shipped `opencode.single.json` grants the orchestrator `write`, `edit` and `bash` (all `true`), so nothing mechanically stops it from editing code — only the orchestrator instructions do. The archive gate can run as `archive-gate.sh <change>` from a command wrapper. |
 | **Codex CLI / Pi / omp** | No general-purpose tool-gate hook today. | Run the gates **manually / in CI**: `archive-gate.sh <change>` before closing a change, and the write guard's spirit stays prose (the orchestrator instructions). |
 
 Because the scripts gate purely by **stdin JSON in, exit code out**, they are not
