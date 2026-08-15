@@ -574,15 +574,41 @@ check_hooks() {
         settings="$(home_dir)/.claude/settings.json"
         hooks_dir="$(home_dir)/.claude/hooks/kurama"
     fi
+
+    # #31: severity comes from the RECEIPT, not from the bare absence of a file.
+    # Two shipped, documented paths install a claude-code target with no hooks:
+    # install.sh copies skills only (docs/installation.md), and a jq-less setup.sh
+    # warns loudly, prints the manual hook steps and writes no settings.json —
+    # recording neither in the receipt. Both were graded a hard FAILURE, which
+    # made doctor call "installed exactly as documented" broken and left the user
+    # no way to reach green short of installing jq. An honest degradation is a
+    # WARNING carrying its remedy. A receipt that CLAIMS the write stays red:
+    # that is the state where something really did go missing after the install.
+    local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
+    local claims_scripts=false claims_settings=false
+    if manifest_json_array "$manifest" "files" | grep -q 'hooks/kurama/'; then
+        claims_scripts=true
+    fi
+    if [ -n "$(manifest_json_array "$manifest" "settings" | awk 'NF')" ]; then
+        claims_settings=true
+    fi
+
     if [ -f "$hooks_dir/archive-gate.sh" ] && [ -f "$hooks_dir/orchestrator-write-guard.sh" ]; then
         pass "hook scripts present in $hooks_dir"
+    elif $claims_scripts; then
+        bad "hook scripts missing from $hooks_dir — the receipt records them as installed"
     else
-        bad "hook scripts missing from $hooks_dir"
+        soft "no Kurama hook scripts in $hooks_dir (skills-only install — the receipt claims none)"
+        note "Run setup.sh --agent claude-code to add the archive gate and the orchestrator write guard."
     fi
+
     if [ -f "$settings" ] && grep -q 'hooks/kurama/' "$settings" 2>/dev/null; then
         pass "hooks block present in settings.json"
+    elif $claims_settings; then
+        bad "hooks block missing from $settings — the receipt records that write"
     else
-        bad "hooks block missing from $settings"
+        soft "hooks not registered in $settings (the receipt records no settings write)"
+        note "Register the two PreToolUse hooks by hand, or install jq and re-run setup.sh."
     fi
 }
 

@@ -11,8 +11,8 @@ set -uo pipefail
 # in one pass. The exit code is derived from the failure counter at the end.
 #
 # Checks:
-#   1. Every skills/<name>/ has a SKILL.md with `name:` and `description:`
-#      frontmatter.                                                     [FATAL]
+#   1. Every skills/<name>/ has a SKILL.md whose leading `---` fence is closed
+#      and whose `name:` and `description:` carry a value.              [FATAL]
 #   2. Every skill the installers reference actually exists.            [FATAL]
 #   3. skills/manifest.json parses, every listed skill dir exists, and
 #      every skills/<name>/ dir is listed with a valid group.           [FATAL]
@@ -42,6 +42,19 @@ section() { printf '\n== %s ==\n' "$1"; }
 # Check 1 — SKILL.md exists with name:/description: frontmatter
 # ----------------------------------------------------------------------------
 
+# True when $1 opens with a `---` fence on line 1 and a later `---` closes it.
+# Only the LEADING pair counts: a `---` further down is a horizontal rule, and a
+# file that never closes its opening fence has no frontmatter at all — every
+# parser reads the whole document as YAML, which is why an unclosed fence must
+# not be waved through as "name: and description: are in there somewhere".
+frontmatter_fence_closed() {
+    awk '
+        NR == 1 && $0 !~ /^---[[:space:]]*$/ { exit }
+        NR > 1 && /^---[[:space:]]*$/         { closed = 1; exit }
+        END { exit (closed ? 0 : 1) }
+    ' "$1"
+}
+
 check_skill_frontmatter() {
     section "SKILL.md frontmatter"
     local before=$FAIL
@@ -57,6 +70,14 @@ check_skill_frontmatter() {
             continue
         fi
 
+        # The fence pair is verified BEFORE the body between it is used, so an
+        # unclosed fence is reported as what it is instead of yielding a
+        # "frontmatter" that is really the whole file.
+        if ! frontmatter_fence_closed "$skill_md"; then
+            fail "skills/$skill_name/SKILL.md: frontmatter fence is never closed (--- ... ---)"
+            continue
+        fi
+
         # Extract the leading YAML frontmatter (lines strictly between the first
         # pair of `---` fences).
         fm="$(awk '
@@ -68,15 +89,18 @@ check_skill_frontmatter() {
             fail "skills/$skill_name/SKILL.md: no YAML frontmatter (--- ... ---)"
             continue
         fi
-        if ! printf '%s\n' "$fm" | grep -qE '^name:'; then
-            fail "skills/$skill_name/SKILL.md: frontmatter missing 'name:'"
+        # Non-empty values, not merely present keys: `name:` and `description:`
+        # are the two fields every harness indexes a skill by, so a blank one is
+        # an unusable skill that used to lint clean.
+        if ! printf '%s\n' "$fm" | grep -qE '^name:[[:space:]]*[^[:space:]]'; then
+            fail "skills/$skill_name/SKILL.md: frontmatter 'name:' is missing or empty"
         fi
-        if ! printf '%s\n' "$fm" | grep -qE '^description:'; then
-            fail "skills/$skill_name/SKILL.md: frontmatter missing 'description:'"
+        if ! printf '%s\n' "$fm" | grep -qE '^description:[[:space:]]*[^[:space:]]'; then
+            fail "skills/$skill_name/SKILL.md: frontmatter 'description:' is missing or empty"
         fi
     done
 
-    [ "$FAIL" -eq "$before" ] && pass "All skills have SKILL.md with name:/description: frontmatter"
+    [ "$FAIL" -eq "$before" ] && pass "All skills have SKILL.md with a closed frontmatter fence and non-empty name:/description:"
 }
 
 # ----------------------------------------------------------------------------
