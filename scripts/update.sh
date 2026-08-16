@@ -16,7 +16,8 @@ set -euo pipefail
 # Backup hygiene: re-running the installer backs up every pre-existing native
 # agent file before overwriting it, so update prunes the accumulated `.bak.*` in
 # each recorded agents dir down to the single newest backup per file (never on a
-# --dry-run).
+# --dry-run). Only files the receipt records are pruned — those dirs also hold
+# the user's own agents, and their backups are none of update's business.
 #
 # Usage:
 #   ./update.sh --agent claude-code                 # re-sync one global agent
@@ -29,6 +30,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 SETUP_SCRIPT="$SCRIPT_DIR/setup.sh"
 VERSION_FILE="$REPO_DIR/VERSION"
+# Repo-side sources a recorded file can be compared against (--dry-run drift).
+EXAMPLES_DIR="$REPO_DIR/examples"
+SKILLS_SRC="$REPO_DIR/skills"
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
 # Every agent that can carry a global receipt (used when no --agent is given).
@@ -221,31 +225,86 @@ hash_file() {
     else cksum "$1" | awk '{print $1"-"$2}'; fi
 }
 
-# Keep only the NEWEST timestamped backup per original file in an agents dir.
-# An update re-runs the idempotent installer, which backs up every pre-existing
-# agent file (via the shared make_backup: NAME.md.bak.YYYYMMDDHHMMSS) before
-# overwriting it — so without pruning, agents/ accumulates one .bak per file on
-# every update. Backup names carry a fixed-width, zero-padded timestamp, so a
-# lexical sort is chronological: keep the last, delete the rest.
+# Map a receipt-relative path back to the repo file it was installed FROM, for
+# one harness ("" when the path has no repo source — an omp RULES.md, anything a
+# future writer records that is generated rather than copied). Mirrors
+# resolve_source in doctor.sh so update's drift preview and doctor's drift check
+# answer the same question the same way.
+resolve_source() {
+    local rel="$1" tool="$2" base
+    base="$(basename "$rel")"
+    case "$rel" in
+        */hooks/kurama/*)  echo "$EXAMPLES_DIR/claude-code/hooks/$base" ;;
+        */agents/*)
+            if [ "$tool" = "pi" ]; then echo "$EXAMPLES_DIR/pi/agents/$base";
+            elif [ "$tool" = "omp" ]; then echo "$EXAMPLES_DIR/omp/agents/$base";
+            else echo "$EXAMPLES_DIR/claude-code/agents/$base"; fi ;;
+        */SKILL.md|SKILL.md)
+            # .../<skill>/SKILL.md → repo skills/<skill>/SKILL.md
+            local skill; skill="$(basename "$(dirname "$rel")")"
+            echo "$SKILLS_SRC/$skill/SKILL.md" ;;
+        *_shared/*)  echo "$SKILLS_SRC/_shared/$base" ;;
+        *)  echo "" ;;
+    esac
+}
+
+# resolve_source against every tool the receipt records, for a file that exists
+# on disk. A project-scope receipt is shared by every harness installed into the
+# repo and resolve_source maps */agents/* per harness, so no single tool can
+# resolve the whole union. Prefers the candidate the installed file actually
+# matches — examples/claude-code/agents/sdd-spec.md and examples/pi/agents/
+# sdd-spec.md are different files with the same basename, and first-existing
+# would report a perfectly in-sync file as drifted. Falls back to the first
+# candidate that exists, which keeps a genuinely drifted file reportable.
+# Same contract as doctor.sh's copy.
+resolve_source_any() {
+    local rel="$1" tools="$2" installed="$3" t src first="" installed_hash
+    installed_hash="$(hash_file "$installed")"
+    while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        src="$(resolve_source "$rel" "$t")"
+        if [ -z "$src" ] || [ ! -f "$src" ]; then continue; fi
+        [ -n "$first" ] || first="$src"
+        if [ "$installed_hash" = "$(hash_file "$src")" ]; then printf '%s' "$src"; return 0; fi
+    done <<TOOLS
+$tools
+TOOLS
+    printf '%s' "$first"
+}
+
+# Keep only the NEWEST timestamped backup per RECORDED original file in an
+# agents dir. An update re-runs the idempotent installer, which backs up every
+# pre-existing agent file (via the shared make_backup: NAME.md.bak.YYYYMMDDHHMMSS)
+# before overwriting it — so without pruning, agents/ accumulates one .bak per
+# file on every update. Backup names carry a fixed-width, zero-padded timestamp,
+# so a lexical sort is chronological: keep the last, delete the rest.
+#
+# $2 is the newline-separated list of basenames the receipt records for THIS dir,
+# and it is the whole safety story. ~/.claude/agents is a shared directory —
+# users keep their own agents (and their own hand-made backups) there — so an
+# unqualified '*.bak.*' glob deleted files Kurama never created, in a dir Kurama
+# does not own. An update may only prune what an update produced.
 prune_stale_agent_backups() {
-    local dir="$1"
+    local dir="$1" recorded="$2"
     [ -d "$dir" ] || return 0
+    [ -n "$recorded" ] || return 0
     local pruned=0 orig baks keep bk
-    # Distinct original filenames that have at least one timestamped backup.
-    for orig in $(find "$dir" -maxdepth 1 -type f -name '*.bak.*' 2>/dev/null \
-        | while IFS= read -r b; do bb="${b##*/}"; printf '%s\n' "${bb%.bak.*}"; done \
-        | sort -u); do
+    while IFS= read -r orig; do
+        [ -n "$orig" ] || continue
         baks="$(find "$dir" -maxdepth 1 -type f -name "$orig.bak.*" 2>/dev/null | sort)"
+        [ -n "$baks" ] || continue
         keep="$(printf '%s\n' "$baks" | awk 'NF{last=$0} END{print last}')"
         while IFS= read -r bk; do
             [ -n "$bk" ] || continue
             [ "$bk" = "$keep" ] && continue
             rm -f "$bk" && pruned=$((pruned + 1))
-        done <<EOF
+        done <<BAKS
 $baks
-EOF
-    done
-    [ "$pruned" -gt 0 ] && info "pruned $pruned stale agent backup(s) in $dir (kept newest per file)"
+BAKS
+    done <<ORIGS
+$recorded
+ORIGS
+    [ "$pruned" -gt 0 ] && info "pruned $pruned stale agent backup(s) in $dir (kept newest per recorded file)"
     return 0
 }
 
@@ -293,18 +352,18 @@ resync_target() {
 $files
 EOF
 
-    if $DRY_RUN; then
-        info "Dry run — would re-sync $(printf '%s\n' "$files" | grep -c . ) recorded file(s) from $REPO_DIR"
-        rm -f "$hashfile"
-        return 0
-    fi
-
     # Normalize each recorded tool to the canonical slug setup.sh accepts.
     # install.sh stores a display name ("Claude Code") whose space would corrupt
     # the delegated command; setup.sh stores the slug already. An unrecognized
     # value is a hard stop — mis-invoking setup.sh would be worse than aborting.
     # Resolve every slug BEFORE installing anything, so a bad entry aborts the
     # target instead of leaving it half re-synced.
+    #
+    # This runs BEFORE the --dry-run report on purpose. A preview whose whole job
+    # is to say what the real run would do must not print a drift report for a
+    # target the real run would refuse outright — and an unusable "tools" value is
+    # also what makes resolve_source_any resolve nothing, so the same gap produced
+    # a confident "no drift" over zero comparisons.
     # The OpenCode install-time choices, recorded by setup.sh since #22. The
     # re-sync below runs setup.sh --non-interactive, where an unset mode falls
     # back to "single" and an unset profile to "no" — and the agent merge then
@@ -350,6 +409,58 @@ EOF
         return 1
     fi
 
+    # --dry-run is documented as "report drift, change nothing", and the snapshot
+    # above is exactly the data that answers it. It used to be thrown away
+    # unread, leaving a constant "would re-sync N recorded file(s)" — the same N
+    # for a pristine install and for one whose skills had been hand-edited. The
+    # preview a user runs BEFORE the real update has to name what the real update
+    # would overwrite, or it is worse than no preview at all.
+    if $DRY_RUN; then
+        local checked=0 drifted=0 missing=0 unresolved=0 src
+        while IFS=$'\t' read -r rel pre; do
+            [ -n "$rel" ] || continue
+            checked=$((checked + 1))
+            if [ ! -e "$receipt_dir/$rel" ]; then
+                warn "missing: $rel"
+                missing=$((missing + 1))
+                continue
+            fi
+            # No repo source to compare against (generated or merged content):
+            # counted, never reported as drift — that would be a false red.
+            src="$(resolve_source_any "$rel" "$tools" "$receipt_dir/$rel")"
+            if [ -z "$src" ] || [ ! -f "$src" ]; then
+                unresolved=$((unresolved + 1))
+                continue
+            fi
+            if [ "$pre" != "$(hash_file "$src")" ]; then
+                warn "drift: $rel"
+                drifted=$((drifted + 1))
+            fi
+        done < "$hashfile"
+        rm -f "$hashfile"
+
+        # The headline counts only what was actually compared. Reporting it over
+        # $checked would let a target where NOTHING resolved to a repo source —
+        # every file skipped, zero hashes compared — print "no drift, all N files
+        # match": a green light the code never earned, on the script users reach
+        # for when they suspect their install is broken. When nothing was
+        # comparable, say that instead of a verdict.
+        local comparable=$((checked - unresolved))
+        local would=$((drifted + missing))
+        if [ "$comparable" -eq 0 ]; then
+            warn "Nothing comparable — none of the $checked recorded file(s) resolve to a repo source"
+            info "This preview cannot tell you whether $receipt_dir drifted."
+        elif [ "$would" -gt 0 ]; then
+            echo -e "  ${YELLOW}${BOLD}$would of $comparable checked file(s) would be re-synced from $REPO_DIR${NC}"
+        else
+            info "No drift — all $comparable checked file(s) match $REPO_DIR"
+        fi
+        if [ "$unresolved" -gt 0 ] && [ "$comparable" -gt 0 ]; then
+            info "$unresolved recorded file(s) skipped — no repo source to compare against"
+        fi
+        return 0
+    fi
+
     # Delegate the actual re-sync to the idempotent installer, matching the
     # recorded scope — once per recorded tool, since a project-scope receipt is
     # shared by every harness installed into that repo and re-syncing only one of
@@ -362,6 +473,15 @@ EOF
     local with_logo=false
     if manifest_has_startup_logo "$manifest"; then with_logo=true; fi
 
+    # Same story for Engram, and the same mechanism as the mode/profile loss
+    # fixed in #22: the delegated run is --non-interactive, where ask_engram
+    # defaults to "no", so the FIRST update re-stamped the receipt engram: no and
+    # the user's opt-in was gone — silently, on a run whose whole job is to
+    # preserve the install. The receipt records the choice; re-pass it. Read once,
+    # up front: each setup.sh run below rewrites the receipt.
+    local with_engram=false
+    if [ "$(manifest_field "$manifest" "engram")" = "yes" ]; then with_engram=true; fi
+
     for slug in "${slugs[@]}"; do
         local -a args=(--agent "$slug" --non-interactive --without-pi-packages)
         if [ "$rscope" = "project" ]; then
@@ -370,6 +490,12 @@ EOF
         # Carry an installed startup logo across the re-sync (opt-in in setup.sh).
         if $with_logo; then
             args+=(--with-logo)
+        fi
+        # Carry the recorded Engram choice. Only the opt-in is re-passed: "no" is
+        # already what --non-interactive resolves to, and --without-engram would
+        # add nothing but noise.
+        if $with_engram; then
+            args+=(--with-engram)
         fi
         # Carry the recorded OpenCode mode + profile (#22). The profile is passed
         # in its BARE form on purpose: "NAME:provider/model" is documented as an
@@ -384,11 +510,23 @@ EOF
                 args+=(--opencode-profile "$oc_profile")
             fi
         fi
-        if ! bash "$SETUP_SCRIPT" "${args[@]}" >/dev/null 2>&1; then
+        # Capture the delegated run instead of discarding it. Both streams used to
+        # go to /dev/null, so every failure reached the user as a bare "Re-sync
+        # failed for <slug>" with no cause — on the exact path they walk while
+        # recovering a broken install, where the cause IS the answer (a target
+        # that stopped being a git repo, a config jq refuses, a read-only dir).
+        # Quiet on success: an update that worked has nothing to report here.
+        local logfile; logfile="$(mktemp)"
+        if ! bash "$SETUP_SCRIPT" "${args[@]}" >"$logfile" 2>&1; then
             fail "Re-sync failed for $slug ($rscope)"
-            rm -f "$hashfile"
+            info "Last lines of the delegated setup.sh run:"
+            awk 'NF' "$logfile" | tail -n 15 | while IFS= read -r line; do
+                printf '      %s\n' "$line"
+            done
+            rm -f "$logfile" "$hashfile"
             return 1
         fi
+        rm -f "$logfile"
     done
 
     # Report which recorded files changed (restored drift or picked up new content).
@@ -419,23 +557,31 @@ EOF
 
     # Hygiene: the re-sync above backed up each pre-existing agent file, so prune
     # the accumulated .bak.* in every recorded agents dir down to the newest per
-    # file. Derive the dirs from the receipt (../agents for global, .claude/.pi
-    # agents for project). Only runs on a real update (dry-run returned earlier).
-    local rel ad agent_dirs=""
+    # file. Only runs on a real update (dry-run returned earlier).
+    #
+    # Built as one "<abs agents dir>\t<basename>" line per recorded agent file
+    # (../agents for global, .claude/.pi agents for project) rather than a bare
+    # list of dirs: the dirs are shared with the user's own agents, so the set of
+    # files an update may prune backups for is exactly the set the receipt says
+    # an update created backups of.
+    local rel ad agent_entries=""
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
         case "$rel" in
             */agents/*.md|agents/*.md)
-                agent_dirs="$agent_dirs
-$(dirname "$receipt_dir/$rel")" ;;
+                agent_entries="$agent_entries
+$(dirname "$receipt_dir/$rel")	$(basename "$rel")" ;;
         esac
     done <<EOF
 $files
 EOF
-    agent_dirs="$(printf '%s\n' "$agent_dirs" | awk 'NF' | sort -u)"
+    agent_entries="$(printf '%s\n' "$agent_entries" | awk 'NF' | sort -u)"
+    local agent_dirs
+    agent_dirs="$(printf '%s\n' "$agent_entries" | awk -F'\t' 'NF { print $1 }' | sort -u)"
     while IFS= read -r ad; do
         [ -n "$ad" ] || continue
-        prune_stale_agent_backups "$ad"
+        prune_stale_agent_backups "$ad" \
+            "$(printf '%s\n' "$agent_entries" | awk -F'\t' -v d="$ad" '$1 == d { print $2 }')"
     done <<EOF
 $agent_dirs
 EOF
@@ -455,7 +601,7 @@ show_help() {
     echo "  --agent NAME     Update one global agent target"
     echo "  --scope SCOPE    'global' (default) or 'project'"
     echo "  --path DIR       Repo root for --scope project"
-    echo "  --dry-run        Report what would re-sync without changing anything"
+    echo "  --dry-run        List the recorded files that drifted from the repo, change nothing"
     echo "  -h, --help       Show this help"
     echo ""
     echo "With no --agent (global scope), every agent that has a receipt is updated."

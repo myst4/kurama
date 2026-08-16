@@ -148,12 +148,19 @@ assert_all_skills_installed() {
 # Run test function $1 in a subshell, echo its combined output, and exit with its
 # status.
 #
-# #31: `set -e` is re-armed INSIDE the subshell on purpose. run_test calls this
-# from an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — the suppression is inherited by the command substitution's subshell
-# too, so a bare failing command inside the test body neither aborted it nor
-# reached run_test. An explicit `set -e` in the subshell is the only way to undo
-# that; the outer shell's -u and pipefail are never suppressed and carry over.
+# #31: `set -e` is re-armed INSIDE the subshell on purpose. Callers disarm errexit
+# around the call so a failing body cannot abort the whole suite; this explicit
+# `set -e` is what puts it back for the body. The outer shell's -u and pipefail
+# are never suppressed and carry over either way.
+#
+# #55: the re-arm is honoured ONLY when the caller is NOT inside a POSIX
+# errexit-ignore context — an `if`/`while` condition, a `!` negation, or any
+# non-final command of an `&&`/`||` list. Bash <= 5.2 let a nested `set -e`
+# override that suppression; bash 5.3 (ubuntu-latest) follows POSIX strictly and
+# silently ignores it, which made every "run the thing, then return 0" test
+# unfailable again on CI while macOS bash 3.2 stayed green. So EVERY caller must
+# reach this function through a plain assignment (or a bare command) wrapped in
+# `set +e` / `set -e` — never from a condition and never from `|| status=$?`.
 invoke_test_body() {
     local func="$1"
     ( set -e; "$func" 2>&1 )
@@ -179,8 +186,16 @@ run_test() {
     TESTS_RUN=$((TESTS_RUN + 1))
     setup
     echo -n "  $name ... "
-    local output
-    if output=$(invoke_test_body "$func"); then
+    local output status
+    # #55: a plain assignment is not an errexit-ignore context, so the subshell's
+    # `set -e` is honoured on every bash from 3.2 to 5.3+. `set +e` here only keeps
+    # a failing body from aborting the suite — it does NOT reach the body, which
+    # re-arms errexit for itself. Do not fold this back into `if output=$(...)`.
+    set +e
+    output=$(invoke_test_body "$func")
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
         echo -e "${GREEN}PASS${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
@@ -195,16 +210,21 @@ run_test() {
 }
 
 # ============================================================================
-# Tests — the harness itself (#31)
+# Tests — the harness itself (#31, #55)
 #
 # A test suite that cannot fail is worse than no suite: it reports green over
-# every regression it was written to catch. `run_test` invokes the test function
-# as an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — including the command substitution's subshell. Every test shaped
-# "run the thing, then `return 0`" was therefore unfailable: the bare command's
-# non-zero status neither aborted the body nor reached run_test. invoke_test_body
-# re-arms errexit inside the subshell, which is the only place the suppression
-# can be undone; these two cases pin both halves of that contract.
+# every regression it was written to catch. Every test shaped "run the thing,
+# then `return 0`" is unfailable unless errexit is genuinely active inside the
+# body: the bare command's non-zero status would neither abort the body nor reach
+# run_test. invoke_test_body re-arms errexit inside its subshell to guarantee
+# that, and #55 added the other half of the contract — the caller must invoke it
+# from outside any errexit-ignore context, or strict-POSIX bash silently drops
+# the re-arm. These two cases pin both halves: a failing bare command must fail
+# its test, and a passing body must still pass.
+#
+# Both cases below therefore use the same `set +e` / plain call / `set -e` shape
+# as run_test. Reintroducing `|| status=$?` here would make them test a path the
+# harness no longer uses — and pass while the real one is broken.
 # ============================================================================
 
 # Fails on its first bare command, then claims success exactly as the unfailable
@@ -222,8 +242,11 @@ _fixture_test_body_succeeds() {
 }
 
 test_harness_bare_command_failure_fails_the_test() {
-    local output status=0
-    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero) || status=$?
+    local output status
+    set +e
+    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero)
+    status=$?
+    set -e
     if [ "$status" -eq 0 ]; then
         echo "invoke_test_body returned 0 for a body whose bare command failed —"
         echo "every 'run it, then return 0' test in this file is unfailable."
@@ -238,8 +261,11 @@ test_harness_bare_command_failure_fails_the_test() {
 }
 
 test_harness_passing_test_still_passes() {
-    local status=0
-    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1 || status=$?
+    local status
+    set +e
+    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1
+    status=$?
+    set -e
     assert_eq "0" "$status" "a body that succeeds must still be reported as a pass" || return 1
     return 0
 }
@@ -5487,6 +5513,1027 @@ run_test "an unregistered @@TOKEN@@ fails loudly, naming it" test_build_examples
 run_test "the committed templates rebuild byte-for-byte" test_build_examples_rebuilds_committed_outputs_byte_for_byte
 echo ""
 
+# ===== UNIT-A (issue #32) =====
+#
+# update.sh hardening. #32 filed five defects; four reproduce against this tree
+# and are fixed here. The fifth — the first unusable receipt killing the whole
+# multi-target run under `set -e` — was already closed by ec8cdf3 for the
+# REFUSAL branch, so the pin below covers the other exit out of resync_target
+# (an unrecognized tool, filed as a failure) instead.
+#
+# Every test drives the real update.sh against a real install inside the
+# sandboxed $HOME run_test provides, so each assertion is about what the user
+# sees or what survives on disk — never an internal.
+
+# The documented contract of --dry-run is "report drift, change nothing". It
+# snapshotted every recorded file's hash and then threw the snapshot away,
+# printing a constant "would re-sync N recorded file(s)" — the same N for a
+# pristine install and for one whose skills had been hand-edited. A user
+# previewing the update saw nothing, ran the real update, and lost the edit.
+test_update_dry_run_reports_drifted_files() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    printf 'LOCAL EDIT\n' > "$HOME/.claude/skills/sdd-apply/SKILL.md"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    printf '%s\n' "$output" | grep -q 'sdd-apply/SKILL.md' || {
+        echo "the dry run never names the drifted file:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    # ...and it is still only a preview.
+    grep -q 'LOCAL EDIT' "$HOME/.claude/skills/sdd-apply/SKILL.md" || {
+        echo "the dry run modified the drifted file"; return 1; }
+    return 0
+}
+
+# The other direction: a pristine install must preview as clean. A drift report
+# that cries wolf on every recorded file is as useless as one that reports
+# nothing, and it is the case every user sees first.
+test_update_dry_run_clean_install_reports_no_drift() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    if printf '%s\n' "$output" | grep -qE 'drift:|missing:'; then
+        echo "a freshly installed target previewed as drifted:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'no drift' || {
+        echo "the dry run never states the target is in sync:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# ~/.claude/agents is a SHARED directory — users keep their own agents there.
+# The prune globbed every *.bak.* in it and deleted all but the lexically last
+# per name, so a user's own backup of their own agent was collected as
+# collateral on the next update. Only originals the receipt records may be
+# pruned.
+test_update_prune_spares_user_owned_agent_backups() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local agents="$HOME/.claude/agents"
+    assert_dir_exists "$agents" || return 1
+
+    # An agent Kurama never installed, with the user's own backups beside it.
+    printf 'mine\n' > "$agents/my-own-agent.md"
+    printf 'v1\n'   > "$agents/my-own-agent.md.bak.20200101000000"
+    printf 'v2\n'   > "$agents/my-own-agent.md.bak.20200102000000"
+    # ...and stale backups of an agent the receipt DOES record.
+    printf 'old\n'  > "$agents/sdd-spec.md.bak.20200101000000"
+    printf 'old\n'  > "$agents/sdd-spec.md.bak.20200102000000"
+
+    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
+        || { echo "update.sh failed"; return 1; }
+
+    assert_file_exists "$agents/my-own-agent.md" || return 1
+    assert_file_exists "$agents/my-own-agent.md.bak.20200101000000" || {
+        echo "update deleted a backup of a user-owned agent"; return 1; }
+    assert_file_exists "$agents/my-own-agent.md.bak.20200102000000" || {
+        echo "update deleted a backup of a user-owned agent"; return 1; }
+
+    # The recorded agent is still pruned to a single backup — the one this very
+    # re-sync wrote, whose timestamp sorts after both 2020 ones.
+    local kept
+    kept=$(count_matching_files "$agents" 'sdd-spec.md.bak.*')
+    assert_eq "1" "$kept" "a recorded agent keeps exactly one backup" || return 1
+    if [ -f "$agents/sdd-spec.md.bak.20200101000000" ]; then
+        echo "the stale backup of a recorded agent was not pruned"; return 1
+    fi
+    return 0
+}
+
+# The re-sync delegates to setup.sh with stdout AND stderr on /dev/null, so
+# every failure surfaced as a bare "Re-sync failed for <slug>" — on the exact
+# path a user walks while recovering a broken install. The cause must reach them.
+test_update_failure_shows_delegated_setup_output() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" --non-interactive > /dev/null 2>&1 \
+        || { echo "project-scope setup failed"; return 1; }
+    # The target stops being a git repo (a deleted .git, a moved checkout, a
+    # restored backup): setup.sh refuses it in non-interactive mode and says so.
+    rm -rf "$repo/.git"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --scope project --path "$repo" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "update exited 0 although the delegated setup.sh failed"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Re-sync failed' || {
+        echo "no per-target failure line:"; printf '%s\n' "$output"; return 1; }
+    printf '%s\n' "$output" | grep -q 'not a git repository' || {
+        echo "the delegated setup.sh output never reaches the user:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# Same mechanism as the OpenCode mode/profile loss fixed in #22: update.sh
+# delegates with --non-interactive, where ask_engram defaults to "no", so the
+# FIRST update re-stamped the receipt engram: no and the choice was gone. The
+# receipt already records it — re-pass it like the --with-logo carry-over.
+test_update_carries_engram_across_resync() {
+    bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code --with-engram failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q '"engram": "yes"' "$manifest" || {
+        echo "setup did not record engram: yes"; return 1; }
+
+    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
+        || { echo "update.sh failed"; return 1; }
+
+    grep -q '"engram": "yes"' "$manifest" || {
+        echo "update.sh re-stamped the receipt — the Engram choice is lost:"
+        grep '"engram"' "$manifest"
+        return 1
+    }
+    return 0
+}
+
+# ec8cdf3 fixed the multi-target abort for the REFUSAL branch (a mode-less
+# OpenCode receipt). An unrecognized tool leaves resync_target by the other
+# door — it is filed as a failure, not a refusal — so pin that branch too: the
+# targets queued behind it must still be updated, and the run must close with a
+# summary naming the one it skipped.
+test_update_unrecognized_tool_does_not_abort_the_other_targets() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup codex failed"; return 1; }
+
+    # A receipt from a harness Kurama no longer supports. ALL_AGENTS puts
+    # claude-code FIRST, so this unusable target is handled before codex.
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local rewritten
+    rewritten=$(awk '{ gsub(/"claude-code"/, "\"gemini-cli\""); print }' "$manifest")
+    printf '%s\n' "$rewritten" > "$manifest"
+
+    local codex_skill="$HOME/.codex/skills/sdd-apply/SKILL.md"
+    assert_file_exists "$codex_skill" || return 1
+    printf 'clobbered\n' > "$codex_skill"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "an unusable receipt must still make the run exit non-zero"; return 1
+    fi
+    if grep -q '^clobbered$' "$codex_skill"; then
+        echo "codex was never re-synced — the unusable receipt aborted the loop"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Not updated' || {
+        echo "no end-of-run summary naming the skipped target:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# A drift preview that compared NOTHING must not report "no drift". Every
+# recorded file whose path has no repo mapping is skipped, and a receipt where
+# every file is skipped used to still print "No drift — all N recorded file(s)
+# match": a green light over zero comparisons, on the script users reach for when
+# they already suspect the install is broken. The headline counts only what was
+# actually compared, and says so when that is nothing.
+test_update_dry_run_says_when_nothing_was_comparable() {
+    bash "$SETUP_SCRIPT" --agent omp --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup omp failed"; return 1; }
+    local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    # omp's RULES.md is the one recorded path with no repo source mapping. A
+    # receipt holding only it is a target where nothing is comparable.
+    assert_file_exists "$HOME/.omp/agent/RULES.md" || return 1
+    printf '%s\n' \
+        '{' \
+        '  "name": "kurama",' \
+        '  "version": "6.0.0",' \
+        '  "tool": "omp",' \
+        '  "tools": [' \
+        '    "omp"' \
+        '  ],' \
+        '  "scope": "global",' \
+        '  "engram": "no",' \
+        '  "files": [' \
+        '    "../RULES.md"' \
+        '  ],' \
+        '  "settings": [],' \
+        '  "pi_packages": [],' \
+        '  "engram_mcp": [],' \
+        '  "prompts": [],' \
+        '  "tui_plugins": [],' \
+        '  "opencode_configs": []' \
+        '}' > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent omp --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview claimed 'no drift' having compared nothing:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'nothing comparable' || {
+        echo "the preview never says it could compare nothing:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# The preview must not describe a target the real run would refuse. The tool
+# validation used to sit BELOW the dry-run return, so a receipt with an
+# unrecognized tool got a plausible drift report and no hint that `update.sh`
+# without --dry-run would refuse it outright.
+test_update_dry_run_refuses_what_the_real_run_would_refuse() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local rewritten
+    rewritten=$(awk '{ gsub(/"claude-code"/, "\"gemini-cli\""); print }' "$manifest")
+    printf '%s\n' "$rewritten" > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "the preview exited 0 for a target the real run refuses:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Unrecognized tool' || {
+        echo "the preview never names the unusable tool:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview reported a drift verdict for a refused target:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}#32 — update.sh hardening${NC}"
+run_test "--dry-run names the recorded files that drifted" test_update_dry_run_reports_drifted_files
+run_test "--dry-run on a pristine install reports no drift" test_update_dry_run_clean_install_reports_no_drift
+run_test "--dry-run says when nothing was comparable" test_update_dry_run_says_when_nothing_was_comparable
+run_test "--dry-run refuses what the real run would refuse" test_update_dry_run_refuses_what_the_real_run_would_refuse
+run_test "the backup prune spares user-owned agent backups" test_update_prune_spares_user_owned_agent_backups
+run_test "a failed re-sync shows the delegated setup.sh output" test_update_failure_shows_delegated_setup_output
+run_test "--with-engram survives a re-sync" test_update_carries_engram_across_resync
+run_test "an unusable receipt does not abort the queued targets" test_update_unrecognized_tool_does_not_abort_the_other_targets
+# ===== UNIT-C (issue #35) =====
+#
+# #35: plugin.json shipped two defects — homepage/repository still pointed at
+# the pre-rename Gentleman-Programming/agent-teams-lite repo instead of this
+# repo's real origin, and the "agents" array hand-listed only the 9 SDD-phase
+# agents, silently missing the 8 review-layer agents (the 4R lenses,
+# review-refuter, the two Judgment Day judges, and jd-fix-agent) that
+# setup.sh's install_native_agents() copies wholesale from
+# examples/claude-code/agents/*.md for --agent claude-code. The Claude Code
+# plugin schema's "agents" field takes file paths (a string or an array), not
+# a directory glob like "skills" gets, so the manifest list has to be
+# hand-enumerated — which means nothing stops it drifting from the on-disk
+# set the next time an agent is added or removed there. These tests close
+# that gap: one confirms the repository URL fix, the other two fail loudly
+# the moment examples/claude-code/agents/ and plugin.json's "agents" array
+# disagree, in either direction.
+
+# Print the sorted basenames of every *.md file directly under dir $1.
+list_agent_basenames() {
+    local dir="$1"
+    local f base
+    for f in "$dir"/*.md; do
+        [ -e "$f" ] || continue
+        base="${f##*/}"
+        echo "$base"
+    done | sort
+}
+
+# Print the sorted basenames referenced by plugin.json's "agents" array.
+# jq preferred; a portable grep fallback keeps this working without jq,
+# per the jq-optional invariant every script path here must honor.
+plugin_json_agent_basenames() {
+    local plugin_file="$1"
+    local paths
+    if command -v jq > /dev/null 2>&1; then
+        paths=$(jq -r '.agents[]?' "$plugin_file" 2>/dev/null)
+    else
+        paths=$(grep -oE '"\./examples/claude-code/agents/[A-Za-z0-9_-]+\.md"' "$plugin_file" \
+            | tr -d '"')
+    fi
+    local p
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        echo "${p##*/}"
+    done <<< "$paths" | sort
+}
+
+test_plugin_json_repository_url() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    assert_file_exists "$plugin_file" || return 1
+    if grep -q 'Gentleman-Programming/agent-teams-lite' "$plugin_file"; then
+        echo "plugin.json still points at the pre-rename Gentleman-Programming/agent-teams-lite repo"
+        return 1
+    fi
+    grep -q '"homepage": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'homepage' does not point at https://github.com/myst4/kurama"; return 1; }
+    grep -q '"repository": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'repository' does not point at https://github.com/myst4/kurama"; return 1; }
+    return 0
+}
+
+test_plugin_json_agents_match_disk_set() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local agents_dir="$REPO_DIR/examples/claude-code/agents"
+    assert_file_exists "$plugin_file" || return 1
+    assert_dir_exists "$agents_dir" || return 1
+
+    local disk_names manifest_names
+    disk_names=$(list_agent_basenames "$agents_dir")
+    manifest_names=$(plugin_json_agent_basenames "$plugin_file")
+
+    if [ -z "$disk_names" ]; then
+        echo "no *.md agent files found in $agents_dir"
+        return 1
+    fi
+    if [ -z "$manifest_names" ]; then
+        echo "plugin.json 'agents' field is empty or unparseable"
+        return 1
+    fi
+
+    assert_eq "$disk_names" "$manifest_names" \
+        "plugin.json 'agents' list has drifted from examples/claude-code/agents/ on disk"
+}
+
+test_plugin_json_agents_count_is_17() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local count
+    count=$(plugin_json_agent_basenames "$plugin_file" | wc -l | tr -d ' ')
+    assert_eq "17" "$count" "plugin.json must register all 17 Claude Code agents"
+}
+
+echo -e "${BOLD}UNIT-C (issue #35) — plugin.json manifest drift${NC}"
+run_test "plugin.json homepage/repository point at myst4/kurama" test_plugin_json_repository_url
+run_test "plugin.json 'agents' matches examples/claude-code/agents/ on disk" test_plugin_json_agents_match_disk_set
+run_test "plugin.json registers all 17 agents" test_plugin_json_agents_count_is_17
+
+# ===== UNIT-B (issue #33) =====
+# ============================================================================
+# uninstall.sh hardening — three defects, all on the highest-blast-radius path
+# in the repo (the one that calls rm):
+#
+#   1. `--agent X --scope project` interpolated X into the LABEL only and then
+#      removed the whole shared project receipt — every harness's files, and the
+#      kurama block out of both CLAUDE.md and AGENTS.md — while printing one
+#      harness's name. A project receipt carries no per-tool attribution, so the
+#      only honest answers are "remove everything" or "refuse". It now refuses.
+#   2. Without jq the hooks block cannot be stripped from settings.json, but the
+#      files[] sweep ran FIRST: the hook scripts were deleted, the strip then
+#      warned and returned, and the run exited 0 — leaving settings.json invoking
+#      executables that no longer exist. Now detected before anything is removed.
+#   3. files[] came straight from a receipt that, in project scope, lives inside
+#      the target repo and is written by whoever wrote that repo. Entries were
+#      joined onto the target dir and rm'd with no containment check at all.
+#
+# The containment rule is the subtle one: setup.sh's receipt_rel DELIBERATELY
+# emits ../-anchored entries for a global install (skills sit in
+# ~/.claude/skills; agents, hooks and settings.json are its SIBLINGS), so 20 of a
+# claude-code receipt's 52 files[] entries legitimately start with "../". A naive
+# "reject every .." rule would orphan all of them — hence the last case here,
+# which pins that they still get removed.
+# ============================================================================
+
+# Insert $2 as the first element of the receipt $1's files[], verbatim. Mirrors
+# collapse_receipt_files_to_empty_array's awk shape: one element per line, so a
+# crafted entry is indistinguishable from a recorded one to every reader.
+inject_receipt_files_entry() {
+    local manifest="$1" entry="$2"
+    local tmp="$manifest.tmp"
+    awk -v entry="$entry" '
+        !injected && /^[[:space:]]*"files"[[:space:]]*:[[:space:]]*\[[[:space:]]*$/ {
+            print; print "    \"" entry "\","; injected = 1; next
+        }
+        { print }
+    ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+}
+
+test_uninstall_rejects_agent_in_project_scope() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+    bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+
+    # Preconditions: ONE receipt shared by both harnesses, and both prompt files
+    # carrying a kurama block — exactly the union the old code removed wholesale.
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q 'BEGIN:kurama' "$repo/CLAUDE.md" || { echo "CLAUDE.md carries no kurama block"; return 1; }
+    grep -q 'BEGIN:kurama' "$repo/AGENTS.md" || { echo "AGENTS.md carries no kurama block"; return 1; }
+    local before
+    before=$(count_matching_files "$repo/.claude/skills" 'SKILL.md')
+    [ "$before" -gt 0 ] || { echo "no skills installed — this case would prove nothing"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "--agent with --scope project must not exit 0; the run reported:"
+        printf '%s\n' "$output" | grep -a 'removed' | head -5
+        return 1
+    fi
+
+    # A refusal removes nothing at all.
+    assert_file_exists "$manifest" || { echo "the refused run deleted the receipt"; return 1; }
+    assert_eq "$before" "$(count_matching_files "$repo/.claude/skills" 'SKILL.md')" \
+        "the refused run removed skill files" || return 1
+    grep -q 'BEGIN:kurama' "$repo/CLAUDE.md" || { echo "the refused run stripped CLAUDE.md"; return 1; }
+    grep -q 'BEGIN:kurama' "$repo/AGENTS.md" || { echo "the refused run stripped AGENTS.md"; return 1; }
+
+    # And it says how to proceed instead of leaving the user guessing.
+    printf '%s\n' "$output" | grep -aq -- '--scope project' || {
+        echo "the refusal never shows the all-or-nothing command; got:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+test_uninstall_project_scope_removes_every_harness_without_agent() {
+    # The other half of the ruling: the documented all-or-nothing path must
+    # really clear BOTH harnesses, or the refusal above just strands the user.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+    bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+    mkdir -p "$repo/.claude/skills/my-custom"
+    echo "keep me" > "$repo/.claude/skills/my-custom/SKILL.md"
+
+    local status=0
+    bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages \
+        > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "the all-or-nothing project uninstall must exit 0" || return 1
+
+    if [ -f "$repo/.kurama-install-manifest.json" ]; then echo "receipt not removed"; return 1; fi
+    if [ -d "$repo/.claude/skills/sdd-apply" ]; then echo "sdd-apply not removed"; return 1; fi
+    local f
+    for f in CLAUDE.md AGENTS.md; do
+        if [ -f "$repo/$f" ] && grep -q 'BEGIN:kurama' "$repo/$f"; then
+            echo "uninstall left a BEGIN:kurama block in $f"; return 1
+        fi
+    done
+    local content
+    content=$(cat "$repo/.claude/skills/my-custom/SKILL.md" 2>/dev/null || echo MISSING)
+    assert_eq "keep me" "$content" "user-created skill preserved" || return 1
+    return 0
+}
+
+test_uninstall_without_jq_refuses_before_deleting_hook_scripts() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    # Install WITH jq, so settings.json really carries the hooks block that a
+    # jq-less removal cannot take back out.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
+    local settings="$HOME/.claude/settings.json"
+    local guard="$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh"
+    local gate="$HOME/.claude/hooks/kurama/archive-gate.sh"
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$settings" || return 1
+    assert_file_exists "$guard" || return 1
+    assert_file_exists "$gate" || return 1
+    grep -q 'hooks/kurama/' "$settings" || { echo "setup wrote no hooks block"; return 1; }
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$UNINSTALL_SCRIPT" --agent claude-code \
+        --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "a jq-less run that cannot clean settings.json must not exit 0; it said:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+
+    # The whole point: settings.json still names the hooks, so the hooks are
+    # still there. Deleting them first is what made every Edit/Write fail.
+    grep -q 'hooks/kurama/' "$settings" || { echo "the refused run mangled settings.json"; return 1; }
+    assert_file_exists "$guard" || {
+        echo "the write-guard hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$gate" || {
+        echo "the archive-gate hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$manifest" || { echo "the refused run deleted the receipt"; return 1; }
+    assert_dir_exists "$HOME/.claude/skills/sdd-apply" || {
+        echo "the refused run removed skills"; return 1; }
+
+    # It must name exactly what to remove by hand — the settings file and the
+    # hook scripts — or the user cannot get out of the state it just refused.
+    printf '%s\n' "$output" | grep -aqF "$settings" || {
+        echo "the refusal does not name settings.json; got:"; printf '%s\n' "$output"; return 1; }
+    printf '%s\n' "$output" | grep -aqF 'orchestrator-write-guard.sh' || {
+        echo "the refusal does not name the hook scripts; got:"; printf '%s\n' "$output"; return 1; }
+    return 0
+}
+
+test_uninstall_without_jq_still_clears_a_target_with_no_hooks_block() {
+    # The guard must be narrow: codex records no settings[] at all, so there is
+    # nothing jq is needed for and a jq-less uninstall must still complete.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "codex setup exited non-zero"; return 1; }
+    local skills="$HOME/.codex/skills"
+    assert_dir_exists "$skills/sdd-apply" || return 1
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$UNINSTALL_SCRIPT" --agent codex \
+        --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "a jq-less uninstall with nothing to strip must exit 0 (got $status):"
+        printf '%s\n' "$output" | tail -10
+        return 1
+    fi
+    if [ -d "$skills/sdd-apply" ]; then echo "sdd-apply survived the uninstall"; return 1; fi
+    if [ -f "$skills/.kurama-install-manifest.json" ]; then echo "receipt survived"; return 1; fi
+    return 0
+}
+
+test_uninstall_refuses_absolute_receipt_files_entry() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+
+    local outside="$TEST_TMPDIR/outside"
+    mkdir -p "$outside"
+    echo "do not touch" > "$outside/canary.txt"
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    inject_receipt_files_entry "$manifest" "$outside/canary.txt"
+    grep -qF "\"$outside/canary.txt\"," "$manifest" || {
+        echo "the crafted absolute entry was not injected"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+
+    assert_file_exists "$outside/canary.txt" || {
+        echo "an absolute receipt entry reached a file outside the target dir"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'refusing' || {
+        echo "the absolute entry was accepted silently (exit $status); got:"
+        printf '%s\n' "$output" | head -20
+        return 1
+    }
+    # A tampered receipt must be distinguishable from a clean uninstall by exit
+    # code alone — a caller that only checks $? would otherwise never know.
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
+    return 0
+}
+
+test_uninstall_refuses_parent_traversal_receipt_files_entry() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+
+    # A sibling of the target repo — reachable from it with a single "..", which
+    # is what a hostile or corrupt receipt in a cloned repo would use.
+    local outside="$TEST_TMPDIR/outside"
+    mkdir -p "$outside"
+    echo "do not touch" > "$outside/canary.txt"
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    inject_receipt_files_entry "$manifest" "../outside/canary.txt"
+    grep -qF '"../outside/canary.txt",' "$manifest" || {
+        echo "the crafted traversal entry was not injected"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+
+    assert_file_exists "$outside/canary.txt" || {
+        echo "a ../ receipt entry deleted a file outside the target repo"; return 1; }
+    # The prune walk runs off the same list: an accepted traversal entry also
+    # let rmdir climb out of the target.
+    assert_dir_exists "$outside" || {
+        echo "the prune walk removed a directory outside the target repo"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'refusing' || {
+        echo "the traversal entry was accepted silently (exit $status); got:"
+        printf '%s\n' "$output" | head -20
+        return 1
+    }
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
+    return 0
+}
+
+# Rewrite the receipt $1's "scope" scalar to $2, or delete the field entirely
+# when $2 is empty. Lets a case hand uninstall a receipt that LIES about its own
+# scope — which in project scope is not a hypothetical: the receipt is a file in
+# the target repo, written by whoever wrote that repo.
+set_receipt_scope() {
+    local manifest="$1" scope="$2"
+    local tmp="$manifest.tmp"
+    if [ -n "$scope" ]; then
+        awk -v s="$scope" '
+            /^[[:space:]]*"scope"[[:space:]]*:/ {
+                sub(/:[[:space:]]*"[^"]*"/, ": \"" s "\""); print; next
+            }
+            { print }
+        ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    else
+        awk '!/^[[:space:]]*"scope"[[:space:]]*:/' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    fi
+}
+
+test_uninstall_ignores_a_receipt_that_lies_about_its_scope() {
+    # The containment bound must come from HOW THE TARGET WAS ADDRESSED, not
+    # from a field inside the attacker-supplied receipt. A project receipt
+    # claiming "global" — or simply omitting "scope", which defaults to global —
+    # widened the bound to the PARENT of the repo, so the documented
+    # `--scope project --path <repo>` reached ../<sibling>/ and deleted it.
+    local claim
+    for claim in global ""; do
+        local repo="$TEST_TMPDIR/proj-${claim:-absent}"
+        make_git_repo "$repo"
+        bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+            --without-engram --non-interactive > /dev/null 2>&1 \
+            || { echo "project setup exited non-zero"; return 1; }
+
+        local outside="$TEST_TMPDIR/outside-${claim:-absent}"
+        mkdir -p "$outside"
+        echo "do not touch" > "$outside/canary.txt"
+
+        local manifest="$repo/.kurama-install-manifest.json"
+        inject_receipt_files_entry "$manifest" "../outside-${claim:-absent}/canary.txt"
+        set_receipt_scope "$manifest" "$claim"
+        # Precondition: the receipt really does claim what this case needs.
+        if [ -n "$claim" ]; then
+            grep -q '"scope"[[:space:]]*:[[:space:]]*"global"' "$manifest" || {
+                echo "the receipt was not made to claim global scope"; return 1; }
+        else
+            if grep -q '"scope"[[:space:]]*:' "$manifest"; then
+                echo "the scope field was not removed from the receipt"; return 1
+            fi
+        fi
+
+        local output status=0
+        output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+            --without-pi-packages 2>&1) || status=$?
+
+        assert_file_exists "$outside/canary.txt" || {
+            echo "a receipt claiming scope='${claim:-<absent>}' widened the bound and deleted outside the repo"
+            return 1
+        }
+        assert_dir_exists "$outside" || {
+            echo "the prune walk climbed out under a spoofed scope='${claim:-<absent>}'"; return 1; }
+        printf '%s\n' "$output" | grep -aq 'refusing' || {
+            echo "scope='${claim:-<absent>}' was accepted silently (exit $status); got:"
+            printf '%s\n' "$output" | head -20
+            return 1
+        }
+        if [ "$status" -eq 0 ]; then
+            echo "a refused entry under scope='${claim:-<absent>}' must not exit 0"
+            return 1
+        fi
+    done
+    return 0
+}
+
+test_uninstall_refuses_an_entry_behind_a_symlinked_directory() {
+    # Containment cannot be purely textual while rm is physical. git versions
+    # symlinks, so in project scope BOTH halves ship in the hostile repo: a
+    # symlinked directory and a receipt entry pointing through it. The textual
+    # check reads "repo/evil/id_rsa" as inside the repo; rm resolves `evil` and
+    # deletes the real file somewhere else entirely.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+
+    local secrets="$TEST_TMPDIR/secrets"
+    mkdir -p "$secrets"
+    echo "do not touch" > "$secrets/id_rsa"
+    ln -s "$secrets" "$repo/evil"
+    # Precondition: the symlink really does resolve out of the repo, so the
+    # textual reading and the physical one genuinely disagree.
+    assert_file_exists "$repo/evil/id_rsa" || {
+        echo "the symlinked directory does not resolve — this case would prove nothing"
+        return 1
+    }
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    inject_receipt_files_entry "$manifest" "evil/id_rsa"
+    grep -qF '"evil/id_rsa",' "$manifest" || {
+        echo "the crafted symlink entry was not injected"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+
+    assert_file_exists "$secrets/id_rsa" || {
+        echo "an entry behind a symlinked directory deleted a file outside the repo"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'refusing' || {
+        echo "the symlinked-directory entry was accepted silently (exit $status); got:"
+        printf '%s\n' "$output" | head -20
+        return 1
+    }
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
+    return 0
+}
+
+test_uninstall_still_removes_legitimate_parent_anchored_entries() {
+    # The containment rule must not be "reject every ..": a global receipt
+    # records agents and hooks as ../-anchored siblings of the skills dir, and
+    # rejecting those would leave 20 of 52 recorded files on disk forever.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+
+    local ups
+    ups=$(receipt_array_values "$manifest" "files" | grep -c '^\.\./' || true)
+    [ "${ups:-0}" -gt 0 ] || {
+        echo "the receipt records no ../-anchored entries — this case would prove nothing"
+        return 1
+    }
+    assert_dir_exists "$HOME/.claude/agents" || return 1
+    assert_file_exists "$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh" || return 1
+
+    local status=0
+    bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages \
+        > /dev/null 2>&1 || status=$?
+    # Also the "clean run" half of the exit-code contract the containment cases
+    # assert from the other side: an untampered receipt exits 0.
+    assert_eq "0" "$status" "the uninstall must exit 0" || return 1
+
+    local left
+    left=$(count_matching_files "$HOME/.claude/agents" 'sdd-*.md')
+    assert_eq "0" "$left" "../agents entries survived the uninstall" || return 1
+    if [ -d "$HOME/.claude/hooks/kurama" ]; then
+        echo "../hooks entries survived the uninstall"; return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}#33 — uninstall hardening (UNIT-B)${NC}"
+run_test "--agent with --scope project refuses and removes nothing" test_uninstall_rejects_agent_in_project_scope
+run_test "the all-or-nothing project uninstall clears every harness" test_uninstall_project_scope_removes_every_harness_without_agent
+run_test "without jq, uninstall refuses before deleting the hook scripts" test_uninstall_without_jq_refuses_before_deleting_hook_scripts
+run_test "without jq, a target with no hooks block still uninstalls" test_uninstall_without_jq_still_clears_a_target_with_no_hooks_block
+run_test "an absolute receipt files[] entry is refused" test_uninstall_refuses_absolute_receipt_files_entry
+run_test "a ../ receipt files[] entry is refused" test_uninstall_refuses_parent_traversal_receipt_files_entry
+run_test "a receipt that lies about its scope cannot widen the bound" test_uninstall_ignores_a_receipt_that_lies_about_its_scope
+run_test "an entry behind a symlinked directory is refused" test_uninstall_refuses_an_entry_behind_a_symlinked_directory
+run_test "legitimate ../-anchored entries are still removed" test_uninstall_still_removes_legitimate_parent_anchored_entries
+
+echo ""
+
+# ============================================================================
+# ===== UNIT-E (issue #39) =====
+#
+# setup.sh minor hardening. Two independent defects, one section:
+#   1. Backups were unconditional. `make_backup` ran before every write with no
+#      comparison against what was about to be written, so a plain idempotent
+#      re-run copied 19 byte-identical files aside as <file>.bak.<timestamp>
+#      (measured on a sandboxed HOME: 3 runs → 38 files, all identical).
+#   2. The `--scope project` guard only string-compared the target against the
+#      clone root, so any SUBDIRECTORY of the Kurama clone was accepted and got
+#      .claude/, CLAUDE.md and the receipt written into the source tree.
+# ============================================================================
+
+# A throwaway copy of the Kurama clone: its own git repo, its own scripts/setup.sh,
+# and the sources a project install reads. The clone-guard tests below point
+# --path INTO this copy, so a regression writes into $TEST_TMPDIR instead of the
+# real source tree — and the guard still faces a genuine "target inside the clone
+# that is running setup", because the setup.sh under test is the staged one.
+stage_kurama_clone_files() {
+    local dest="$1"
+    mkdir -p "$dest/scripts" "$dest/docs" || return 1
+    cp "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/banner.sh" "$dest/scripts/" || return 1
+    cp -R "$REPO_DIR/examples" "$REPO_DIR/skills" "$dest/" || return 1
+    cp "$REPO_DIR/VERSION" "$dest/VERSION" || return 1
+    printf '# staged docs\n' > "$dest/docs/index.md" || return 1
+    [ -d "$dest/skills/sdd-apply" ] || return 1
+    return 0
+}
+
+stage_kurama_clone() {
+    stage_kurama_clone_files "$1" || return 1
+    make_git_repo "$1"
+    return 0
+}
+
+# Report (and clear) the artifacts a project-scope install leaves in a directory.
+# Named paths only — never a glob — so a failing guard test cleans up after
+# itself without ever being able to delete something it did not create.
+project_install_artifacts_cleared() {
+    local dir="$1" leaked=0 stray
+    for stray in "$dir/.claude" "$dir/CLAUDE.md" "$dir/.kurama-install-manifest.json"; do
+        if [ -e "$stray" ]; then
+            rm -rf "$stray"
+            leaked=1
+        fi
+    done
+    [ "$leaked" -eq 0 ]
+}
+
+test_setup_rerun_writes_no_new_backups() {
+    # The whole point of an idempotent installer: running it twice leaves the disk
+    # where the first run left it. Nothing setup writes changes between two
+    # identical runs, so a second wave of .bak files is pure noise in the user's
+    # config dir — and it is unbounded, one wave per re-run, forever.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the first setup run exited non-zero"; return 1; }
+    local first
+    first=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
+    assert_eq "0" "$first" "a fresh install has nothing to back up" || return 1
+
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the second setup run exited non-zero"; return 1; }
+    local second
+    second=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
+    if [ "$second" -ne 0 ]; then
+        echo "an unchanged re-run wrote $second backup file(s), e.g.:"
+        find "$HOME" -name '*.bak.*' | sed "s|$HOME|~|" | head -5
+        return 1
+    fi
+    return 0
+}
+
+test_setup_rerun_still_backs_up_a_hand_edited_file() {
+    # The other half of the contract: the skip is content-based, NOT "never back
+    # up on a re-run". A file the user edited by hand is still copied aside
+    # before setup overwrites it — and it is the ONLY file backed up.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the first setup run exited non-zero"; return 1; }
+    local victim="$HOME/.claude/agents/review-risk.md"
+    assert_file_exists "$victim" || return 1
+    printf 'HAND EDITED BODY\n' > "$victim"
+
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the second setup run exited non-zero"; return 1; }
+
+    local baks bak
+    baks=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
+    if [ "$baks" -ne 1 ]; then
+        echo "expected exactly one backup (the hand-edited file), got $baks:"
+        find "$HOME" -name '*.bak.*' | sed "s|$HOME|~|" | head -5
+        return 1
+    fi
+    bak=$(find "$HOME" -name 'review-risk.md.bak.*' | head -1)
+    [ -n "$bak" ] || { echo "the hand-edited agent was not the file backed up"; return 1; }
+    grep -qF 'HAND EDITED BODY' "$bak" || {
+        echo "the backup does not hold the hand-edited content"; return 1; }
+    if grep -qF 'HAND EDITED BODY' "$victim"; then
+        echo "the file was backed up but never replaced with the shipped version"
+        return 1
+    fi
+    return 0
+}
+
+test_scope_project_rejects_a_subdirectory_of_the_clone() {
+    # `--path <clone>/docs` used to be accepted: the guard compared the target
+    # string against the clone ROOT only, so every subdirectory slipped through
+    # and Kurama installed itself into its own source tree.
+    local clone="$TEST_TMPDIR/staged-clone"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --scope project \
+        --path "$clone/docs" --without-engram --non-interactive 2>&1) || status=$?
+
+    local clean=0
+    project_install_artifacts_cleared "$clone/docs" || clean=1
+    if [ "$status" -eq 0 ]; then
+        echo "setup accepted a subdirectory of its own clone as a project target"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    if [ "$clean" -ne 0 ]; then
+        echo "setup refused the target but still wrote into the clone's docs/"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'Refusing to install into the Kurama' || {
+        echo "the refusal never says the target is the Kurama clone:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    return 0
+}
+
+test_scope_project_rejects_a_symlink_into_the_clone() {
+    # The same rejection through a symlink: `cd $link && pwd` keeps the LOGICAL
+    # path, so no string comparison against the clone root can see through it.
+    # Comparing git toplevels does, because git resolves the path physically.
+    local clone="$TEST_TMPDIR/staged-clone-link"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+    local link="$TEST_TMPDIR/linked-docs"
+    ln -s "$clone/docs" "$link" || { echo "could not create the symlink"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --scope project \
+        --path "$link" --without-engram --non-interactive 2>&1) || status=$?
+
+    local clean=0
+    project_install_artifacts_cleared "$clone/docs" || clean=1
+    if [ "$status" -eq 0 ]; then
+        echo "setup followed a symlink into its own clone and installed there"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    if [ "$clean" -ne 0 ]; then
+        echo "setup refused the symlink but still wrote through it into the clone"
+        return 1
+    fi
+    return 0
+}
+
+test_scope_project_guard_does_not_misfire_on_a_non_repo() {
+    # The guard rejects a target that resolves INTO the clone, not every target it
+    # cannot resolve. A plain directory outside any repo still gets the
+    # pre-existing "not a git repository" abort, with its own remedy.
+    local plain="$TEST_TMPDIR/plain-dir"
+    mkdir -p "$plain"
+
+    local output status=0
+    output=$(bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$plain" \
+        --without-engram --non-interactive 2>&1) || status=$?
+
+    [ "$status" -ne 0 ] || { echo "a non-git target must still abort"; return 1; }
+    printf '%s\n' "$output" | grep -qF 'not a git repository' || {
+        echo "a non-git target lost its own diagnostic:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    if printf '%s\n' "$output" | grep -qF 'Refusing to install into the Kurama'; then
+        echo "the clone guard misfired on a directory outside the clone:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    return 0
+}
+
+test_scope_project_allows_a_repo_that_vendors_a_kurama_copy() {
+    # The guard protects a Kurama CLONE, not "every work tree that happens to
+    # contain a copy of Kurama". A project that vendors an unpacked (non-git)
+    # Kurama under tools/ shares its git toplevel with that copy, so a bare
+    # toplevel comparison would refuse the user's own repository.
+    local proj="$TEST_TMPDIR/vendoring-project"
+    make_git_repo "$proj"
+    stage_kurama_clone_files "$proj/tools/kurama" \
+        || { echo "could not stage the vendored Kurama copy"; return 1; }
+
+    bash "$proj/tools/kurama/scripts/setup.sh" --agent claude-code --scope project \
+        --path "$proj" --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup refused a project that merely vendors a Kurama copy"; return 1; }
+    assert_dir_exists "$proj/.claude/skills/sdd-apply" || return 1
+    return 0
+}
+
+echo -e "${BOLD}#39 — setup.sh minor hardening (backups + clone guard)${NC}"
+run_test "an unchanged re-run writes no new .bak files" test_setup_rerun_writes_no_new_backups
+run_test "a hand-edited file is still backed up, and only it" test_setup_rerun_still_backs_up_a_hand_edited_file
+run_test "--scope project refuses a subdirectory of the clone" test_scope_project_rejects_a_subdirectory_of_the_clone
+run_test "--scope project refuses a symlink into the clone" test_scope_project_rejects_a_symlink_into_the_clone
+run_test "the clone guard does not misfire on a non-repo target" test_scope_project_guard_does_not_misfire_on_a_non_repo
+run_test "a repo that vendors a Kurama copy is still installable" test_scope_project_allows_a_repo_that_vendors_a_kurama_copy
+
 # ===== UNIT-D (issue #36) =====
 # ============================================================================
 # #36 — the first thing anyone sees: banner.sh's degradation ladder and size
@@ -5950,6 +6997,7 @@ run_test "the preview re-splits, spaces and all" test_tui_preview_quotes_a_path_
 run_test "the maintenance preview is absolute too" test_tui_maintenance_preview_is_absolute
 run_test "a profile name is repaired or refused" test_tui_profile_name_is_repaired_or_refused
 run_test "the repaired name is one setup.sh accepts" test_tui_repaired_profile_name_is_one_setup_accepts
+
 echo ""
 
 # ============================================================================
