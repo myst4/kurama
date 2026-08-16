@@ -2280,6 +2280,12 @@ OPENCODE_PROFILE_MODEL=""  # optional provider/model applied to every profile ag
 STARTUP_LOGO=""            # "yes" (via --with-logo) installs the Kurama startup logo; anything else skips it. Never prompted for — the default install stays clean.
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
 ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
+# Run-shaping flags seen on this invocation that the interactive TUI hand-off
+# (issue #40) cannot forward — it takes NO arguments and asks its own questions.
+# An underspecified run (no --agent/--all) carrying any of these is REFUSED rather
+# than silently honoring nothing. --agent/--all/--non-interactive/--help are not
+# blockers and are never appended here.
+HANDOFF_BLOCKED_FLAGS=()
 
 # Every value-taking flag goes through this first: under `set -u` a bare
 # `--agent` at the end of the line used to abort with a raw
@@ -2314,20 +2320,22 @@ while [[ $# -gt 0 ]]; do
         --all)            ALL=true; shift ;;
         --non-interactive) NON_INTERACTIVE=true; ALL=true; shift ;;
         --scope)
+            HANDOFF_BLOCKED_FLAGS+=("--scope")
             require_flag_value --scope "${2:-}"
             case "$2" in
                 global|project) SCOPE="$2"; shift 2 ;;
                 *) echo "Invalid scope: $2 (use 'global' or 'project')"; exit 1 ;;
             esac
             ;;
-        --path)           require_flag_value --path "${2:-}"; TARGET_PATH="$2"; shift 2 ;;
-        --with-pi-packages)    PI_PACKAGES="yes"; shift ;;
-        --without-pi-packages) PI_PACKAGES="no"; shift ;;
-        --with-engram)         ENGRAM="yes"; shift ;;
-        --without-engram)      ENGRAM="no"; shift ;;
-        --with)    require_flag_value --with "${2:-}";    setup_validate_group_name "$2"; setup_enable_group "$2"; shift 2 ;;
-        --without) require_flag_value --without "${2:-}"; setup_validate_group_name "$2"; setup_disable_group "$2"; shift 2 ;;
+        --path)           HANDOFF_BLOCKED_FLAGS+=("--path"); require_flag_value --path "${2:-}"; TARGET_PATH="$2"; shift 2 ;;
+        --with-pi-packages)    HANDOFF_BLOCKED_FLAGS+=("--with-pi-packages");    PI_PACKAGES="yes"; shift ;;
+        --without-pi-packages) HANDOFF_BLOCKED_FLAGS+=("--without-pi-packages"); PI_PACKAGES="no"; shift ;;
+        --with-engram)         HANDOFF_BLOCKED_FLAGS+=("--with-engram");         ENGRAM="yes"; shift ;;
+        --without-engram)      HANDOFF_BLOCKED_FLAGS+=("--without-engram");      ENGRAM="no"; shift ;;
+        --with)    HANDOFF_BLOCKED_FLAGS+=("--with");    require_flag_value --with "${2:-}";    setup_validate_group_name "$2"; setup_enable_group "$2"; shift 2 ;;
+        --without) HANDOFF_BLOCKED_FLAGS+=("--without"); require_flag_value --without "${2:-}"; setup_validate_group_name "$2"; setup_disable_group "$2"; shift 2 ;;
         --opencode-mode)
+            HANDOFF_BLOCKED_FLAGS+=("--opencode-mode")
             require_flag_value --opencode-mode "${2:-}"
             if [[ "$2" == "single" || "$2" == "multi" ]]; then
                 OPENCODE_MODE="$2"; shift 2
@@ -2338,6 +2346,7 @@ while [[ $# -gt 0 ]]; do
         --opencode-profile)
             # Grammar: NAME[:provider/model]. Split on the FIRST colon so the
             # model's own "/" survives; an empty NAME defaults to "kurama".
+            HANDOFF_BLOCKED_FLAGS+=("--opencode-profile")
             require_flag_value --opencode-profile "${2:-}"
             _prof_val="$2"
             _prof_name="${_prof_val%%:*}"
@@ -2351,8 +2360,8 @@ while [[ $# -gt 0 ]]; do
             OPENCODE_PROFILE_MODEL="$_prof_rest"
             shift 2
             ;;
-        --with-logo)    STARTUP_LOGO="yes"; shift ;;
-        --without-logo) STARTUP_LOGO="no"; shift ;;
+        --with-logo)    HANDOFF_BLOCKED_FLAGS+=("--with-logo");    STARTUP_LOGO="yes"; shift ;;
+        --without-logo) HANDOFF_BLOCKED_FLAGS+=("--without-logo"); STARTUP_LOGO="no"; shift ;;
         -h|--help)
             echo "Usage: setup.sh [OPTIONS]"
             echo ""
@@ -2386,6 +2395,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# --path only makes sense with project scope. Checked BEFORE the TUI hand-off
+# (issue #40 review I1) so `./setup.sh --path DIR` still errors here rather than
+# being swallowed by the interactive branch below.
+if [ -n "$TARGET_PATH" ] && [ "$SCOPE" != "project" ]; then
+    echo "--path requires --scope project"; exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # Interactive front-end: hand off to the TUI (issue #40)
 # ---------------------------------------------------------------------------
@@ -2398,6 +2414,19 @@ done
 # absent, setup.sh cannot install it, so a TUI is impossible: print the flag
 # guide and exit 2 rather than half-install a guessed default.
 if [[ -z "$AGENT" ]] && ! $ALL; then
+    # The hand-off passes NO arguments and the TUI asks its own questions, so any
+    # run-shaping flag given here would be silently dropped (review I1) — e.g.
+    # `--without review` would install review anyway, contradicting the flag.
+    # Refuse instead of honoring nothing: name the flags and point at the two ways
+    # to make them apply — a concrete target, or a non-interactive run.
+    if [ "${#HANDOFF_BLOCKED_FLAGS[@]}" -gt 0 ]; then
+        echo ""
+        fail "These flags need an explicit target and cannot be forwarded to the interactive TUI:"
+        fail "  ${HANDOFF_BLOCKED_FLAGS[*]}"
+        info "Name the target so they apply: add --agent <name> (or --all),"
+        info "or re-run non-interactively (./setup.sh --non-interactive …) with those flags."
+        exit 2
+    fi
     if command -v gum >/dev/null 2>&1; then
         exec bash "$SCRIPT_DIR/setup-tui.sh"
     fi
@@ -2414,11 +2443,6 @@ if ! print_banner; then
     echo -e "${CYAN}${BOLD}║    Kurama — Full Setup          ║${NC}"
     echo -e "${CYAN}${BOLD}║   Detect • Install • Configure            ║${NC}"
     echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
-fi
-
-# --path only makes sense with project scope.
-if [ -n "$TARGET_PATH" ] && [ "$SCOPE" != "project" ]; then
-    echo "--path requires --scope project"; exit 1
 fi
 
 # O1: validate the project target (exists, git repo, not the Kurama repo) once.

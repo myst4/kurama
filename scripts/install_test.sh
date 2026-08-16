@@ -7442,6 +7442,26 @@ test_h_setup_interactive_without_gum_prints_guide_exits_2() {
     return 0
 }
 
+# The TUI hand-off takes NO arguments, so an underspecified run (no --agent/--all)
+# carrying a run-shaping flag would have that flag SILENTLY DROPPED. `--without
+# review` is the sharp case: the review group would install ANYWAY, contradicting
+# the explicit flag. setup.sh must REFUSE (non-zero, naming the flag) and install
+# nothing — never silently honor nothing (review fix I1).
+test_h_setup_interactive_refuses_unforwardable_flags() {
+    local out status=0
+    out="$(KURAMA_NO_BANNER=1 bash "$SETUP_SCRIPT" --without review 2>&1)" || status=$?
+    [ "$status" -ne 0 ] \
+        || { echo "'--without review' with no target exited 0 (silently honored nothing)"; return 1; }
+    printf '%s\n' "$out" | grep -q -- '--without' \
+        || { echo "refusal did not name the offending flag (got: $out)"; return 1; }
+    # It installed nothing — least of all the review group it was told to skip.
+    if [ -d "$HOME/.claude/skills" ]; then
+        echo "half-install: ~/.claude/skills created on a refused underspecified run"
+        return 1
+    fi
+    return 0
+}
+
 # ---- R3: jq-less logo de-registration is honest; doctor flags a dangling logo ----
 
 # Installing --with-logo (jq present) registers the plugin in tui.json AND records
@@ -7505,6 +7525,7 @@ test_h_doctor_flags_registered_but_missing_logo() {
 echo -e "${BOLD}UNIT-H (issue #40): simplification decisions${NC}"
 run_test "setup.sh interactive + gum hands off to the TUI" test_h_setup_interactive_with_gum_delegates_to_tui
 run_test "setup.sh interactive - gum prints the flag guide and exits 2" test_h_setup_interactive_without_gum_prints_guide_exits_2
+run_test "setup.sh refuses unforwardable flags (--without review) instead of honoring nothing" test_h_setup_interactive_refuses_unforwardable_flags
 run_test "uninstall.sh jq-less logo path leaves tui.json untouched" test_h_uninstall_jqless_logo_path_is_honest
 run_test "doctor.sh flags a registered-but-missing logo plugin" test_h_doctor_flags_registered_but_missing_logo
 
