@@ -5487,6 +5487,103 @@ run_test "an unregistered @@TOKEN@@ fails loudly, naming it" test_build_examples
 run_test "the committed templates rebuild byte-for-byte" test_build_examples_rebuilds_committed_outputs_byte_for_byte
 echo ""
 
+# ===== UNIT-C (issue #35) =====
+#
+# #35: plugin.json shipped two defects — homepage/repository still pointed at
+# the pre-rename Gentleman-Programming/agent-teams-lite repo instead of this
+# repo's real origin, and the "agents" array hand-listed only the 9 SDD-phase
+# agents, silently missing the 8 review-layer agents (the 4R lenses,
+# review-refuter, the two Judgment Day judges, and jd-fix-agent) that
+# setup.sh's install_native_agents() copies wholesale from
+# examples/claude-code/agents/*.md for --agent claude-code. The Claude Code
+# plugin schema's "agents" field takes file paths (a string or an array), not
+# a directory glob like "skills" gets, so the manifest list has to be
+# hand-enumerated — which means nothing stops it drifting from the on-disk
+# set the next time an agent is added or removed there. These tests close
+# that gap: one confirms the repository URL fix, the other two fail loudly
+# the moment examples/claude-code/agents/ and plugin.json's "agents" array
+# disagree, in either direction.
+
+# Print the sorted basenames of every *.md file directly under dir $1.
+list_agent_basenames() {
+    local dir="$1"
+    local f base
+    for f in "$dir"/*.md; do
+        [ -e "$f" ] || continue
+        base="${f##*/}"
+        echo "$base"
+    done | sort
+}
+
+# Print the sorted basenames referenced by plugin.json's "agents" array.
+# jq preferred; a portable grep fallback keeps this working without jq,
+# per the jq-optional invariant every script path here must honor.
+plugin_json_agent_basenames() {
+    local plugin_file="$1"
+    local paths
+    if command -v jq > /dev/null 2>&1; then
+        paths=$(jq -r '.agents[]?' "$plugin_file" 2>/dev/null)
+    else
+        paths=$(grep -oE '"\./examples/claude-code/agents/[A-Za-z0-9_-]+\.md"' "$plugin_file" \
+            | tr -d '"')
+    fi
+    local p
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        echo "${p##*/}"
+    done <<< "$paths" | sort
+}
+
+test_plugin_json_repository_url() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    assert_file_exists "$plugin_file" || return 1
+    if grep -q 'Gentleman-Programming/agent-teams-lite' "$plugin_file"; then
+        echo "plugin.json still points at the pre-rename Gentleman-Programming/agent-teams-lite repo"
+        return 1
+    fi
+    grep -q '"homepage": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'homepage' does not point at https://github.com/myst4/kurama"; return 1; }
+    grep -q '"repository": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'repository' does not point at https://github.com/myst4/kurama"; return 1; }
+    return 0
+}
+
+test_plugin_json_agents_match_disk_set() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local agents_dir="$REPO_DIR/examples/claude-code/agents"
+    assert_file_exists "$plugin_file" || return 1
+    assert_dir_exists "$agents_dir" || return 1
+
+    local disk_names manifest_names
+    disk_names=$(list_agent_basenames "$agents_dir")
+    manifest_names=$(plugin_json_agent_basenames "$plugin_file")
+
+    if [ -z "$disk_names" ]; then
+        echo "no *.md agent files found in $agents_dir"
+        return 1
+    fi
+    if [ -z "$manifest_names" ]; then
+        echo "plugin.json 'agents' field is empty or unparseable"
+        return 1
+    fi
+
+    assert_eq "$disk_names" "$manifest_names" \
+        "plugin.json 'agents' list has drifted from examples/claude-code/agents/ on disk"
+}
+
+test_plugin_json_agents_count_is_17() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local count
+    count=$(plugin_json_agent_basenames "$plugin_file" | wc -l | tr -d ' ')
+    assert_eq "17" "$count" "plugin.json must register all 17 Claude Code agents"
+}
+
+echo -e "${BOLD}UNIT-C (issue #35) — plugin.json manifest drift${NC}"
+run_test "plugin.json homepage/repository point at myst4/kurama" test_plugin_json_repository_url
+run_test "plugin.json 'agents' matches examples/claude-code/agents/ on disk" test_plugin_json_agents_match_disk_set
+run_test "plugin.json registers all 17 agents" test_plugin_json_agents_count_is_17
+echo ""
+
 # ============================================================================
 # Summary
 # ============================================================================
