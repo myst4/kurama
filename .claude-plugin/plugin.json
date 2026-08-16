@@ -6,8 +6,8 @@
     "name": "Gentleman Programming",
     "url": "https://github.com/Gentleman-Programming"
   },
-  "homepage": "https://github.com/Gentleman-Programming/agent-teams-lite",
-  "repository": "https://github.com/Gentleman-Programming/agent-teams-lite",
+  "homepage": "https://github.com/myst4/kurama",
+  "repository": "https://github.com/myst4/kurama",
   "license": "MIT",
   "keywords": [
     "spec-driven-development",
@@ -27,7 +27,15 @@
     "./examples/claude-code/agents/sdd-tasks.md",
     "./examples/claude-code/agents/sdd-apply.md",
     "./examples/claude-code/agents/sdd-verify.md",
-    "./examples/claude-code/agents/sdd-archive.md"
+    "./examples/claude-code/agents/sdd-archive.md",
+    "./examples/claude-code/agents/review-risk.md",
+    "./examples/claude-code/agents/review-readability.md",
+    "./examples/claude-code/agents/review-reliability.md",
+    "./examples/claude-code/agents/review-resilience.md",
+    "./examples/claude-code/agents/review-refuter.md",
+    "./examples/claude-code/agents/jd-judge-a.md",
+    "./examples/claude-code/agents/jd-judge-b.md",
+    "./examples/claude-code/agents/jd-fix-agent.md"
   ],
   "hooks": "./examples/claude-code/hooks/hooks.json"
 }
