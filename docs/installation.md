@@ -24,7 +24,7 @@ For manual installation or specific tools, see below.
 The recommended way to install is the **setup script** — it handles everything (skills + orchestrator prompts) in one step:
 
 ```bash
-./scripts/setup.sh        # Interactive: detects agents, asks which to set up
+./scripts/setup.sh        # Interactive gum TUI (no gum? use --all or --agent)
 ./scripts/setup.sh --all  # Auto-detect + install all (no prompts)
 ```
 
