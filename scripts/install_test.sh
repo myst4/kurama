@@ -23,6 +23,17 @@ HOOKS_SRC_DIR="$REPO_DIR/examples/claude-code/hooks"
 ARCHIVE_GATE_HOOK="$HOOKS_SRC_DIR/archive-gate.sh"
 WRITE_GUARD_HOOK="$HOOKS_SRC_DIR/orchestrator-write-guard.sh"
 
+# The shipped receipt library (issue #37) — the single copy the six scripts
+# source. The suite reads receipts through it (receipt_array_values below) and
+# UNIT-F exercises it directly, so the tests use the SAME parser the tooling does.
+KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"
+if [ ! -f "$KURAMA_LIB" ]; then
+    echo "install_test.sh: missing $KURAMA_LIB — incomplete clone." >&2
+    exit 1
+fi
+# shellcheck source=lib/receipt.sh disable=SC1091
+. "$KURAMA_LIB"
+
 # ============================================================================
 # Test state
 # ============================================================================
@@ -2459,43 +2470,14 @@ test_scope_project_uninstall_clean() {
 }
 
 # Print a flat JSON string array from a receipt, one entry per line (nothing when
-# the key is absent). Mirrors manifest_json_array (scripts/doctor.sh) so the test
-# reads receipts exactly the way uninstall/update/doctor do: jq when present, awk
-# fallback otherwise. That includes the opening rule below, which handles a
-# single-line "key": [] itself — a copy that only set inarr would walk past the
-# empty array into the NEXT key, which is the defect
-# test_nojq_receipt_parser_ignores_single_line_empty_array exists to catch. This
-# is the SEVENTH copy of that parser — setup.sh, install.sh, update.sh,
-# uninstall.sh, doctor.sh, setup-tui.sh and this file — and they are kept in sync
-# by convention, so an edit here belongs in the other six too (issue #37 tracks
-# the shared library that would end this).
+# the key is absent). Issue #37 ended the six byte-identical parser copies (and
+# this test's private seventh copy that was "kept in sync by convention"): this
+# now delegates to manifest_json_array from scripts/lib/receipt.sh, sourced above,
+# so the test reads receipts through the EXACT parser uninstall/update/doctor use —
+# including the single-line "key": [] handling
+# test_nojq_receipt_parser_ignores_single_line_empty_array guards.
 receipt_array_values() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq > /dev/null 2>&1; then
-        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null
-        return 0
-    fi
-    awk -v key="$key" '
-        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
-            tail = substr($0, index($0, "[") + 1)
-            if (tail ~ /\]/) {                       # array opens and closes on this line
-                sub(/\].*/, "", tail)
-                n = split(tail, parts, ",")
-                for (i = 1; i <= n; i++) {
-                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
-                    if (parts[i] != "") print parts[i]
-                }
-                next
-            }
-            inarr = 1; next
-        }
-        inarr && /\]/ { inarr = 0 }
-        inarr {
-            line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
-            gsub(/,$/, "", line); gsub(/"/, "", line)
-            if (line != "") print line
-        }' "$manifest"
+    manifest_json_array "$1" "$2"
 }
 
 # True when $2 is an exact line of the newline-separated list $1.
@@ -4293,6 +4275,9 @@ test_install_incomplete_checkout_aborts_early() {
     local fake="$TEST_TMPDIR/partial-repo"
     mkdir -p "$fake/scripts"
     cp "$INSTALL_SCRIPT" "$fake/scripts/install.sh"
+    # install.sh sources scripts/lib/receipt.sh (issue #37); ship it so the abort
+    # under test is the missing examples/, not the missing lib.
+    cp -R "$SCRIPT_DIR/lib" "$fake/scripts/lib"
     ln -s "$REPO_DIR/skills" "$fake/skills"
     cp "$REPO_DIR/VERSION" "$fake/VERSION"
 
@@ -6346,6 +6331,9 @@ stage_kurama_clone_files() {
     local dest="$1"
     mkdir -p "$dest/scripts" "$dest/docs" || return 1
     cp "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/banner.sh" "$dest/scripts/" || return 1
+    # setup.sh sources scripts/lib/receipt.sh (issue #37) and aborts without it,
+    # so a staged clone must ship the lib exactly as a real clone does.
+    cp -R "$SCRIPT_DIR/lib" "$dest/scripts/lib" || return 1
     cp -R "$REPO_DIR/examples" "$REPO_DIR/skills" "$dest/" || return 1
     cp "$REPO_DIR/VERSION" "$dest/VERSION" || return 1
     printf '# staged docs\n' > "$dest/docs/index.md" || return 1
@@ -6997,6 +6985,169 @@ run_test "the preview re-splits, spaces and all" test_tui_preview_quotes_a_path_
 run_test "the maintenance preview is absolute too" test_tui_maintenance_preview_is_absolute
 run_test "a profile name is repaired or refused" test_tui_profile_name_is_repaired_or_refused
 run_test "the repaired name is one setup.sh accepts" test_tui_repaired_profile_name_is_one_setup_accepts
+
+echo ""
+
+# ===== UNIT-F (issue #37) =====
+#
+# The six byte-identical receipt-parser copies (and this suite's private seventh
+# copy) are gone: scripts/lib/receipt.sh is the one implementation, sourced above.
+# These tests exercise that single lib directly — the parser over the historical
+# cases (the PR #13 single-line empty-array bug included), the new receiptSchema
+# field, manifest_tools' legacy/modern gate, and skills_path — plus an integration
+# check that every one of the six scripts actually sources the lib and fails loud
+# without it. The old "kept in sync by convention" machinery is retired.
+
+# --- (a) the single lib parser, parametrized over the historical cases --------
+
+test_lib_manifest_json_array_reads_multi_element() {
+    local m="$TEST_TMPDIR/r.json"
+    printf '{\n  "files": [\n    "a/SKILL.md",\n    "b/SKILL.md"\n  ]\n}\n' > "$m"
+    assert_eq "a/SKILL.md
+b/SKILL.md" "$(manifest_json_array "$m" files)" "multi-element files[]" || return 1
+    return 0
+}
+
+test_lib_manifest_json_array_single_line_empty_yields_nothing() {
+    # The PR #13 defect, driven straight at the lib: a single-line "files": []
+    # must yield NOTHING and must not leak the next key (settings[]) — the exact
+    # read uninstall.sh drives rm from.
+    local m="$TEST_TMPDIR/r.json"
+    printf '{\n  "files": [],\n  "settings": [\n    ".claude/settings.json"\n  ]\n}\n' > "$m"
+    assert_eq "" "$(manifest_json_array "$m" files)" "empty files[] must yield nothing" || return 1
+    assert_eq ".claude/settings.json" "$(manifest_json_array "$m" settings)" \
+        "settings[] must still read after an empty files[]" || return 1
+    return 0
+}
+
+test_lib_manifest_json_array_single_line_populated() {
+    local m="$TEST_TMPDIR/r.json"
+    printf '{\n  "tools": ["claude-code", "opencode"]\n}\n' > "$m"
+    assert_eq "claude-code
+opencode" "$(manifest_json_array "$m" tools)" "single-line populated array" || return 1
+    return 0
+}
+
+test_lib_manifest_json_array_absent_key_yields_nothing() {
+    local m="$TEST_TMPDIR/r.json"
+    printf '{\n  "files": [\n    "a"\n  ]\n}\n' > "$m"
+    assert_eq "" "$(manifest_json_array "$m" nope)" "absent key must yield nothing" || return 1
+    return 0
+}
+
+test_lib_manifest_field_reads_and_missing() {
+    local m="$TEST_TMPDIR/r.json"
+    printf '{\n  "version": "4.2.0",\n  "tool": "claude-code"\n}\n' > "$m"
+    assert_eq "4.2.0" "$(manifest_field "$m" version)" "scalar field read" || return 1
+    assert_eq "" "$(manifest_field "$m" nope)" "absent scalar field is empty" || return 1
+    return 0
+}
+
+test_lib_receipt_schema_present_absent_and_nonnumeric() {
+    local m="$TEST_TMPDIR/r.json"
+    printf '{\n  "receiptSchema": 1,\n  "tool": "claude-code"\n}\n' > "$m"
+    assert_eq "1" "$(receipt_schema "$m")" "integer receiptSchema is read" || return 1
+    printf '{\n  "tool": "claude-code"\n}\n' > "$m"
+    assert_eq "0" "$(receipt_schema "$m")" "a pre-#37 receipt reports schema 0" || return 1
+    assert_eq "0" "$(receipt_schema "$TEST_TMPDIR/missing.json")" "a missing receipt reports 0" || return 1
+    return 0
+}
+
+test_lib_manifest_tools_modern_and_legacy() {
+    local m="$TEST_TMPDIR/r.json"
+    # Modern (receiptSchema >= 1): tools[] is authoritative.
+    printf '{\n  "receiptSchema": 1,\n  "tool": "claude-code",\n  "tools": [\n    "claude-code",\n    "opencode"\n  ]\n}\n' > "$m"
+    assert_eq "claude-code
+opencode" "$(manifest_tools "$m")" "modern receipt lists tools[]" || return 1
+    # Legacy (no receiptSchema, no tools[]): frozen scalar-"tool" fallback.
+    printf '{\n  "version": "3.0.0",\n  "tool": "Claude Code"\n}\n' > "$m"
+    assert_eq "Claude Code" "$(manifest_tools "$m")" "legacy receipt falls back to scalar tool" || return 1
+    return 0
+}
+
+test_lib_skills_path_global_project_and_omp() {
+    unset PI_CODING_AGENT_DIR  # a preset relocation would change the omp default
+    assert_eq "$HOME/.claude/skills" "$(skills_path claude-code global)" "claude-code global" || return 1
+    assert_eq "$HOME/.config/opencode/skills" "$(skills_path opencode global)" "opencode global" || return 1
+    assert_eq "$HOME/.codex/skills" "$(skills_path codex global)" "codex global" || return 1
+    assert_eq "$HOME/.pi/agent/skills" "$(skills_path pi global)" "pi global" || return 1
+    assert_eq "$HOME/.omp/agent/skills" "$(skills_path omp global)" "omp global default" || return 1
+    assert_eq "" "$(skills_path bogus global)" "unknown harness is empty" || return 1
+    assert_eq "/repo/.pi/skills" "$(skills_path pi project /repo)" "pi project scope" || return 1
+    assert_eq "/repo/.claude/skills" "$(skills_path claude-code project /repo)" "claude-code project scope" || return 1
+    local out
+    out="$(PI_CODING_AGENT_DIR=/custom/omp skills_path omp global)"
+    assert_eq "/custom/omp/skills" "$out" "omp honors PI_CODING_AGENT_DIR" || return 1
+    return 0
+}
+
+# --- (b) integration: every script sources the one lib, and fails loud without it
+
+# Every script must both SOURCE the lib and carry the missing-lib GUARD — grepping
+# the source line alone would let someone delete the guard from one script (the
+# deletion path is uninstall.sh) and stay green while a partial clone runs it with
+# an undefined parser.
+test_lib_all_six_scripts_source_it() {
+    local s missing=""
+    for s in setup.sh install.sh uninstall.sh update.sh doctor.sh setup-tui.sh; do
+        # shellcheck disable=SC2016  # matching the literal source lines as written
+        grep -qF 'KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"' "$SCRIPT_DIR/$s" \
+            && grep -qF '[ ! -f "$KURAMA_LIB" ]' "$SCRIPT_DIR/$s" \
+            && grep -qF '. "$KURAMA_LIB"' "$SCRIPT_DIR/$s" \
+            || missing="$missing $s"
+    done
+    [ -z "$missing" ] || { echo "scripts missing the source line or the guard:$missing"; return 1; }
+    return 0
+}
+
+test_lib_missing_aborts_loud() {
+    # A partial clone: EACH script without its lib sibling must abort non-zero and
+    # name the lib, never run on with an undefined parser. The guard sits above arg
+    # parsing, so --help trips it. Looped over all six — the deletion path
+    # (uninstall.sh) is exactly the one a single-script test would miss.
+    local nolib="$TEST_TMPDIR/nolib" s output status
+    for s in setup.sh install.sh uninstall.sh update.sh doctor.sh setup-tui.sh; do
+        rm -rf "$nolib"; mkdir -p "$nolib"
+        cp "$SCRIPT_DIR/$s" "$nolib/$s"
+        status=0
+        output=$(bash "$nolib/$s" --help 2>&1) || status=$?
+        [ "$status" -ne 0 ] || { echo "$s: a missing lib/receipt.sh must abort non-zero"; return 1; }
+        printf '%s\n' "$output" | grep -qF 'lib/receipt.sh' || {
+            echo "$s: the abort never names the missing lib:"; printf '%s\n' "$output" | tail -3; return 1; }
+    done
+    return 0
+}
+
+test_lib_truncated_lib_aborts_loud() {
+    # A present-but-empty lib (truncated download / bad merge) leaves the parser
+    # undefined. Each script must catch that too — via the command -v guard after
+    # the source — instead of running on with a missing manifest_json_array.
+    local dir="$TEST_TMPDIR/emptylib" s output status
+    for s in setup.sh install.sh uninstall.sh update.sh doctor.sh setup-tui.sh; do
+        rm -rf "$dir"; mkdir -p "$dir/lib"
+        cp "$SCRIPT_DIR/$s" "$dir/$s"
+        : > "$dir/lib/receipt.sh"
+        status=0
+        output=$(bash "$dir/$s" --help 2>&1) || status=$?
+        [ "$status" -ne 0 ] || { echo "$s: an empty lib must abort non-zero"; return 1; }
+        printf '%s\n' "$output" | grep -qF 'did not define the receipt parser' || {
+            echo "$s: the abort never flags the undefined parser:"; printf '%s\n' "$output" | tail -3; return 1; }
+    done
+    return 0
+}
+
+echo -e "${BOLD}UNIT-F (issue #37) — shared receipt library${NC}"
+run_test "lib parser reads a multi-element array" test_lib_manifest_json_array_reads_multi_element
+run_test "lib parser: single-line empty array yields nothing, no leak" test_lib_manifest_json_array_single_line_empty_yields_nothing
+run_test "lib parser reads a single-line populated array" test_lib_manifest_json_array_single_line_populated
+run_test "lib parser: an absent key yields nothing" test_lib_manifest_json_array_absent_key_yields_nothing
+run_test "lib reads a scalar field, empty when absent" test_lib_manifest_field_reads_and_missing
+run_test "receipt_schema reads the int, 0 when absent/missing" test_lib_receipt_schema_present_absent_and_nonnumeric
+run_test "manifest_tools: modern tools[] and legacy scalar fallback" test_lib_manifest_tools_modern_and_legacy
+run_test "skills_path: global, project, and omp relocation" test_lib_skills_path_global_project_and_omp
+run_test "all six scripts source + guard scripts/lib/receipt.sh" test_lib_all_six_scripts_source_it
+run_test "all six abort loud when lib/receipt.sh is missing" test_lib_missing_aborts_loud
+run_test "all six abort loud when lib/receipt.sh is empty/truncated" test_lib_truncated_lib_aborts_loud
 
 echo ""
 

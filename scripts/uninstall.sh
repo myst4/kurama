@@ -15,6 +15,21 @@ set -euo pipefail
 #   ./uninstall.sh --agent codex --dry-run           # Show what would be removed
 # ============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Shared receipt library — the single copy of the receipt parser and helpers
+# (issue #37). SCRIPT_DIR resolves to the clone, so this always finds it; fail
+# loud on a partial clone rather than running with an undefined parser — the
+# parser this script drives `rm` from.
+KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"
+if [ ! -f "$KURAMA_LIB" ]; then
+    echo "kurama: missing $KURAMA_LIB — incomplete clone. Re-clone or pull the full repo." >&2
+    exit 1
+fi
+# shellcheck source=lib/receipt.sh disable=SC1091
+. "$KURAMA_LIB"
+command -v manifest_json_array >/dev/null 2>&1 || { echo "kurama: scripts/lib/receipt.sh is present but did not define the receipt parser" >&2; exit 1; }
+
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
 # Orchestrator marker pair — the block setup.sh merges into a shared prompt file.
@@ -61,105 +76,22 @@ print_info() { echo -e "  ${CYAN}→${NC} $1"; }
 # Path resolution (kept in sync with install.sh get_tool_path)
 # ============================================================================
 
+# The five harness skills paths come from the shared skills_path() map (issue
+# #37, which honors PI_CODING_AGENT_DIR for omp); project-local stays here.
 get_tool_path() {
     local tool="$1"
     case "$tool" in
-        claude-code)   echo "$HOME/.claude/skills" ;;
-        opencode)      echo "$HOME/.config/opencode/skills" ;;
-        codex)         echo "$HOME/.codex/skills" ;;
-        pi)            echo "$HOME/.pi/agent/skills" ;;
-        # PI_CODING_AGENT_DIR relocates omp's user base; honor it so uninstall
-        # removes from the same place setup installed to.
-        omp)           echo "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
         project-local) echo "./skills" ;;
-        *)             echo "" ;;
+        *)             skills_path "$tool" ;;
     esac
 }
 
 # ============================================================================
-# Manifest parsing
+# Manifest parsing — manifest_json_array / manifest_field / manifest_files /
+# manifest_tools now live in scripts/lib/receipt.sh (issue #37), sourced above.
+# uninstall.sh drives `rm` from what those emit, which is exactly why the parser
+# is now a single shared copy that the empty-array fix can never miss again.
 # ============================================================================
-
-# Emit each string element of a named JSON array (files, settings, pi_packages)
-# from an install manifest. Uses jq when available, otherwise a portable awk
-# fallback that reads the one-element-per-line arrays setup.sh/install.sh write.
-# Mirrors manifest_json_array in doctor.sh/update.sh/install.sh (and setup.sh's
-# receipt_json_array / setup-tui.sh's copy) so every script parses a receipt the
-# same way.
-#
-# Why the opening rule handles the whole array itself instead of just setting
-# inarr: for a single-line "key": [] the array closes on the line that opened it,
-# so setting inarr and skipping to the next line hands the closing-bracket check
-# a bracket that never arrives. The parser then runs to the end of the receipt,
-# printing the NEXT key's declaration line as if it were an element, followed by
-# the elements that belong to that other key. This function drives rm from
-# files[] below, so an empty files[] would migrate .claude/settings.json out of
-# settings[] and delete the file outright instead of stripping its kurama hooks
-# block. The !inarr guard is the same defense one level up: without it a later
-# "<key>" nested elsewhere in the receipt re-opens an array already closed.
-manifest_json_array() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null
-        return 0
-    fi
-    awk -v key="$key" '
-        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
-            tail = substr($0, index($0, "[") + 1)
-            if (tail ~ /\]/) {                       # array opens and closes on this line
-                sub(/\].*/, "", tail)
-                n = split(tail, parts, ",")
-                for (i = 1; i <= n; i++) {
-                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
-                    if (parts[i] != "") print parts[i]
-                }
-                next
-            }
-            inarr = 1; next
-        }
-        inarr && /\]/ { inarr = 0 }
-        inarr {
-            line = $0
-            gsub(/^[[:space:]]+/, "", line)
-            gsub(/[[:space:]]+$/, "", line)
-            gsub(/,$/, "", line)
-            gsub(/"/, "", line)
-            if (line != "") print line
-        }
-    ' "$manifest"
-}
-
-# Back-compat wrapper: the "files" array.
-manifest_files() {
-    manifest_json_array "$1" "files"
-}
-
-# Read a manifest scalar field ("tool", "scope", "version").
-manifest_field() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '.[$k] // ""' "$manifest" 2>/dev/null
-        return 0
-    fi
-    awk -v key="$key" '
-        match($0, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"") {
-            s = substr($0, RSTART, RLENGTH)
-            sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
-        }' "$manifest"
-}
-
-# Every harness recorded in the receipt. A project-scope receipt is shared by
-# every harness installed into that repo, so it lists them all in "tools"; the
-# flat arrays below are the union across them. Receipts written by v6 and by the
-# legacy install.sh have no "tools", so the effective list is the single "tool".
-manifest_tools() {
-    local manifest="$1" tools
-    tools="$(manifest_json_array "$manifest" "tools" | awk 'NF')"
-    [ -n "$tools" ] || tools="$(manifest_field "$manifest" "tool")"
-    printf '%s\n' "$tools"
-}
 
 # O3: surgically strip the Kurama PreToolUse hooks block (entries whose command
 # contains "hooks/kurama/") from a settings.json, leaving every other hook and

@@ -19,7 +19,20 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 SKILLS_SRC="$REPO_DIR/skills"
 EXAMPLES_DIR="$REPO_DIR/examples"
 MANIFEST_FILE="$SKILLS_SRC/manifest.json"
+# shellcheck disable=SC2034  # read by read_version() in scripts/lib/receipt.sh
 VERSION_FILE="$REPO_DIR/VERSION"
+
+# Shared receipt library — the single copy of the receipt parser and helpers
+# (issue #37). SCRIPT_DIR resolves to the clone, so this always finds it; fail
+# loud on a partial clone rather than running with an undefined parser.
+KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"
+if [ ! -f "$KURAMA_LIB" ]; then
+    echo "kurama: missing $KURAMA_LIB — incomplete clone. Re-clone or pull the full repo." >&2
+    exit 1
+fi
+# shellcheck source=lib/receipt.sh disable=SC1091
+. "$KURAMA_LIB"
+command -v manifest_json_array >/dev/null 2>&1 || { echo "kurama: scripts/lib/receipt.sh is present but did not define the receipt parser" >&2; exit 1; }
 
 # Name of the per-target install manifest — identical to install.sh so
 # scripts/uninstall.sh can remove exactly what a setup.sh install wrote.
@@ -136,7 +149,7 @@ detect_os() {
     esac
 }
 
-home_dir() { echo "$HOME"; }
+# home_dir() now lives in scripts/lib/receipt.sh (issue #37).
 
 # ============================================================================
 # Colors
@@ -213,18 +226,9 @@ check_agent() {
 # Path Resolution
 # ============================================================================
 
+# Global skills dir for a harness — the shared skills_path() map (issue #37).
 get_skills_path() {
-    local agent="$1"
-    local home
-    home="$(home_dir)"
-
-    case "$agent" in
-        claude-code)  echo "$home/.claude/skills" ;;
-        opencode)     echo "$home/.config/opencode/skills" ;;
-        codex)        echo "$home/.codex/skills" ;;
-        pi)           echo "$home/.pi/agent/skills" ;;
-        omp)          echo "$(omp_agent_base)/skills" ;;
-    esac
+    skills_path "$1" global
 }
 
 # omp resolves its user base from PI_CODING_AGENT_DIR when set, else ~/.omp/agent
@@ -284,11 +288,7 @@ get_example_file() {
 scoped_skills_path() {
     local agent="$1"
     if [ "$SCOPE" = "project" ]; then
-        case "$agent" in
-            pi)  echo "$TARGET_PATH/.pi/skills" ;;
-            omp) echo "$TARGET_PATH/.omp/skills" ;;
-            *)   echo "$TARGET_PATH/.claude/skills" ;;
-        esac
+        skills_path "$agent" project "$TARGET_PATH"
     else
         get_skills_path "$agent"
     fi
@@ -467,27 +467,9 @@ validate_project_target() {
 # ============================================================================
 # Version + manifest helpers (kept in sync with install.sh so both installers
 # resolve the SAME default skill set and write the SAME install receipt)
+#
+# read_version / read_commit now live in scripts/lib/receipt.sh (issue #37).
 # ============================================================================
-
-read_version() {
-    local v="unknown"
-    if [ -f "$VERSION_FILE" ]; then
-        IFS= read -r v < "$VERSION_FILE" || true
-        [ -n "$v" ] || v="unknown"
-    fi
-    printf '%s' "$v"
-}
-
-# Short commit SHA of the Kurama repo this setup runs from, used to stamp the
-# receipt (V3). Empty when git is unavailable or HEAD is missing; the caller then
-# omits the "commit" field so it never breaks a jq-less parser or a git-less host.
-read_commit() {
-    local c=""
-    if command -v git >/dev/null 2>&1; then
-        c="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-    fi
-    printf '%s' "$c"
-}
 
 make_writable() {
     chmod u+w "$1" 2>/dev/null || true
@@ -548,48 +530,9 @@ _json_array() {
         }'
 }
 
-# Read back a receipt we (or a previous run) wrote. Mirrors manifest_field /
-# manifest_json_array in doctor.sh/update.sh/uninstall.sh so every script parses
-# a receipt the same way: jq when available, portable awk otherwise.
-receipt_field() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '.[$k] // ""' "$manifest" 2>/dev/null; return 0
-    fi
-    awk -v key="$key" '
-        match($0, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"") {
-            s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
-        }' "$manifest"
-}
-
-receipt_json_array() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null; return 0
-    fi
-    awk -v key="$key" '
-        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
-            tail = substr($0, index($0, "[") + 1)
-            if (tail ~ /\]/) {                       # array opens and closes on this line
-                sub(/\].*/, "", tail)
-                n = split(tail, parts, ",")
-                for (i = 1; i <= n; i++) {
-                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
-                    if (parts[i] != "") print parts[i]
-                }
-                next
-            }
-            inarr = 1; next
-        }
-        inarr && /\]/ { inarr = 0 }
-        inarr {
-            line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
-            gsub(/,$/, "", line); gsub(/"/, "", line)
-            if (line != "") print line
-        }' "$manifest"
-}
+# receipt_field / receipt_json_array (setup.sh's historical names for
+# manifest_field / manifest_json_array) now live in scripts/lib/receipt.sh as
+# aliases (issue #37), so the call sites below read unchanged.
 
 # Union of two newline lists: blanks dropped, duplicates dropped, insertion
 # order preserved (the first list's entries keep their positions, the second
@@ -643,15 +586,11 @@ finalize_receipt() {
     version="$(read_version)"
     commit="$(read_commit)"
 
-    # tools[]: every harness recorded here. v6 and legacy install.sh receipts only
-    # carry the scalar "tool", so fall back to it; the current tool goes last and
-    # stays the value of "tool".
+    # tools[]: every harness already recorded here. The v6/legacy scalar-"tool"
+    # fallback is manifest_tools' single decision now (issue #37), not re-sniffed.
+    # The current tool goes last and stays the value of "tool".
     local prev_tools
-    prev_tools="$(receipt_json_array "$manifest_path" "tools")"
-    if [ -z "$prev_tools" ]; then
-        prev_tools="$(receipt_field "$manifest_path" "tool")"
-    fi
-    prev_tools="$(printf '%s\n' "$prev_tools" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
+    prev_tools="$(manifest_tools "$manifest_path" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
 
     local tools files settings pi_packages engram_mcp prompts tui_plugins opencode_configs
     tools="$(_merge_lines "$prev_tools" "$RECEIPT_TOOL")"
@@ -686,6 +625,7 @@ finalize_receipt() {
     {
         printf '{\n'
         printf '  "name": "kurama",\n'
+        printf '  "receiptSchema": %s,\n' "$RECEIPT_SCHEMA"
         printf '  "version": "%s",\n' "$version"
         [ -n "$commit" ] && printf '  "commit": "%s",\n' "$commit"
         printf '  "tool": "%s",\n' "$RECEIPT_TOOL"
