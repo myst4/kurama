@@ -7532,6 +7532,54 @@ run_test "doctor.sh flags a registered-but-missing logo plugin" test_h_doctor_fl
 echo ""
 
 # ============================================================================
+# ===== UNIT-I (issue #63) =====
+# Batch integration follow-ups: two #41-class fail-loud gaps the collapse/jq work
+# left behind, plus two regression pins the per-task reviewers punted to the final
+# review. Two are code fixes (setup.sh _shared guard, uninstall.sh jq-present
+# unparseable-config refusal); two pin behaviour that is already correct so a
+# revert cannot slip back in green.
+# ============================================================================
+
+test_i_setup_missing_shared_fails_loud_before_write() {
+    # #63: install.sh's pre-#38 validate_source checked `[ ! -d "$SKILLS_SRC/_shared" ]`;
+    # the #38 collapse ported the examples/ and manifest checks into setup.sh but dropped
+    # _shared. skills/_shared is load-bearing — every target installs it and all 20 default
+    # SKILL.md files reference _shared/* — yet install_skills copies it only behind
+    # `if [ -d "$shared_src" ]`, so a clone with skills/ but no _shared/ silently skipped it,
+    # still printed "Done!" and wrote a receipt for a PARTIAL install: exit 0 where it must
+    # be exit 1. Same #41 fail-loud class as the examples/ gap pinned in UNIT-G, and _shared
+    # is more load-bearing (all targets, not just OpenCode).
+    local clone="$TEST_TMPDIR/staged-clone-no-shared"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+    rm -rf "$clone/skills/_shared" || { echo "could not remove skills/_shared from the staged clone"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "setup.sh installed from a clone missing skills/_shared instead of aborting"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'Missing: skills/_shared' || {
+        echo "the abort never names the missing skills/_shared path:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    local receipt="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if [ -e "$receipt" ]; then
+        echo "setup.sh wrote a receipt for a partial install: $receipt"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-I (issue #63): batch integration follow-ups${NC}"
+run_test "setup.sh fails loud on a clone missing skills/_shared (no partial receipt)" test_i_setup_missing_shared_fails_loud_before_write
+
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 
