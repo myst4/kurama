@@ -15,8 +15,8 @@
 Kurama turns any capable AI coding assistant into a disciplined
 **Spec-Driven Development (SDD)** team. It ships as **24 portable Markdown skills**
 (all installed by default — the optional `tdd` and `kanban-github` modules are included but
-removable with `install.sh --without tdd` / `install.sh --without optional`; module
-selection is an `install.sh` flag, `setup.sh` always installs the default set)
+removable with `setup.sh --without tdd` / `setup.sh --without optional`; module
+selection is a `setup.sh` flag, and with no `--with`/`--without` it installs the default set)
 plus a set of shared convention files, and a thin
 *delegate-only orchestrator* prompt. The orchestrator never writes code itself — it coordinates a pipeline of
 focused sub-agents, each running in a **fresh context window**, that explore,
@@ -103,13 +103,13 @@ yourself, use the installer scripts and then append the orchestrator prompt from
 `examples/<your-agent>/` as printed in the "Next step" notice:
 
 ```bash
-./scripts/install.sh        # interactive menu, or: --agent <name>
+./scripts/setup.sh          # interactive detect + install, or: --agent <name>
 ```
 
-It is not a drop-in replacement for `setup.sh`: on a target `setup.sh` already
-manages, `install.sh` refuses and points you at `./scripts/update.sh`, rather
-than overwriting a receipt that records hooks, agents and orchestrator blocks it
-never wrote.
+`scripts/install.sh` still works as a thin compatibility wrapper — it maps its old
+flags onto `setup.sh` and forwards (issue #38), so there is now one install path
+with all capabilities and a single receipt writer. Prefer calling `setup.sh`
+directly.
 
 Then, inside your project:
 
@@ -133,18 +133,19 @@ skills, agents, hooks, and MCP registrations included.
 
 All 24 default skills, grouped by role. Every one is a single `SKILL.md` that any
 file-reading agent can load. The optional `tdd` and `kanban-github` modules ship
-installed and can be excluded with `install.sh --without tdd` /
-`install.sh --without optional`; installing either never activates it — both stay
+installed and can be excluded with `setup.sh --without tdd` /
+`setup.sh --without optional`; installing either never activates it — both stay
 separate per-project switches.
 
-> **Module selection is an `install.sh` flag.** `--with`/`--without` are implemented
-> by `scripts/install.sh` only. `scripts/setup.sh` always installs the **default**
-> skill set and rejects those flags with `Unknown option`. Use `install.sh` when you
-> want a non-default skill selection, then wire the orchestrator prompt yourself.
+> **Module selection is a `setup.sh` flag.** `--with`/`--without` are implemented by
+> `scripts/setup.sh`. With no `--with`/`--without` it installs the **default** skill
+> set; pass them for a non-default selection (e.g. `setup.sh --without review` for a
+> full setup without the review lenses). `scripts/install.sh` forwards these flags to
+> `setup.sh` for backward compatibility.
 
 **No language knowledge is installed by default.** Kurama is stack-agnostic: it knows
 the shape of the workflow, never the values of a specific ecosystem. Per-language
-pattern skills live in the opt-in `lang` group (OFF by default; `install.sh --with lang`
+pattern skills live in the opt-in `lang` group (OFF by default; `setup.sh --with lang`
 adds `go-testing`), and your own language skills reach sub-agents through the
 [skill registry](#the-skills) without touching the harness. The project's test and
 build commands are **asked at `/sdd-init`** and recorded in config — never guessed from
@@ -209,13 +210,13 @@ by the diff can block, and only `BLOCKER`/`CRITICAL` gate. See
 
 | Skill | Role |
 |-------|------|
-| `tdd` | Language-agnostic RED → GREEN → REFACTOR contract, anti-patterns, and per-task evidence format. Installed by default; remove the module with `install.sh --without tdd`. Installing it never activates TDD — that is a separate explicit per-project switch (see [docs/tdd.md](docs/tdd.md)). |
+| `tdd` | Language-agnostic RED → GREEN → REFACTOR contract, anti-patterns, and per-task evidence format. Installed by default; remove the module with `setup.sh --without tdd`. Installing it never activates TDD — that is a separate explicit per-project switch (see [docs/tdd.md](docs/tdd.md)). |
 
 ### Kanban module (installed by default, activation opt-in)
 
 | Skill | Role |
 |-------|------|
-| `kanban-github` | Optional GitHub Projects (v2) board sync: each issue the harness works on is a card the orchestrator moves through Backlog → Ready → In Progress → In Review → Done as the SDD cycle crosses phase boundaries. Installed by default (manifest group `optional`; remove with `install.sh --without optional`). Installing it never activates the board — activation is opt-in per project via `kanban.enabled`, and **requires a configured GitHub CLI (`gh`)** to turn on. Failed board updates are WARNINGs that never block the cycle. See [docs/kanban-github.md](docs/kanban-github.md). |
+| `kanban-github` | Optional GitHub Projects (v2) board sync: each issue the harness works on is a card the orchestrator moves through Backlog → Ready → In Progress → In Review → Done as the SDD cycle crosses phase boundaries. Installed by default (manifest group `optional`; remove with `setup.sh --without optional`). Installing it never activates the board — activation is opt-in per project via `kanban.enabled`, and **requires a configured GitHub CLI (`gh`)** to turn on. Failed board updates are WARNINGs that never block the cycle. See [docs/kanban-github.md](docs/kanban-github.md). |
 
 Shared behavior the SDD skills rely on lives in
 [`skills/_shared/`](skills/_shared/) — the persistence contract, the Engram and

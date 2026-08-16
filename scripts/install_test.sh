@@ -389,18 +389,21 @@ test_codex_skill_count() {
 # ============================================================================
 
 test_install_project_local() {
+    # #38: install.sh is now a wrapper; --agent project-local maps to a setup.sh
+    # project trial rooted at the cwd (which must be a git repo), so the skills land
+    # under the repo's .claude/skills rather than a bare ./skills.
     local project="$TEST_TMPDIR/local-project"
-    mkdir -p "$project"
+    make_git_repo "$project"
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
-    assert_all_skills_installed "$project/skills"
+    assert_all_skills_installed "$project/.claude/skills"
 }
 
 test_project_local_skill_count() {
     local project="$TEST_TMPDIR/local-project"
-    mkdir -p "$project"
+    make_git_repo "$project"
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
     local count
-    count=$(find "$project/skills" -name "SKILL.md" | wc -l | tr -d ' ')
+    count=$(find "$project/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
     assert_eq "24" "$count" "Expected exactly 24 skills for project-local"
 }
 
@@ -409,16 +412,20 @@ test_project_local_skill_count() {
 # ============================================================================
 
 test_custom_path() {
+    # #38: --agent custom --path DIR maps to a setup.sh project trial rooted at DIR
+    # (a git repo); skills land under DIR/.claude/skills.
     local custom="$TEST_TMPDIR/custom-skills"
+    make_git_repo "$custom"
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
-    assert_all_skills_installed "$custom"
+    assert_all_skills_installed "$custom/.claude/skills"
 }
 
 test_custom_path_skill_count() {
     local custom="$TEST_TMPDIR/custom-skills"
+    make_git_repo "$custom"
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     local count
-    count=$(find "$custom" -name "SKILL.md" | wc -l | tr -d ' ')
+    count=$(find "$custom/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
     assert_eq "24" "$count" "Expected exactly 24 skills for custom path"
 }
 
@@ -547,14 +554,14 @@ test_opencode_command_content_matches_source() {
 # ============================================================================
 
 test_output_shows_skill_names() {
+    # #38: install.sh delegates to setup.sh, whose output reports the count and the
+    # skills directory rather than echoing every individual skill name. Assert the
+    # delegated install names what it did: the agent, the count, and the skills path.
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    for skill in "${EXPECTED_SKILLS[@]}"; do
-        echo "$output" | grep -q "$skill" || {
-            echo "Output missing skill name: $skill"
-            return 1
-        }
-    done
+    echo "$output" | grep -q "claude-code" || { echo "Output missing the agent name"; return 1; }
+    echo "$output" | grep -q "skills installed" || { echo "Output missing the skills-installed count line"; return 1; }
+    echo "$output" | grep -q ".claude/skills" || { echo "Output missing the skills directory"; return 1; }
     return 0
 }
 
@@ -577,10 +584,12 @@ test_output_shows_install_count() {
 }
 
 test_output_shows_next_step() {
+    # setup.sh's summary points the user at the next action (open a project and run
+    # /sdd-init) rather than install.sh's old "Next step" banner (#38).
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "Next step" || {
-        echo "Output missing 'Next step' guidance"
+    echo "$output" | grep -q "/sdd-init" || {
+        echo "Output missing the /sdd-init next-step guidance"
         return 1
     }
 }
@@ -605,10 +614,12 @@ test_os_detection_runs() {
 }
 
 test_header_shows_detected_os() {
+    # #38: install.sh no longer prints its own "Detected: <os>" header — it delegates
+    # to setup.sh, whose header/summary frames the run instead.
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "Detected:" || {
-        echo "Output missing 'Detected:' OS label"
+    echo "$output" | grep -qiE "Setting up|Setup Complete|Kurama" || {
+        echo "Output missing the setup.sh run header"
         return 1
     }
 }
@@ -647,9 +658,12 @@ test_overwrite_stale_skill() {
 }
 
 test_nested_custom_path() {
-    local deep="$TEST_TMPDIR/a/b/c/d/skills"
+    # A deeply nested custom target still works: setup.sh installs into the repo's
+    # .claude/skills under the deep path (#38).
+    local deep="$TEST_TMPDIR/a/b/c/d/repo"
+    make_git_repo "$deep"
     bash "$INSTALL_SCRIPT" --agent custom --path "$deep" > /dev/null 2>&1
-    assert_all_skills_installed "$deep"
+    assert_all_skills_installed "$deep/.claude/skills"
 }
 
 # ============================================================================
@@ -812,8 +826,12 @@ test_no_broken_opencode_json_reference() {
 }
 
 test_opencode_json_reference_fixed() {
-    grep -qE 'opencode\.single\.json' "$SCRIPT_DIR/install.sh" || {
-        echo "install.sh missing opencode.single.json reference"
+    # #38: install.sh no longer emits OpenCode guidance — setup.sh owns it and builds
+    # the template path from the resolved mode (opencode.single.json /
+    # opencode.multi.json), never the nonexistent examples/opencode/opencode.json.
+    # shellcheck disable=SC2016  # matching the literal ${OPENCODE_MODE} in setup.sh
+    grep -qF 'opencode.${OPENCODE_MODE}.json' "$SCRIPT_DIR/setup.sh" || {
+        echo "setup.sh does not build the mode-specific opencode template path"
         return 1
     }
     return 0
@@ -1860,12 +1878,15 @@ test_uninstall_dry_run_preserves_files() {
 }
 
 test_uninstall_custom_path() {
+    # #38: --agent custom maps to a setup.sh project install; its receipt lives at the
+    # repo root and uninstall takes the project selectors.
     local custom="$TEST_TMPDIR/custom-skills"
+    make_git_repo "$custom"
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     assert_file_exists "$custom/.kurama-install-manifest.json" || return 1
-    bash "$UNINSTALL_SCRIPT" --path "$custom" > /dev/null 2>&1
-    if [ -d "$custom/sdd-apply" ]; then
-        echo "sdd-apply should have been removed from custom path"
+    bash "$UNINSTALL_SCRIPT" --scope project --path "$custom" --without-pi-packages > /dev/null 2>&1
+    if [ -d "$custom/.claude/skills/sdd-apply" ]; then
+        echo "sdd-apply should have been removed from the custom project path"
         return 1
     fi
     return 0
@@ -2269,33 +2290,37 @@ test_update_shows_commit_transition() {
 }
 
 test_update_restamps_install_sh_receipt() {
-    # install.sh stores the human DISPLAY name in the receipt "tool" field
-    # ("Claude Code", with a space) — unlike setup.sh, which stores the slug. The
-    # re-sync must normalize that back to the slug before delegating to setup.sh;
-    # otherwise the space word-splits into a bogus --agent token ("Unknown option:
-    # Code"), the re-sync fails, update exits 1, and the receipt is NEVER re-stamped
-    # (V4 unmet). This drives the INSTALL_SCRIPT path that
-    # test_update_shows_commit_transition (SETUP_SCRIPT, slug tool) never exercises.
+    # A pre-#38 install.sh stored the human DISPLAY name in the receipt "tool" field
+    # ("Claude Code", with a space) — unlike setup.sh, which stores the slug. install.sh
+    # is now a wrapper that writes the slug via setup.sh, but LEGACY display-name receipts
+    # still exist on users' machines and update.sh must still normalize them before
+    # delegating to setup.sh; otherwise the space word-splits into a bogus --agent token
+    # ("Unknown option: Code"), the re-sync fails, update exits 1, and the receipt is NEVER
+    # re-stamped (V4 unmet). Stage a faithful legacy receipt and drive that path.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     assert_file_exists "$manifest" || return 1
-    # Guard the premise: install.sh really does store the spaced display name.
-    grep -q '"tool"[[:space:]]*:[[:space:]]*"Claude Code"' "$manifest" || {
-        echo "expected install.sh to store display-name tool 'Claude Code'"; return 1; }
 
-    # Simulate a pre-5.0.0 receipt so the re-stamp is observable: roll the version
-    # back and drop the commit line (portable awk rewrite, no jq required).
-    local tmp="$manifest.stale"
-    awk '
-        /"commit"[[:space:]]*:/ { next }
-        /"version"[[:space:]]*:/ { print "  \"version\": \"5.0.0-dev\","; next }
-        { print }
-    ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    # Overwrite with a pre-5.0.0 install.sh-shaped receipt: display-name tool, older
+    # version, no commit, and no tools[] (the modern array setup.sh added later), so
+    # update.sh resolves the tool from the spaced "tool" field and must normalize it.
+    cat > "$manifest" <<'LEGACY'
+{
+  "name": "kurama",
+  "version": "5.0.0-dev",
+  "tool": "Claude Code",
+  "files": [
+    "sdd-apply/SKILL.md"
+  ]
+}
+LEGACY
+    grep -q '"tool"[[:space:]]*:[[:space:]]*"Claude Code"' "$manifest" || {
+        echo "failed to stage a legacy display-name receipt"; return 1; }
 
     local output rc
     output=$(bash "$UPDATE_SCRIPT" --agent claude-code 2>&1) && rc=0 || rc=$?
     if [ "$rc" -ne 0 ]; then
-        echo "update.sh must exit 0 on an install.sh-created receipt (got exit $rc)"
+        echo "update.sh must exit 0 on a legacy install.sh receipt (got exit $rc)"
         printf '%s\n' "$output" | awk '{ print "    " $0 }'
         return 1
     fi
@@ -4193,62 +4218,53 @@ test_setup_empty_claude_json_engram_not_blanked() {
 }
 
 test_install_refuses_setup_managed_receipt() {
+    # #38/#24: install.sh no longer REFUSES a target setup.sh manages — it IS setup.sh
+    # now (delegation), so re-running install.sh over a setup install RE-SYNCS it
+    # cleanly through the single writer. The richer receipt (tools[], settings[], hook
+    # file entries) must survive — install.sh must never truncate it (the #24 bug).
     bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
-    local before
-    before="$(cat "$manifest")"
+    grep -q '"settings"' "$manifest" || { echo "premise: setup receipt lacks settings[]"; return 1; }
 
     local output status=0
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1) || status=$?
-    if [ "$status" -eq 0 ]; then
-        echo "install.sh silently took over a target setup.sh manages"; return 1
+    if [ "$status" -ne 0 ]; then
+        echo "install.sh (wrapper) must re-sync a setup-managed target, not fail (exit $status)"
+        printf '%s\n' "$output" | awk '{ print "    " $0 }'
+        return 1
     fi
-    printf '%s\n' "$output" | grep -q 'managed by setup.sh' || {
-        echo "no message naming setup.sh as the owner of this target"; return 1; }
-    printf '%s\n' "$output" | grep -q 'update.sh' || { echo "no pointer to update.sh"; return 1; }
-
-    # The receipt survives byte-for-byte: hooks, prompts, settings and tools[] are
-    # records of files install.sh never wrote and cannot reproduce.
-    assert_eq "$before" "$(cat "$manifest")" "the setup.sh receipt must be left untouched" || return 1
-    grep -q '"settings"' "$manifest" || { echo "settings[] lost"; return 1; }
+    # setup-only keys install.sh used to truncate survive — one coherent receipt.
+    grep -q '"settings"' "$manifest" || { echo "settings[] lost — the wrapper truncated the receipt (#24 regressed)"; return 1; }
     grep -q 'hooks/kurama/archive-gate.sh' "$manifest" || { echo "hook file entries lost"; return 1; }
+    grep -q '"tools"' "$manifest" || { echo "tools[] lost"; return 1; }
+    grep -q '"tool"[[:space:]]*:[[:space:]]*"claude-code"' "$manifest" || {
+        echo "receipt tool is not the setup.sh slug 'claude-code'"; return 1; }
     return 0
 }
 
 test_install_refuse_writes_nothing_for_opencode() {
-    # "Refused" has to mean the whole target, not just its skills dir: the
-    # OpenCode branch writes command files after install_skills, and those are
-    # files setup.sh owns too (multi mode rewrites the `agent:` line of every
-    # subtask command). Rewriting them from the repo copies silently reverts that
-    # routing on a target install.sh claims not to touch.
+    # #38: install.sh no longer refuses a setup-managed OpenCode target — it delegates
+    # to setup.sh, the sole owner of the /sdd-* command files and the receipt. Re-running
+    # install.sh over a setup opencode install must RE-SYNC it cleanly (exit 0, the 9
+    # commands present, one coherent receipt), not refuse it.
     run_setup_opencode || { echo "setup opencode exited non-zero"; return 1; }
     local cmd_dir="$HOME/.config/opencode/commands"
     local before_count
     before_count=$(find "$cmd_dir" -name 'sdd-*.md' | wc -l | tr -d ' ')
-    [ "$before_count" -gt 0 ] || { echo "setup installed no commands — nothing to protect"; return 1; }
-
-    # Stand in for any per-target edit setup.sh made that install.sh's copies do
-    # not carry. A plain byte compare would pass today by coincidence.
-    printf 'agent: sdd-apply-multi-routing\n' >> "$cmd_dir/sdd-apply.md"
-
-    # Backdate the commands AND a reference file to 2000, so "was this rewritten?"
-    # is answered by a 26-year gap rather than by clock granularity.
-    local ref="$TEST_TMPDIR/mtime-ref"
-    touch -t 200001010000 "$ref"
-    touch -t 200001010000 "$cmd_dir"/sdd-*.md
+    [ "$before_count" -gt 0 ] || { echo "setup installed no commands — nothing to re-sync"; return 1; }
 
     local status=0
     bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1 || status=$?
-    if [ "$status" -eq 0 ]; then echo "install.sh did not refuse the managed target"; return 1; fi
+    if [ "$status" -ne 0 ]; then echo "install.sh must re-sync the opencode target, not refuse it (exit $status)"; return 1; fi
 
-    grep -q 'sdd-apply-multi-routing' "$cmd_dir/sdd-apply.md" || {
-        echo "the refused run rewrote sdd-apply.md and reverted setup.sh's edit"; return 1; }
-    local touched
-    touched=$(find "$cmd_dir" -name 'sdd-*.md' -newer "$ref" | wc -l | tr -d ' ')
-    assert_eq "0" "$touched" "a refused target must have zero files rewritten" || return 1
-    assert_eq "$before_count" "$(find "$cmd_dir" -name 'sdd-*.md' | wc -l | tr -d ' ')" \
-        "the refused run must not add command files either" || return 1
+    local after_count
+    after_count=$(find "$cmd_dir" -name 'sdd-*.md' | wc -l | tr -d ' ')
+    assert_eq "9" "$after_count" "the delegated re-sync keeps the 9 OpenCode commands" || return 1
+    local manifest="$HOME/.config/opencode/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q '"tool"[[:space:]]*:[[:space:]]*"opencode"' "$manifest" || {
+        echo "opencode receipt tool wrong after re-sync"; return 1; }
     return 0
 }
 
@@ -4270,23 +4286,27 @@ test_install_without_group_removes_excluded_skills() {
 }
 
 test_install_incomplete_checkout_aborts_early() {
-    # A checkout with skills/ but no examples/ — the shape the OpenCode command
-    # glob used to die on, midway through an all-global run.
+    # #38: install.sh is a wrapper — a checkout missing the real installer (setup.sh)
+    # must abort loudly and write nothing, not silently do nothing. (The examples/
+    # completeness check now lives in setup.sh, the sole installer — enforced there
+    # and pinned by test_g_setup_missing_examples_fails_loud_before_write; this test
+    # pins the wrapper's own delegate-present guard.)
     local fake="$TEST_TMPDIR/partial-repo"
     mkdir -p "$fake/scripts"
     cp "$INSTALL_SCRIPT" "$fake/scripts/install.sh"
     # install.sh sources scripts/lib/receipt.sh (issue #37); ship it so the abort
-    # under test is the missing examples/, not the missing lib.
+    # under test is the missing setup.sh, not the missing lib.
     cp -R "$SCRIPT_DIR/lib" "$fake/scripts/lib"
     ln -s "$REPO_DIR/skills" "$fake/skills"
     cp "$REPO_DIR/VERSION" "$fake/VERSION"
+    # Deliberately DO NOT copy setup.sh — the delegate is absent.
 
     local output status=0
     output=$(bash "$fake/scripts/install.sh" --agent all-global 2>&1) || status=$?
-    if [ "$status" -eq 0 ]; then echo "install.sh reported success on an incomplete checkout"; return 1; fi
-    printf '%s\n' "$output" | grep -q 'Missing: examples' || {
-        echo "the abort never names examples/ as the missing piece"; return 1; }
-    # It aborts up front, instead of after installing three targets out of five.
+    if [ "$status" -eq 0 ]; then echo "install.sh reported success with no setup.sh present"; return 1; fi
+    printf '%s\n' "$output" | grep -q 'setup.sh' || {
+        echo "the abort never names the missing setup.sh"; printf '%s\n' "$output" | tail -3; return 1; }
+    # It aborts up front, before delegating to anything.
     if [ -d "$HOME/.claude/skills" ]; then echo "targets were written before the abort"; return 1; fi
     return 0
 }
@@ -5119,7 +5139,7 @@ run_test "Commands match source files exactly" test_opencode_command_content_mat
 echo ""
 
 echo -e "${BOLD}Output verification${NC}"
-run_test "Output lists all skill names" test_output_shows_skill_names
+run_test "Output reports agent, count and skills path" test_output_shows_skill_names
 run_test "Output shows Done! message" test_output_shows_done_message
 run_test "Output shows install count" test_output_shows_install_count
 run_test "Output shows next-step guidance" test_output_shows_next_step
@@ -5128,7 +5148,7 @@ echo ""
 
 echo -e "${BOLD}OS detection${NC}"
 run_test "--help runs without error" test_os_detection_runs
-run_test "Header shows detected OS" test_header_shows_detected_os
+run_test "Delegated run shows the setup.sh header" test_header_shows_detected_os
 echo ""
 
 echo -e "${BOLD}Edge cases${NC}"
@@ -5366,8 +5386,8 @@ run_test "jq-less run records no settings.json it never wrote" test_nojq_receipt
 run_test "empty settings.json is merged, never blanked" test_setup_empty_settings_json_not_blanked
 run_test "empty opencode.json is created, never blanked" test_setup_empty_opencode_json_not_blanked
 run_test "empty .claude.json survives the Engram merge" test_setup_empty_claude_json_engram_not_blanked
-run_test "install.sh refuses a setup.sh-managed receipt" test_install_refuses_setup_managed_receipt
-run_test "a refused target gets no OpenCode command writes" test_install_refuse_writes_nothing_for_opencode
+run_test "install.sh re-syncs (never truncates) a setup.sh receipt" test_install_refuses_setup_managed_receipt
+run_test "install.sh re-syncs a setup-managed OpenCode target" test_install_refuse_writes_nothing_for_opencode
 run_test "--without removes the excluded skills from disk" test_install_without_group_removes_excluded_skills
 run_test "incomplete checkout aborts before writing" test_install_incomplete_checkout_aborts_early
 run_test "install.sh: valueless flag prints usage" test_install_flag_without_value_shows_usage
@@ -7148,6 +7168,206 @@ run_test "skills_path: global, project, and omp relocation" test_lib_skills_path
 run_test "all six scripts source + guard scripts/lib/receipt.sh" test_lib_all_six_scripts_source_it
 run_test "all six abort loud when lib/receipt.sh is missing" test_lib_missing_aborts_loud
 run_test "all six abort loud when lib/receipt.sh is empty/truncated" test_lib_truncated_lib_aborts_loud
+
+echo ""
+
+# ===== UNIT-G (issue #38) =====
+#
+# install.sh and setup.sh were collapsed into one install path. setup.sh gained the
+# --with/--without skill-group selection install.sh used to own (so a full setup can
+# drop the review group — skills AND review-layer agents), and install.sh became a
+# thin wrapper that maps its historical flags onto setup.sh and writes NO receipt of
+# its own: setup.sh (via scripts/lib/receipt.sh) is the sole receipt writer, closing
+# the #24 receipt-conflict class for good. These tests pin the moved capability, the
+# flag mapping (especially --all/all-global), and the single-writer invariant.
+
+# --- (a) setup.sh honours --with/--without --------------------------------------
+
+test_g_setup_without_review_is_a_full_review_free_setup() {
+    # The headline of #38: a FULL setup WITHOUT the review group — no review skills
+    # AND no review-layer native agents — with the rest of the install (hooks, the
+    # other groups, the orchestrator merge) intact.
+    bash "$SETUP_SCRIPT" --agent claude-code --without review --non-interactive > /dev/null 2>&1
+    local base="$HOME/.claude/skills" agents="$HOME/.claude/agents"
+    local lens
+    for lens in review-risk review-readability review-reliability review-resilience review-refuter; do
+        [ -d "$base/$lens" ] && { echo "review skill $lens should be excluded"; return 1; }
+        [ -e "$agents/$lens.md" ] && { echo "review-layer agent $lens.md should be excluded"; return 1; }
+    done
+    assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core still on
+    assert_dir_exists "$base/judgment-day" || return 1    # quality still on
+    local count
+    count=$(find "$base" -name SKILL.md | wc -l | tr -d ' ')
+    assert_eq "19" "$count" "full setup --without review lands 19 skills" || return 1
+    # A genuinely full setup: Claude Code hooks were still installed.
+    assert_file_exists "$HOME/.claude/settings.json" || return 1
+    return 0
+}
+
+test_g_setup_without_rejects_required_group() {
+    if bash "$SETUP_SCRIPT" --agent claude-code --without sdd-core --non-interactive > /dev/null 2>&1; then
+        echo "setup.sh --without sdd-core must exit non-zero (sdd-core is required)"; return 1
+    fi
+    return 0
+}
+
+test_g_setup_with_lang_adds_language_skills() {
+    bash "$SETUP_SCRIPT" --agent claude-code --with lang --non-interactive > /dev/null 2>&1
+    assert_dir_exists "$HOME/.claude/skills/go-testing" || return 1
+    local count
+    count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
+    assert_eq "25" "$count" "setup.sh --with lang lands 25 skills" || return 1
+    return 0
+}
+
+test_g_setup_reinstall_without_review_prunes() {
+    # A default install then a --without review re-install converges to the same state
+    # as a fresh one: the review skill is removed from disk AND from the receipt (not
+    # merely dropped from the active set and left loading — the #24-adjacent bug).
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1
+    assert_dir_exists "$HOME/.claude/skills/review-risk" || return 1
+    bash "$SETUP_SCRIPT" --agent claude-code --without review --non-interactive > /dev/null 2>&1
+    [ -e "$HOME/.claude/skills/review-risk/SKILL.md" ] && { echo "stale review skill left on disk after prune"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    grep -q 'review-risk' "$manifest" && { echo "receipt still references review-risk after prune"; return 1; }
+    # The rest of the install is intact — this pruned, it did not wipe.
+    assert_dir_exists "$HOME/.claude/skills/sdd-apply" || return 1
+    return 0
+}
+
+# --- (b) install.sh wrapper maps each documented flag onto setup.sh --------------
+
+test_g_wrapper_agent_maps_to_full_setup() {
+    # install.sh --agent NAME runs the SAME full setup.sh install (24 skills) and
+    # writes setup.sh's slug-tool receipt with the setup-only keys — proof the full
+    # installer ran through the delegate, not install.sh's old skills-only path.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    assert_all_skills_installed "$HOME/.claude/skills" || return 1
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    grep -q '"tool"[[:space:]]*:[[:space:]]*"claude-code"' "$manifest" || {
+        echo "wrapper receipt tool is not the setup.sh slug 'claude-code'"; return 1; }
+    grep -q '"settings"' "$manifest" || { echo "wrapper did not run the full setup (no settings[] in receipt)"; return 1; }
+    return 0
+}
+
+test_g_wrapper_all_global_installs_five_unconditionally() {
+    # all-global maps to an EXPLICIT enumeration of the five harnesses — not
+    # setup.sh --all's PATH detection, which would install nothing in this agent-less
+    # test environment. All five skills dirs must be populated regardless of PATH.
+    bash "$INSTALL_SCRIPT" --agent all-global > /dev/null 2>&1
+    local d
+    for d in "$HOME/.claude/skills" "$HOME/.config/opencode/skills" "$HOME/.codex/skills" \
+             "$HOME/.pi/agent/skills" "$HOME/.omp/agent/skills"; do
+        local c; c=$(find "$d" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
+        assert_eq "24" "$c" "all-global must install 24 skills into $d" || return 1
+    done
+    return 0
+}
+
+test_g_wrapper_forwards_group_flags() {
+    # A group flag rides through the wrapper into setup.sh unchanged.
+    bash "$INSTALL_SCRIPT" --agent claude-code --without review > /dev/null 2>&1
+    [ -d "$HOME/.claude/skills/review-risk" ] && { echo "--without review not forwarded through the wrapper"; return 1; }
+    local count
+    count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
+    assert_eq "19" "$count" "wrapper --without review lands 19 skills" || return 1
+    return 0
+}
+
+test_g_wrapper_version_and_help_answered_locally() {
+    # --version and --help are answered by the wrapper itself (setup.sh has no
+    # --version), and --help still documents the historical agents.
+    local vout; vout=$(bash "$INSTALL_SCRIPT" --version 2>&1)
+    printf '%s' "$vout" | grep -qE '^kurama [0-9]' || { echo "--version did not print 'kurama <version>'"; return 1; }
+    local hout; hout=$(bash "$INSTALL_SCRIPT" --help 2>&1)
+    printf '%s' "$hout" | grep -q 'all-global' || { echo "--help lost the all-global agent"; return 1; }
+    printf '%s' "$hout" | grep -q 'setup.sh' || { echo "--help does not mention the setup.sh delegate"; return 1; }
+    return 0
+}
+
+test_g_wrapper_prints_deprecation_notice() {
+    # A one-line deprecation notice is emitted (to stderr) when the wrapper delegates.
+    local errout; errout=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1 >/dev/null)
+    printf '%s' "$errout" | grep -qi 'deprecat' || { echo "no deprecation notice on stderr"; return 1; }
+    return 0
+}
+
+# --- (c) install.sh writes no receipt of its own — setup.sh is the sole writer ---
+
+test_g_wrapper_does_not_truncate_setup_receipt() {
+    # #24 closed for good: run setup.sh, then install.sh, over the same claude-code
+    # target. The wrapper must NOT truncate the richer receipt — the setup-only keys
+    # survive because the SAME setup.sh writer produced both.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    grep -q '"settings"' "$manifest" || { echo "premise: setup.sh receipt lacks settings[]"; return 1; }
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    grep -q '"settings"' "$manifest" || { echo "install.sh truncated the receipt (settings[] gone) — #24 regressed"; return 1; }
+    grep -q '"tools"' "$manifest" || { echo "install.sh truncated tools[] — #24 regressed"; return 1; }
+    grep -q 'hooks/kurama/archive-gate.sh' "$manifest" || { echo "hook file entries lost after the install.sh run"; return 1; }
+    return 0
+}
+
+test_g_wrapper_writes_no_display_name_tool() {
+    # The old install.sh stored the DISPLAY name ("Claude Code"); the wrapper delegates
+    # to setup.sh, which records the slug — no install.sh-only receipt shape remains.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if grep -q '"tool"[[:space:]]*:[[:space:]]*"Claude Code"' "$manifest"; then
+        echo "wrapper still wrote install.sh's display-name tool 'Claude Code'"; return 1
+    fi
+    return 0
+}
+
+# --- (d) setup.sh fails loud on an incomplete source tree (I3, ported from install.sh)
+
+test_g_setup_missing_examples_fails_loud_before_write() {
+    # I3 (#38): the examples/ completeness check that used to live in install.sh's
+    # validate_source moved into setup.sh when the two installers collapsed. examples/
+    # is not optional — the OpenCode target installs its /sdd-* commands from it and
+    # every orchestrator merge reads a prompt file under it — so a clone with skills/
+    # but no examples/ must FAIL LOUD (exit 1, naming the missing path) BEFORE any
+    # write, honouring the #41 fail-loud invariant. The pre-collapse hazard: warn
+    # per-source, skip the commands, still print "Done!" and write a receipt for a
+    # PARTIAL install — exit 0 where it must be exit 1.
+    local clone="$TEST_TMPDIR/staged-clone-no-examples"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+    rm -rf "$clone/examples" || { echo "could not remove examples/ from the staged clone"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "setup.sh installed from a clone missing examples/ instead of aborting"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'Missing: examples/' || {
+        echo "the abort never names the missing examples/ path:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    local receipt="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if [ -e "$receipt" ]; then
+        echo "setup.sh wrote a receipt for a partial install: $receipt"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-G (issue #38) — collapse install.sh into setup.sh${NC}"
+run_test "setup.sh --without review is a full review-free setup" test_g_setup_without_review_is_a_full_review_free_setup
+run_test "setup.sh --without sdd-core is rejected" test_g_setup_without_rejects_required_group
+run_test "setup.sh --with lang adds language skills (25)" test_g_setup_with_lang_adds_language_skills
+run_test "setup.sh --without review re-install prunes stale review" test_g_setup_reinstall_without_review_prunes
+run_test "wrapper --agent maps to the full setup.sh install" test_g_wrapper_agent_maps_to_full_setup
+run_test "wrapper all-global installs all five (no detection)" test_g_wrapper_all_global_installs_five_unconditionally
+run_test "wrapper forwards --with/--without to setup.sh" test_g_wrapper_forwards_group_flags
+run_test "wrapper answers --version/--help locally" test_g_wrapper_version_and_help_answered_locally
+run_test "wrapper prints a deprecation notice" test_g_wrapper_prints_deprecation_notice
+run_test "wrapper never truncates the setup.sh receipt (#24)" test_g_wrapper_does_not_truncate_setup_receipt
+run_test "wrapper writes no display-name receipt of its own" test_g_wrapper_writes_no_display_name_tool
+run_test "setup.sh fails loud on a clone missing examples/ (no partial receipt)" test_g_setup_missing_examples_fails_loud_before_write
 
 echo ""
 

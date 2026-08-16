@@ -95,6 +95,55 @@ ENGRAM_BINARY_CHECKED=false   # ensure the binary probe/brew prompt runs at most
 # membership be tested with a case glob.
 SETUP_ACTIVE_GROUPS=" sdd-core quality review optional tdd "
 
+# #38: group selection, ported from install.sh so setup.sh alone can do a full
+# setup WITHOUT an on-by-default group (e.g. --without review) or WITH an opt-in
+# one (--with lang) — install.sh is now a thin wrapper that forwards these here.
+# sdd-core is mandatory; quality/review/optional/tdd are on by default and opt-out;
+# lang is off by default and opt-in. Kept in sync with skills/manifest.json "groups".
+SETUP_REQUIRED_GROUPS=" sdd-core "
+SETUP_KNOWN_GROUPS="sdd-core quality review optional tdd lang"
+
+setup_validate_group_name() {
+    case "$1" in
+        sdd-core|quality|review|optional|tdd|lang) return 0 ;;
+        *)
+            fail "Unknown skill group: $1 (valid: quality, review, optional, tdd, lang)"
+            exit 1
+            ;;
+    esac
+}
+
+setup_enable_group() {
+    local g="$1"
+    case "$SETUP_ACTIVE_GROUPS" in
+        *" $g "*) return 0 ;;
+    esac
+    SETUP_ACTIVE_GROUPS="$SETUP_ACTIVE_GROUPS$g "
+}
+
+# Rebuild the active set from the known-group order, dropping $g. sdd-core is
+# refused (it is required). Mirrors install.sh's disable_group so the two resolve
+# an identical selection from the same flags.
+setup_disable_group() {
+    local g="$1"
+    case "$SETUP_REQUIRED_GROUPS" in
+        *" $g "*)
+            fail "Group '$g' is required and cannot be excluded"
+            exit 1
+            ;;
+    esac
+    local rebuilt=" " tok
+    for tok in $SETUP_KNOWN_GROUPS; do
+        case "$SETUP_ACTIVE_GROUPS" in
+            *" $tok "*)
+                [ "$tok" = "$g" ] && continue
+                rebuilt="$rebuilt$tok "
+                ;;
+        esac
+    done
+    SETUP_ACTIVE_GROUPS="$rebuilt"
+}
+
 MARKER_BEGIN="<!-- BEGIN:kurama -->"
 MARKER_END="<!-- END:kurama -->"
 
@@ -206,7 +255,7 @@ detect_agents() {
     echo ""
     if [[ ${#DETECTED_AGENTS[@]} -eq 0 ]]; then
         warn "No agents detected in PATH"
-        info "You can still install manually with: ./install.sh"
+        info "Install for a specific agent anyway with: ./setup.sh --agent <name>  (claude-code, opencode, codex, pi, omp)"
     else
         echo -e "  ${GREEN}${BOLD}${#DETECTED_AGENTS[@]} agent(s) detected${NC}"
     fi
@@ -669,6 +718,39 @@ finalize_receipt() {
 # Install Skills
 # ============================================================================
 
+# #38: remove SKILL.md files a previous receipt recorded under $1 (this target's
+# skills dir) that the current group selection no longer installs. $2 is the
+# newline list of freshly recorded receipt-relative paths. Only plain-relative
+# "*/SKILL.md" entries resolving under $1 are ever touched: "../"-anchored entries
+# (native agents, hooks, settings live one level up), absolute entries, and — in
+# project scope, where harnesses share one receipt dir — entries under a SIBLING
+# harness's skills dir are all skipped. Ported from install.sh's old
+# remove_stale_receipt_files so a `--without <group>` re-install leaves neither a
+# stale skill loading in the agent nor a receipt entry behind (#24-adjacent).
+prune_stale_skills() {
+    local target_dir="$1" installed="$2"
+    local manifest_path="$RECEIPT_DIR/$INSTALL_MANIFEST_NAME"
+    [ -f "$manifest_path" ] || return 0
+
+    local entry abs removed=0
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        case "$entry" in /*|*..*) continue ;; esac
+        case "$entry" in */SKILL.md) ;; *) continue ;; esac
+        abs="$RECEIPT_DIR/$entry"
+        case "$abs" in "$target_dir"/*) ;; *) continue ;; esac
+        if printf '%s\n' "$installed" | grep -qxF -- "$entry"; then continue; fi
+        [ -e "$abs" ] || continue
+        rm -f "$abs"
+        rmdir "$(dirname "$abs")" 2>/dev/null || true
+        removed=$((removed + 1))
+    done <<< "$(manifest_json_array "$manifest_path" "files")"
+
+    if [ "$removed" -gt 0 ]; then
+        warn "$removed skill(s) from the previous install removed (no longer selected)"
+    fi
+}
+
 install_skills() {
     local agent_name="$1"
     local target_dir
@@ -732,6 +814,12 @@ $(receipt_rel "$target_dir/$skill_name/SKILL.md")"
         exit 1
     fi
 
+    # #38: reconcile with the previous receipt BEFORE finalize rewrites it, so a
+    # group dropped with --without leaves neither a stale SKILL.md on disk nor an
+    # entry behind. RECEIPT_FILES holds only skills + _shared at this point (native
+    # agents are recorded below), which is exactly the freshly-installed skill set.
+    prune_stale_skills "$target_dir" "$RECEIPT_FILES"
+
     # Native subagents. Each harness has its own frontmatter contract, so the
     # agent sets are NOT interchangeable: claude-code ships Claude-format agents,
     # pi ships Pi-format, and omp ships omp task-agent format. omp deliberately
@@ -753,6 +841,19 @@ $(receipt_rel "$target_dir/$skill_name/SKILL.md")"
 
 # Install every *.md agent from $1 into the scoped agents dir, backing up any
 # pre-existing same-named file and recording each in RECEIPT_FILES.
+# #38: which optional group a native agent belongs to, so `--without <group>`
+# drops its agents alongside its skills (a full setup WITHOUT the review group must
+# leave no review-LAYER agents, not just no review skills). review-* are the 4R +
+# refuter lenses; jd-* are the Judgment Day quality agents; everything else (the
+# sdd-* phase agents) is core and always installed.
+native_agent_group_active() {
+    case "$1" in
+        review-*) setup_group_is_active review ;;
+        jd-*)     setup_group_is_active quality ;;
+        *)        return 0 ;;
+    esac
+}
+
 install_native_agents() {
     local agents_src="$1" label="$2"
     local agents_target
@@ -767,6 +868,14 @@ install_native_agents() {
         [ -f "$agent_file" ] || continue
         agent_base="$(basename "$agent_file")"
         agent_dest="$agents_target/$agent_base"
+        # #38: an agent whose group is deselected is never installed — and a copy a
+        # prior (fuller) install left behind is removed, so a `--without <group>`
+        # re-install converges to the same state as a fresh one. finalize_receipt's
+        # _receipt_existing then drops its now-absent path from the receipt too.
+        if ! native_agent_group_active "$agent_base"; then
+            [ -e "$agent_dest" ] && rm -f "$agent_dest"
+            continue
+        fi
         if [ -f "$agent_dest" ]; then
             make_writable "$agent_dest"
         fi
@@ -2131,7 +2240,8 @@ show_summary() {
 interactive_menu() {
     if [[ ${#DETECTED_AGENTS[@]} -eq 0 ]]; then
         echo ""
-        warn "No agents detected. Use ./install.sh for manual installation."
+        warn "No agents detected on PATH — nothing to set up interactively."
+        info "Install for a specific agent with: ./setup.sh --agent <name>  (claude-code, opencode, codex, pi, omp)"
         exit 0
     fi
 
@@ -2248,6 +2358,8 @@ while [[ $# -gt 0 ]]; do
         --without-pi-packages) PI_PACKAGES="no"; shift ;;
         --with-engram)         ENGRAM="yes"; shift ;;
         --without-engram)      ENGRAM="no"; shift ;;
+        --with)    require_flag_value --with "${2:-}";    setup_validate_group_name "$2"; setup_enable_group "$2"; shift 2 ;;
+        --without) require_flag_value --without "${2:-}"; setup_validate_group_name "$2"; setup_disable_group "$2"; shift 2 ;;
         --opencode-mode)
             require_flag_value --opencode-mode "${2:-}"
             if [[ "$2" == "single" || "$2" == "multi" ]]; then
@@ -2290,6 +2402,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --without-pi-packages  Skip the Pi package stack (--agent pi, non-interactive)"
             echo "  --with-engram          Use Engram as the persistence engine (register its MCP)"
             echo "  --without-engram       Keep the built-in markdown persistence (default)"
+            echo "  --with GROUP           Include an optional skill group (quality, review, optional, tdd, lang)"
+            echo "  --without GROUP        Exclude an on-by-default skill group (quality, review, optional, tdd)"
             echo "  --non-interactive      No prompts (for external installers)"
             echo "  -h, --help             Show this help"
             echo ""
@@ -2323,6 +2437,21 @@ for skill_dir in "$SKILLS_SRC"/sdd-*/; do
 done
 if [ ! -f "$MANIFEST_FILE" ]; then
     fail "Missing: skills/manifest.json (the skill list source of truth)"
+    fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
+    exit 1
+fi
+# examples/ is not optional and its absence must FAIL LOUD before any write (#41):
+# the OpenCode target installs its /sdd-* command files from it, and every target's
+# orchestrator merge reads a prompt file under it. Without this, a checkout with
+# skills/ but no examples/ warns per-source, skips the commands, still prints "Done!"
+# and writes a receipt for a PARTIAL install — exit 0 where it must be exit 1. Ported
+# from install.sh's validate_source when the two installers collapsed (#38).
+if [ ! -d "$EXAMPLES_DIR" ]; then
+    fail "Missing: examples/ (agent configs and the OpenCode /sdd-* commands)"
+    fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
+    exit 1
+elif [ ! -d "$EXAMPLES_DIR/opencode/commands" ]; then
+    fail "Missing: examples/opencode/commands (the OpenCode /sdd-* command files)"
     fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
     exit 1
 fi

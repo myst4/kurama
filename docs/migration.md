@@ -514,7 +514,7 @@ read-only review lenses: `review-risk` (R1), `review-readability` (R2),
 **installed by default** alongside `sdd-core`, `quality`, and `optional`; at the time
 this landed, a default install was **23 skills** (was 18) with `--with tdd` at **24**
 (superseded by Phase 8: `tdd` now installs by default — 24 default, `--without tdd` 23). Opt out with
-`--without review` (`install.sh` only — `setup.sh` rejects the flag; the PowerShell `install.ps1`/`setup.ps1` equivalents were historical and have since been deleted).
+`--without review` (now a `setup.sh` flag; `install.sh` forwards it to `setup.sh`. The PowerShell `install.ps1`/`setup.ps1` equivalents were historical and have since been deleted).
 
 The orchestrator selects lenses by deterministic triage — trivial diff → no lens;
 standard diff → exactly one dominant-risk lens; hot path (auth/update/security/payments)

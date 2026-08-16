@@ -59,14 +59,15 @@ modules that ship on disk but stay inert until you opt in per project: the TDD m
 Installing a module never activates it — activation is a separate explicit
 per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban-github.md)).
 
-> **Changing the skill selection is `install.sh`'s job, not `setup.sh`'s.**
-> `--with`/`--without` are implemented by `scripts/install.sh` only; `setup.sh` has no
-> module flags and exits `Unknown option: --without` if you pass one. With
-> `install.sh`: `--without tdd` excludes the TDD module (23 skills), `--without optional`
-> excludes the `optional` group — `kanban-github` (23 skills), and `--with lang` adds the
-> per-language pattern skills, OFF by default (25 skills). Kurama is stack-agnostic, so a
-> default install ships no language-specific knowledge. `install.sh` copies skills only,
-> so you wire the orchestrator prompt yourself afterwards.
+> **Changing the skill selection is a `setup.sh` flag.** `--with`/`--without` are
+> implemented by `scripts/setup.sh`; with no `--with`/`--without` it installs the
+> default set. `--without tdd` excludes the TDD module (23 skills), `--without optional`
+> excludes the `optional` group — `kanban-github` (23 skills), `--without review` drops
+> the 4R + refuter review lenses AND their review-layer agents (19 skills), and
+> `--with lang` adds the per-language pattern skills, OFF by default (25 skills). Kurama
+> is stack-agnostic, so a default install ships no language-specific knowledge. The
+> flags apply to the full `setup.sh` install (skills, agents, hooks, orchestrator merge)
+> — `scripts/install.sh` forwards them to `setup.sh` for backward compatibility.
 
 > **`gh` prerequisite (only to activate the Kanban module).** The optional Kanban
 > board sync requires a configured GitHub CLI — `gh` installed, authenticated, and
@@ -79,12 +80,13 @@ per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban
 
 > **For external installers** (e.g. [gentle-ai](https://github.com/gentleman-programming/gentleman-ai-installer)): use `--non-interactive` flag.
 
-> **`install.sh` defers to `setup.sh`.** The two installers are not
-> interchangeable: `install.sh` copies skills only, and on a target whose receipt
-> `setup.sh` wrote it **refuses** (exit 1) and points you at `update.sh` instead
-> of overwriting a receipt that records hooks, native agents, orchestrator blocks
-> and MCP registrations it cannot reproduce. Re-sync those targets with
-> `./scripts/update.sh`.
+> **`install.sh` is now a thin wrapper around `setup.sh`** (issue #38). The two used
+> to be separate installers with conflicting receipts (#24); they are collapsed into
+> one. `install.sh` maps its historical flags onto `setup.sh` and forwards — so
+> `install.sh --agent claude-code` runs the full `setup.sh` install (skills, agents,
+> hooks, orchestrator merge) and `setup.sh` (via `scripts/lib/receipt.sh`) is the sole
+> receipt writer. Prefer calling `scripts/setup.sh` directly; keep re-syncing recorded
+> installs with `./scripts/update.sh`.
 
 ---
 

@@ -220,7 +220,7 @@ kurama/
 │       └── agents/                    ← 17 omp task agents (thinkingLevel/glob/spawns:"" — NOT interchangeable with the Claude or Pi sets, which omp filters out)
 └── scripts/
     ├── setup.sh                       ← Full setup: detect + install + configure
-    ├── install.sh                     ← Skills-only installer; reads skills/manifest.json
+    ├── install.sh                     ← Thin back-compat wrapper; maps legacy flags onto setup.sh (writes no receipt of its own)
     ├── install_test.sh                ← Regression test suite for install.sh
     ├── uninstall.sh                   ← Removes exactly what an install manifest recorded
     └── build-examples.sh              ← Assembles examples/_templates/ into every examples/* orchestrator file (portable bash 3.2/BSD)

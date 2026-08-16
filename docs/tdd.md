@@ -155,9 +155,9 @@ Two independent things, easy to conflate:
 - **Installing the module** puts `skills/tdd/SKILL.md` on disk. The `tdd` group in
   [skills/manifest.json](../skills/manifest.json) is now **installed by default** —
   `setup.sh` and `install.sh` both include it in the
-  default set. Remove it with `install.sh --without tdd` if you never want the module
-  on disk — module selection is an `install.sh` flag; `setup.sh` has no `--without`
-  and rejects it. (The language-pattern plugins like `go-testing` live in the separate
+  default set. Remove it with `setup.sh --without tdd` if you never want the module
+  on disk — `setup.sh` owns `--with`/`--without` module selection, and `install.sh`
+  forwards those flags to it. (The language-pattern plugins like `go-testing` live in the separate
   opt-in `lang` group.)
 - **Activating TDD** turns the RED → GREEN → REFACTOR cycle on for a *specific
   project* via the explicit `tdd.enabled` flag above. Installing the module never
