@@ -29,7 +29,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 SETUP_SCRIPT="$SCRIPT_DIR/setup.sh"
+# shellcheck disable=SC2034  # read by read_version() in scripts/lib/receipt.sh
 VERSION_FILE="$REPO_DIR/VERSION"
+
+# Shared receipt library — the single copy of the receipt parser and helpers
+# (issue #37). SCRIPT_DIR resolves to the clone, so this always finds it; fail
+# loud on a partial clone rather than running with an undefined parser.
+KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"
+if [ ! -f "$KURAMA_LIB" ]; then
+    echo "kurama: missing $KURAMA_LIB — incomplete clone. Re-clone or pull the full repo." >&2
+    exit 1
+fi
+# shellcheck source=lib/receipt.sh disable=SC1091
+. "$KURAMA_LIB"
 # Repo-side sources a recorded file can be compared against (--dry-run drift).
 EXAMPLES_DIR="$REPO_DIR/examples"
 SKILLS_SRC="$REPO_DIR/skills"
@@ -69,26 +81,14 @@ fail() { echo -e "  ${RED}✗${NC} $1"; }
 info() { echo -e "  ${CYAN}→${NC} $1"; }
 header() { echo -e "\n${CYAN}${BOLD}$1${NC}"; }
 
-home_dir() { echo "$HOME"; }
-
 # ============================================================================
-# Receipt helpers
+# Receipt helpers — home_dir / read_version / read_commit / hash_file and the
+# receipt parser now live in scripts/lib/receipt.sh (issue #37), sourced above.
 # ============================================================================
 
-read_version() {
-    local v="unknown"
-    [ -f "$VERSION_FILE" ] && { IFS= read -r v < "$VERSION_FILE" || true; [ -n "$v" ] || v="unknown"; }
-    printf '%s' "$v"
-}
-
-# Short commit SHA of the current Kurama repo checkout ('' when git is unavailable).
-repo_commit() {
-    local c=""
-    if command -v git >/dev/null 2>&1; then
-        c="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-    fi
-    printf '%s' "$c"
-}
+# Short commit SHA of the current Kurama repo checkout ('' when git is
+# unavailable). Historical name; delegates to the shared read_commit.
+repo_commit() { read_commit; }
 
 # Render "version (commit)", collapsing to just "version" when no commit is known.
 fmt_ver_commit() {
@@ -96,17 +96,10 @@ fmt_ver_commit() {
     if [ -n "$c" ]; then printf '%s (%s)' "$v" "$c"; else printf '%s' "$v"; fi
 }
 
-# Skills dir (= receipt dir for global) for a global agent, mirroring setup.sh.
+# Skills dir (= receipt dir for global) for a global agent — the shared
+# skills_path() map (issue #37).
 global_skills_path() {
-    local agent="$1" home; home="$(home_dir)"
-    case "$agent" in
-        claude-code)  echo "$home/.claude/skills" ;;
-        opencode)     echo "$home/.config/opencode/skills" ;;
-        codex)        echo "$home/.codex/skills" ;;
-        pi)           echo "$home/.pi/agent/skills" ;;
-        omp)          echo "${PI_CODING_AGENT_DIR:-$home/.omp/agent}/skills" ;;
-        *)            echo "" ;;
-    esac
+    skills_path "$1" global
 }
 
 # Map a receipt "tool" value to the canonical agent slug setup.sh accepts.
@@ -129,76 +122,8 @@ tool_to_slug() {
     esac
 }
 
-# Read a manifest scalar field ("tool", "scope", "version").
-manifest_field() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '.[$k] // ""' "$manifest" 2>/dev/null
-        return 0
-    fi
-    awk -v key="$key" '
-        match($0, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"") {
-            s = substr($0, RSTART, RLENGTH)
-            sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
-        }' "$manifest"
-}
-
-# Emit each element of a flat receipt array — "files", "tools", … (jq or awk
-# fallback). Mirrors manifest_json_array in doctor.sh/uninstall.sh/install.sh
-# (and setup.sh's receipt_json_array / setup-tui.sh's copy) so every script
-# parses a receipt the same way.
-#
-# Why the opening rule handles the whole array itself instead of just setting
-# inarr: for a single-line "key": [] the array closes on the line that opened it,
-# so setting inarr and skipping to the next line hands the closing-bracket check
-# a bracket that never arrives. The parser then runs to the end of the receipt,
-# printing the NEXT key's declaration line as if it were an element, followed by
-# the elements that belong to that other key. uninstall.sh drives rm from
-# files[], so an empty files[] would migrate .claude/settings.json out of
-# settings[] and delete the file outright instead of stripping its kurama hooks
-# block. The !inarr guard is the same defense one level up: without it a later
-# "<key>" nested elsewhere in the receipt re-opens an array already closed.
-manifest_json_array() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null
-        return 0
-    fi
-    awk -v key="$key" '
-        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
-            tail = substr($0, index($0, "[") + 1)
-            if (tail ~ /\]/) {                       # array opens and closes on this line
-                sub(/\].*/, "", tail)
-                n = split(tail, parts, ",")
-                for (i = 1; i <= n; i++) {
-                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
-                    if (parts[i] != "") print parts[i]
-                }
-                next
-            }
-            inarr = 1; next
-        }
-        inarr && /\]/ { inarr = 0 }
-        inarr {
-            line = $0
-            gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
-            gsub(/,$/, "", line); gsub(/"/, "", line)
-            if (line != "") print line
-        }' "$manifest"
-}
-
-# Every harness recorded in the receipt. A project-scope receipt is shared by
-# every harness installed into that repo, so it lists them all in "tools"; the
-# flat arrays below are the union across them. Receipts written by v6 and by the
-# legacy install.sh have no "tools", so the effective list is the single "tool".
-manifest_tools() {
-    local manifest="$1" tools
-    tools="$(manifest_json_array "$manifest" "tools" | awk 'NF')"
-    [ -n "$tools" ] || tools="$(manifest_field "$manifest" "tool")"
-    printf '%s\n' "$tools"
-}
+# manifest_field / manifest_json_array / manifest_tools now live in
+# scripts/lib/receipt.sh (issue #37), sourced above.
 
 # Render a newline-separated tool list as "a, b" for a header/info line.
 fmt_tool_list() {
@@ -217,13 +142,7 @@ manifest_has_startup_logo() {
         | awk '/kurama-logo\.tsx?$/ { found = 1 } END { exit(found ? 0 : 1) }'
 }
 
-# Portable content hash of a file ("" if missing).
-hash_file() {
-    [ -f "$1" ] || { printf ''; return 0; }
-    if command -v shasum >/dev/null 2>&1; then shasum "$1" | awk '{print $1}';
-    elif command -v sha1sum >/dev/null 2>&1; then sha1sum "$1" | awk '{print $1}';
-    else cksum "$1" | awk '{print $1"-"$2}'; fi
-}
+# hash_file() now lives in scripts/lib/receipt.sh (issue #37).
 
 # Map a receipt-relative path back to the repo file it was installed FROM, for
 # one harness ("" when the path has no repo source — an omp RULES.md, anything a

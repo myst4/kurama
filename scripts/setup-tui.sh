@@ -45,6 +45,17 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_SCRIPT="$SCRIPT_DIR/setup.sh"
 
+# Shared receipt library — the single copy of the receipt parser and helpers
+# (issue #37). SCRIPT_DIR resolves to the clone, so this always finds it; fail
+# loud on a partial clone rather than running with an undefined parser.
+KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"
+if [ ! -f "$KURAMA_LIB" ]; then
+    echo "kurama: missing $KURAMA_LIB — incomplete clone. Re-clone or pull the full repo." >&2
+    exit 1
+fi
+# shellcheck source=lib/receipt.sh disable=SC1091
+. "$KURAMA_LIB"
+
 # Every harness setup.sh accepts, paired with the binary that proves it is
 # installed. Kept in the same order setup.sh's detect_agents() checks them.
 AGENTS="claude-code opencode codex pi omp"
@@ -74,73 +85,14 @@ agent_binary() {
 
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 
-# Where each harness keeps its GLOBAL receipt: the skills dir, mirroring
-# get_skills_path() in setup.sh:204-216 (project scope puts it in the repo root).
+# Where each harness keeps its GLOBAL receipt: the skills dir — the shared
+# skills_path() map (issue #37); project scope puts the receipt in the repo root.
 global_skills_path() {
-    case "$1" in
-        claude-code)  echo "$HOME/.claude/skills" ;;
-        opencode)     echo "$HOME/.config/opencode/skills" ;;
-        codex)        echo "$HOME/.codex/skills" ;;
-        pi)           echo "$HOME/.pi/agent/skills" ;;
-        omp)          echo "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
-        *)            echo "" ;;
-    esac
+    skills_path "$1" global
 }
 
-manifest_field() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '.[$k] // ""' "$manifest" 2>/dev/null; return 0
-    fi
-    awk -v key="$key" '
-        match($0, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"") {
-            s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*"/, "", s); sub(/".*/, "", s); print s; exit
-        }' "$manifest"
-}
-
-manifest_json_array() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null; return 0
-    fi
-    # The opening rule reads the rest of the line before deciding to stay open:
-    # `"tools": []` opens and closes on one line, and consuming it as an opening
-    # would swallow every following line until the next `]` — emitting the NEXT
-    # key's declaration line as if it were an element. `!inarr` keeps a nested
-    # occurrence of the same key from re-opening an array already being read.
-    awk -v key="$key" '
-        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
-            tail = substr($0, index($0, "[") + 1)
-            if (tail ~ /\]/) {                       # array opens and closes on this line
-                sub(/\].*/, "", tail)
-                n = split(tail, parts, ",")
-                for (i = 1; i <= n; i++) {
-                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
-                    if (parts[i] != "") print parts[i]
-                }
-                next
-            }
-            inarr = 1; next
-        }
-        inarr && /\]/ { inarr = 0 }
-        inarr {
-            line = $0; gsub(/^[[:space:]]+/, "", line); gsub(/[[:space:]]+$/, "", line)
-            gsub(/,$/, "", line); gsub(/"/, "", line)
-            if (line != "") print line
-        }' "$manifest"
-}
-
-# A project-scope receipt is shared by every harness installed into the repo and
-# lists them all in "tools". Receipts written by v6 and by the legacy install.sh
-# have no "tools" at all, so the scalar "tool" is the fallback.
-manifest_tools() {
-    local tools
-    tools="$(manifest_json_array "$1" "tools" | awk 'NF')"
-    [ -n "$tools" ] || tools="$(manifest_field "$1" "tool")"
-    printf '%s\n' "$tools"
-}
+# manifest_field / manifest_json_array / manifest_tools now live in
+# scripts/lib/receipt.sh (issue #37), sourced above.
 
 # Newline-separated list → one line joined by $2, duplicates dropped, order kept.
 join_list() {

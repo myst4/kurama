@@ -11,7 +11,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 SKILLS_SRC="$REPO_DIR/skills"
 MANIFEST_FILE="$SKILLS_SRC/manifest.json"
+# shellcheck disable=SC2034  # read by read_version() in scripts/lib/receipt.sh
 VERSION_FILE="$REPO_DIR/VERSION"
+
+# Shared receipt library — the single copy of the receipt parser and helpers
+# (issue #37). SCRIPT_DIR resolves to the clone, so this always finds it; fail
+# loud on a partial clone rather than running with an undefined parser.
+KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"
+if [ ! -f "$KURAMA_LIB" ]; then
+    echo "kurama: missing $KURAMA_LIB — incomplete clone. Re-clone or pull the full repo." >&2
+    exit 1
+fi
+# shellcheck source=lib/receipt.sh disable=SC1091
+. "$KURAMA_LIB"
 
 # Name of the per-target install manifest (records version + installed files so
 # upgrades can detect leftovers and uninstall.sh can remove exactly what we wrote).
@@ -82,20 +94,14 @@ setup_colors() {
 # Path Resolution
 # ============================================================================
 
+# The five harness skills paths come from the shared skills_path() map (issue
+# #37); the two install.sh-only targets stay here.
 get_tool_path() {
     local tool="$1"
     case "$tool" in
-        claude-code)       echo "$HOME/.claude/skills" ;;
-        opencode)          echo "$HOME/.config/opencode/skills" ;;
         opencode-commands) echo "$HOME/.config/opencode/commands" ;;
-        codex)             echo "$HOME/.codex/skills" ;;
-        # Pi's global skills live under its agent config dir (~/.pi/agent/skills).
-        pi)                echo "$HOME/.pi/agent/skills" ;;
-        # omp keeps user skills under its agent config dir (~/.omp/agent/skills).
-        # PI_CODING_AGENT_DIR relocates that base when set — honor it, since omp
-        # itself resolves the user base from that variable.
-        omp)               echo "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
         project-local)     echo "./skills" ;;
+        *)                 skills_path "$tool" ;;
     esac
 }
 
@@ -183,28 +189,9 @@ show_help() {
 
 # ============================================================================
 # Version + manifest helpers
+#
+# read_version / read_commit now live in scripts/lib/receipt.sh (issue #37).
 # ============================================================================
-
-read_version() {
-    local v="unknown"
-    if [ -f "$VERSION_FILE" ]; then
-        IFS= read -r v < "$VERSION_FILE" || true
-        [ -n "$v" ] || v="unknown"
-    fi
-    printf '%s' "$v"
-}
-
-# Short commit SHA of the Kurama repo this installer runs from, used to stamp the
-# receipt (V3). Prints the empty string when git is unavailable or the repo has no
-# HEAD — the caller then omits the "commit" field entirely so it never breaks a
-# jq-less parser or an install on a machine without git.
-read_commit() {
-    local c=""
-    if command -v git >/dev/null 2>&1; then
-        c="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-    fi
-    printf '%s' "$c"
-}
 
 print_version() {
     printf 'kurama %s\n' "$(read_version)"
@@ -318,54 +305,8 @@ compute_active_skills() {
     fi
 }
 
-# Emit each string element of a named JSON array (files, settings, pi_packages)
-# from an install manifest. Uses jq when available, otherwise a portable awk
-# fallback that reads the one-element-per-line arrays setup.sh/install.sh write.
-# Mirrors manifest_json_array in doctor.sh/update.sh so every script parses a
-# receipt the same way.
-#
-# Why the opening rule handles the whole array itself instead of just setting
-# inarr: for a single-line "key": [] the array closes on the line that opened it,
-# so setting inarr and skipping to the next line hands the closing-bracket check
-# a bracket that never arrives. The parser then runs to the end of the receipt,
-# printing the NEXT key's declaration line as if it were an element, followed by
-# the elements that belong to that other key. This function drives rm from
-# files[] below, so an empty files[] would migrate .claude/settings.json out of
-# settings[] and delete the file outright instead of stripping its kurama hooks
-# block. The !inarr guard is the same defense one level up: without it a later
-# "<key>" nested elsewhere in the receipt re-opens an array already closed.
-manifest_json_array() {
-    local manifest="$1" key="$2"
-    [ -f "$manifest" ] || return 0
-    if command -v jq >/dev/null 2>&1; then
-        jq -r --arg k "$key" '(.[$k] // [])[]' "$manifest" 2>/dev/null
-        return 0
-    fi
-    awk -v key="$key" '
-        !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {
-            tail = substr($0, index($0, "[") + 1)
-            if (tail ~ /\]/) {                       # array opens and closes on this line
-                sub(/\].*/, "", tail)
-                n = split(tail, parts, ",")
-                for (i = 1; i <= n; i++) {
-                    gsub(/^[[:space:]]+|[[:space:]]+$|"/, "", parts[i])
-                    if (parts[i] != "") print parts[i]
-                }
-                next
-            }
-            inarr = 1; next
-        }
-        inarr && /\]/ { inarr = 0 }
-        inarr {
-            line = $0
-            gsub(/^[[:space:]]+/, "", line)
-            gsub(/[[:space:]]+$/, "", line)
-            gsub(/,$/, "", line)
-            gsub(/"/, "", line)
-            if (line != "") print line
-        }
-    ' "$manifest"
-}
+# manifest_json_array now lives in scripts/lib/receipt.sh (issue #37) — the one
+# copy every script sources, so the empty-array fix can never miss one again.
 
 # Top-level receipt keys only setup.sh's finalize_receipt writes. install.sh's
 # receipt is a strict subset (name/version/commit/tool/files), so seeing any of
@@ -438,6 +379,7 @@ write_install_manifest() {
     {
         printf '{\n'
         printf '  "name": "kurama",\n'
+        printf '  "receiptSchema": %s,\n' "$RECEIPT_SCHEMA"
         printf '  "version": "%s",\n' "$version"
         [ -n "$commit" ] && printf '  "commit": "%s",\n' "$commit"
         printf '  "tool": "%s",\n' "$tool_name"
