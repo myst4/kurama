@@ -469,6 +469,60 @@ offer_pi_uninstall() {
 }
 
 # ============================================================================
+# #33: receipt path containment
+#
+# remove_target drives `rm` straight from the receipt's files[]. In project scope
+# that receipt lives INSIDE the target repo, so its contents are supplied by
+# whoever wrote that repo — not by Kurama — and an entry that resolves outside
+# the install tree must never be acted on.
+#
+# The bound is NOT simply the receipt dir. setup.sh's receipt_rel deliberately
+# emits ../-anchored entries for a global install: skills live in
+# ~/.claude/skills, but the agents, hooks and settings.json it also writes are
+# SIBLINGS of that dir, so 20 of a healthy claude-code receipt's 52 files[]
+# entries start with "../". Rejecting every ".." would orphan all of them. The
+# bound is exactly what receipt_rel can produce — the receipt dir for a project
+# receipt, its PARENT for a global one — and nothing else is removable.
+
+# Collapse "." and ".." components in a path, textually. No filesystem access, so
+# it answers the same way for a path that does not exist and cannot be walked
+# past by a component that only becomes interesting once resolved.
+normalize_abs_path() {
+    local rest="$1" out="" comp
+    while [ -n "$rest" ]; do
+        comp="${rest%%/*}"
+        if [ "$comp" = "$rest" ]; then rest=""; else rest="${rest#*/}"; fi
+        case "$comp" in
+            ''|.) ;;
+            ..)   out="${out%/*}" ;;
+            *)    out="$out/$comp" ;;
+        esac
+    done
+    printf '%s' "${out:-/}"
+}
+
+# True when $2 is STRICTLY inside $1. The root itself is never a recorded file,
+# and never a directory the prune walk below may remove.
+path_within_root() {
+    local root="$1" path="$2"
+    [ -n "$root" ] || return 1
+    case "$path" in
+        "$root"/*) return 0 ;;
+        *)         return 1 ;;
+    esac
+}
+
+# The tree every recorded path must stay inside, for a receipt in $1 with scope $2.
+receipt_containment_root() {
+    local dir_abs="$1" rscope="$2"
+    if [ "$rscope" = "project" ]; then
+        printf '%s' "$dir_abs"
+    else
+        dirname "$dir_abs"
+    fi
+}
+
+# ============================================================================
 # Removal
 # ============================================================================
 
@@ -484,10 +538,111 @@ remove_target() {
 
     echo -e "\n${BOLD}Uninstalling from $label${NC} ($dir)"
 
-    local files
-    files="$(manifest_files "$manifest")"
+    # Absolute form of the target dir, plus the tree every recorded path has to
+    # stay inside (see receipt_containment_root). The receipt's own "scope" is
+    # what decides the bound, so --path targets are judged by what they record
+    # rather than by how they were addressed on the command line.
+    local dir_abs rscope root_abs
+    dir_abs="$(cd "$dir" 2>/dev/null && pwd)" || dir_abs=""
+    if [ -z "$dir_abs" ]; then
+        case "$dir" in
+            /*) dir_abs="$(normalize_abs_path "$dir")" ;;
+            *)  dir_abs="$(normalize_abs_path "$PWD/$dir")" ;;
+        esac
+    fi
+    rscope="$(manifest_field "$manifest" "scope")"; [ -n "$rscope" ] || rscope="global"
+    root_abs="$(receipt_containment_root "$dir_abs" "$rscope")"
 
-    local removed=0 rel target
+    # Filter files[] down to the entries that really belong to this install
+    # BEFORE anything is removed. Both the rm loop and the prune walk read the
+    # filtered list, so a rejected entry can neither delete a file nor let rmdir
+    # climb out of the tree.
+    local raw_files files unsafe=0 rel
+    raw_files="$(manifest_files "$manifest")"
+    files=""
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        case "$rel" in
+            /*)
+                print_warn "$label: refusing absolute receipt entry: $rel"
+                unsafe=$((unsafe + 1))
+                continue
+                ;;
+        esac
+        if ! path_within_root "$root_abs" "$(normalize_abs_path "$dir_abs/$rel")"; then
+            print_warn "$label: refusing receipt entry that resolves outside $root_abs: $rel"
+            unsafe=$((unsafe + 1))
+            continue
+        fi
+        files="${files}${rel}
+"
+    done <<EOF
+$raw_files
+EOF
+    if [ "$unsafe" -gt 0 ]; then
+        print_warn "$label: $unsafe receipt entry/entries ignored — a receipt may only name paths under $root_abs"
+    fi
+
+    # jq-optional invariant: without jq the kurama hooks block cannot be stripped
+    # from settings.json. The files[] sweep used to run FIRST, so the hook SCRIPTS
+    # were deleted, remove_hooks_from_settings then warned and returned, and the
+    # run exited 0 — leaving settings.json invoking executables that no longer
+    # exist, i.e. a broken PreToolUse hook on every Edit/Write. Detect it here,
+    # before a single file is removed, and refuse the whole target.
+    local settings sfile spath blocked_settings=""
+    settings="$(manifest_json_array "$manifest" "settings")"
+    if ! command -v jq >/dev/null 2>&1; then
+        while IFS= read -r sfile; do
+            [ -n "$sfile" ] || continue
+            spath="$dir/$sfile"
+            [ -f "$spath" ] || continue
+            # Textual probe, not a JSON parse: setup.sh embeds "hooks/kurama/" in
+            # every command it writes. No match means nothing of ours is in there
+            # and there is nothing for jq to strip, so the run may proceed.
+            grep -qF 'hooks/kurama/' "$spath" 2>/dev/null || continue
+            # Normalized for display: the recorded form is ../settings.json, and
+            # telling a user to hand-edit ".../skills/../settings.json" when they
+            # have to find the file themselves is worse than not telling them.
+            blocked_settings="${blocked_settings}$(normalize_abs_path "$dir_abs/$sfile")
+"
+        done <<EOF
+$settings
+EOF
+    fi
+    if [ -n "$blocked_settings" ]; then
+        if $DRY_RUN; then
+            print_warn "$label: jq not found — a real run would REFUSE this target"
+            print_info "the kurama hooks block cannot be stripped from settings.json without jq"
+        else
+            print_error "$label: jq not found — cannot strip the kurama hooks block"
+            print_info "Nothing was removed. Deleting the hook scripts while settings.json"
+            print_info "still invokes them breaks every Edit/Write in the harness."
+            print_info "Install jq and re-run, or remove these by hand first:"
+            while IFS= read -r spath; do
+                if [ -n "$spath" ]; then
+                    print_info "  every PreToolUse entry whose command contains 'hooks/kurama/' in:"
+                    print_info "    $spath"
+                fi
+            done <<EOF
+$blocked_settings
+EOF
+            local hookfiles
+            hookfiles="$(printf '%s\n' "$files" | grep -F 'hooks/kurama/' || true)"
+            if [ -n "$hookfiles" ]; then
+                print_info "  then these hook scripts:"
+                while IFS= read -r rel; do
+                    if [ -n "$rel" ]; then
+                        print_info "    $(normalize_abs_path "$dir_abs/$rel")"
+                    fi
+                done <<EOF
+$hookfiles
+EOF
+            fi
+            return 1
+        fi
+    fi
+
+    local removed=0 target
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
         target="$dir/$rel"
@@ -506,9 +661,8 @@ EOF
 
     # O3: strip the Kurama hooks block from every settings.json the receipt
     # recorded, then offer to revert any recorded Pi packages. Both read the
-    # manifest, so they must run BEFORE it is deleted.
-    local sfile settings
-    settings="$(manifest_json_array "$manifest" "settings")"
+    # manifest, so they must run BEFORE it is deleted. settings[] was already
+    # read above, where the jq-less case is caught before anything is removed.
     while IFS= read -r sfile; do
         [ -n "$sfile" ] || continue
         remove_hooks_from_settings "$dir/$sfile"
@@ -587,8 +741,6 @@ EOF
     # records none of what setup_opencode wrote. Sweep those artifacts too —
     # gated on this receipt actually recording opencode, so removing claude-code
     # never reaches into ~/.config/opencode.
-    local rscope
-    rscope="$(manifest_field "$manifest" "scope")"; [ -n "$rscope" ] || rscope="global"
     if manifest_tools "$manifest" | grep -Fxq -- opencode; then
         sweep_legacy_opencode_artifacts "$rscope"
         removed=$((removed + LEGACY_SWEEP_REMOVED))
@@ -612,14 +764,20 @@ EOF
     # both skill-relative global paths (sdd-apply/SKILL.md, ../agents/x.md) and the
     # deeper project-scope paths (.claude/skills/sdd-apply/SKILL.md,
     # .claude/hooks/kurama/x.sh) that the single-component strip could not reach.
+    #
+    # #33: the walk is bounded by the same containment root as the removal above.
+    # The old stop condition was `$pdir != $dir`, which the ../-anchored entries a
+    # global receipt legitimately carries never satisfy — the walk climbed past
+    # ~/.claude toward $HOME and beyond, calling rmdir on everything it found
+    # empty on the way up.
     printf '%s\n' "$files" | awk 'NF' | while IFS= read -r rel; do
-        pdir="$(dirname "$dir/$rel")"
-        while [ "$pdir" != "$dir" ] && [ "$pdir" != "/" ] && [ "$pdir" != "." ]; do
+        pdir="$(normalize_abs_path "$(dirname "$dir_abs/$rel")")"
+        while path_within_root "$root_abs" "$pdir"; do
             rmdir "$pdir" 2>/dev/null || break
             pdir="$(dirname "$pdir")"
         done
     done
-    rmdir "$dir" 2>/dev/null || true
+    rmdir "$dir_abs" 2>/dev/null || true
 
     echo -e "  ${GREEN}${BOLD}$removed file(s) removed${NC}"
 }
@@ -632,7 +790,7 @@ show_help() {
     echo "Usage: uninstall.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --agent NAME           Uninstall from a specific agent target"
+    echo "  --agent NAME           Uninstall from a specific agent target (global scope only)"
     echo "  --scope SCOPE          'global' (default) or 'project' (mirrors setup.sh)"
     echo "  --path DIR             Explicit dir (global) or repo root (--scope project)"
     echo "  --all                  Uninstall from every known global agent target"
@@ -643,9 +801,15 @@ show_help() {
     echo ""
     echo "Agents: claude-code, opencode, codex, pi, omp, project-local"
     echo ""
-    echo "Only files recorded in each target's $INSTALL_MANIFEST_NAME are removed."
+    echo "Only files recorded in each target's $INSTALL_MANIFEST_NAME are removed, and only"
+    echo "when they resolve inside the tree that install wrote to — a recorded path that"
+    echo "points anywhere else is refused, never deleted."
     echo "The recorded settings.json hooks block, the Engram MCP registration, and the"
     echo "orchestrator BEGIN:kurama block are stripped surgically; other keys/content stay."
+    echo ""
+    echo "A project install writes ONE receipt in the repo root, shared by every harness"
+    echo "installed there, so '--scope project' uninstall is all-or-nothing: --agent is"
+    echo "rejected there rather than silently removing every harness."
 }
 
 # ============================================================================
@@ -677,16 +841,43 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# #33: --agent means nothing for a project uninstall, and pretending otherwise
+# was destructive. A project install writes ONE receipt in the repo root, shared
+# by every harness installed there: its files[], prompts[] and settings[] are the
+# union across them, with no per-tool attribution. --agent was only interpolated
+# into the label, so `--agent claude-code --scope project` removed every
+# harness's files and stripped the kurama block from BOTH CLAUDE.md and AGENTS.md
+# while printing "Uninstalling from project (claude-code)". Per-tool attribution
+# needs a receipt schema that records it (#37); until then a project uninstall is
+# all-or-nothing and says so rather than guessing. setup.sh's own undo hint
+# already drops --agent for project scope, so this matches what it advertises.
+if [[ "$SCOPE" == "project" && -n "$AGENT" ]]; then
+    print_error "--agent is not supported with --scope project"
+    print_info "A project install records ONE receipt in the repo root, shared by every"
+    print_info "harness installed there. It carries no per-tool attribution, so removing"
+    print_info "a single harness from it is not possible — a project uninstall is"
+    print_info "all-or-nothing."
+    print_info "To remove every Kurama install from the repo, drop --agent:"
+    print_info "  uninstall.sh --scope project --path ${CUSTOM_PATH:-<repo>}"
+    print_info "Add --dry-run to that first to see exactly what it would remove."
+    exit 1
+fi
+
 if $DRY_RUN; then
     echo -e "${YELLOW}${BOLD}Dry run — no files will be deleted.${NC}"
 fi
 
+# A target remove_target refused (jq-less with a settings.json it cannot clean)
+# must not be reported as a success. --all keeps sweeping the remaining agents
+# and the non-zero status is carried to the end.
+EXIT_CODE=0
+
 # O1: project scope removes the single repo-root receipt setup.sh wrote there.
 if [[ "$SCOPE" == "project" ]]; then
     TARGET_PATH="${CUSTOM_PATH:-$PWD}"
-    remove_target "$TARGET_PATH" "project (${AGENT:-repo})"
+    remove_target "$TARGET_PATH" "project (repo)" || EXIT_CODE=1
 elif [[ -n "$CUSTOM_PATH" ]]; then
-    remove_target "$CUSTOM_PATH" "custom path"
+    remove_target "$CUSTOM_PATH" "custom path" || EXIT_CODE=1
 elif [[ -n "$AGENT" ]]; then
     target_dir="$(get_tool_path "$AGENT")"
     if [[ -z "$target_dir" ]]; then
@@ -694,14 +885,19 @@ elif [[ -n "$AGENT" ]]; then
         show_help
         exit 1
     fi
-    remove_target "$target_dir" "$AGENT"
+    remove_target "$target_dir" "$AGENT" || EXIT_CODE=1
 elif $ALL; then
     for agent in $ALL_AGENTS; do
-        remove_target "$(get_tool_path "$agent")" "$agent"
+        remove_target "$(get_tool_path "$agent")" "$agent" || EXIT_CODE=1
     done
 else
     show_help
     exit 1
+fi
+
+if [[ $EXIT_CODE -ne 0 ]]; then
+    echo -e "\n${RED}${BOLD}Uninstall incomplete — one or more targets were refused (see above).${NC}"
+    exit "$EXIT_CODE"
 fi
 
 echo -e "\n${GREEN}${BOLD}Done.${NC}"
