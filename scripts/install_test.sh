@@ -5891,6 +5891,437 @@ echo -e "${BOLD}UNIT-C (issue #35) — plugin.json manifest drift${NC}"
 run_test "plugin.json homepage/repository point at myst4/kurama" test_plugin_json_repository_url
 run_test "plugin.json 'agents' matches examples/claude-code/agents/ on disk" test_plugin_json_agents_match_disk_set
 run_test "plugin.json registers all 17 agents" test_plugin_json_agents_count_is_17
+
+# ===== UNIT-B (issue #33) =====
+# ============================================================================
+# uninstall.sh hardening — three defects, all on the highest-blast-radius path
+# in the repo (the one that calls rm):
+#
+#   1. `--agent X --scope project` interpolated X into the LABEL only and then
+#      removed the whole shared project receipt — every harness's files, and the
+#      kurama block out of both CLAUDE.md and AGENTS.md — while printing one
+#      harness's name. A project receipt carries no per-tool attribution, so the
+#      only honest answers are "remove everything" or "refuse". It now refuses.
+#   2. Without jq the hooks block cannot be stripped from settings.json, but the
+#      files[] sweep ran FIRST: the hook scripts were deleted, the strip then
+#      warned and returned, and the run exited 0 — leaving settings.json invoking
+#      executables that no longer exist. Now detected before anything is removed.
+#   3. files[] came straight from a receipt that, in project scope, lives inside
+#      the target repo and is written by whoever wrote that repo. Entries were
+#      joined onto the target dir and rm'd with no containment check at all.
+#
+# The containment rule is the subtle one: setup.sh's receipt_rel DELIBERATELY
+# emits ../-anchored entries for a global install (skills sit in
+# ~/.claude/skills; agents, hooks and settings.json are its SIBLINGS), so 20 of a
+# claude-code receipt's 52 files[] entries legitimately start with "../". A naive
+# "reject every .." rule would orphan all of them — hence the last case here,
+# which pins that they still get removed.
+# ============================================================================
+
+# Insert $2 as the first element of the receipt $1's files[], verbatim. Mirrors
+# collapse_receipt_files_to_empty_array's awk shape: one element per line, so a
+# crafted entry is indistinguishable from a recorded one to every reader.
+inject_receipt_files_entry() {
+    local manifest="$1" entry="$2"
+    local tmp="$manifest.tmp"
+    awk -v entry="$entry" '
+        !injected && /^[[:space:]]*"files"[[:space:]]*:[[:space:]]*\[[[:space:]]*$/ {
+            print; print "    \"" entry "\","; injected = 1; next
+        }
+        { print }
+    ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+}
+
+test_uninstall_rejects_agent_in_project_scope() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+    bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+
+    # Preconditions: ONE receipt shared by both harnesses, and both prompt files
+    # carrying a kurama block — exactly the union the old code removed wholesale.
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q 'BEGIN:kurama' "$repo/CLAUDE.md" || { echo "CLAUDE.md carries no kurama block"; return 1; }
+    grep -q 'BEGIN:kurama' "$repo/AGENTS.md" || { echo "AGENTS.md carries no kurama block"; return 1; }
+    local before
+    before=$(count_matching_files "$repo/.claude/skills" 'SKILL.md')
+    [ "$before" -gt 0 ] || { echo "no skills installed — this case would prove nothing"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "--agent with --scope project must not exit 0; the run reported:"
+        printf '%s\n' "$output" | grep -a 'removed' | head -5
+        return 1
+    fi
+
+    # A refusal removes nothing at all.
+    assert_file_exists "$manifest" || { echo "the refused run deleted the receipt"; return 1; }
+    assert_eq "$before" "$(count_matching_files "$repo/.claude/skills" 'SKILL.md')" \
+        "the refused run removed skill files" || return 1
+    grep -q 'BEGIN:kurama' "$repo/CLAUDE.md" || { echo "the refused run stripped CLAUDE.md"; return 1; }
+    grep -q 'BEGIN:kurama' "$repo/AGENTS.md" || { echo "the refused run stripped AGENTS.md"; return 1; }
+
+    # And it says how to proceed instead of leaving the user guessing.
+    printf '%s\n' "$output" | grep -aq -- '--scope project' || {
+        echo "the refusal never shows the all-or-nothing command; got:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+test_uninstall_project_scope_removes_every_harness_without_agent() {
+    # The other half of the ruling: the documented all-or-nothing path must
+    # really clear BOTH harnesses, or the refusal above just strands the user.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code project setup exited non-zero"; return 1; }
+    bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+    mkdir -p "$repo/.claude/skills/my-custom"
+    echo "keep me" > "$repo/.claude/skills/my-custom/SKILL.md"
+
+    local status=0
+    bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages \
+        > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "the all-or-nothing project uninstall must exit 0" || return 1
+
+    if [ -f "$repo/.kurama-install-manifest.json" ]; then echo "receipt not removed"; return 1; fi
+    if [ -d "$repo/.claude/skills/sdd-apply" ]; then echo "sdd-apply not removed"; return 1; fi
+    local f
+    for f in CLAUDE.md AGENTS.md; do
+        if [ -f "$repo/$f" ] && grep -q 'BEGIN:kurama' "$repo/$f"; then
+            echo "uninstall left a BEGIN:kurama block in $f"; return 1
+        fi
+    done
+    local content
+    content=$(cat "$repo/.claude/skills/my-custom/SKILL.md" 2>/dev/null || echo MISSING)
+    assert_eq "keep me" "$content" "user-created skill preserved" || return 1
+    return 0
+}
+
+test_uninstall_without_jq_refuses_before_deleting_hook_scripts() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    # Install WITH jq, so settings.json really carries the hooks block that a
+    # jq-less removal cannot take back out.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
+    local settings="$HOME/.claude/settings.json"
+    local guard="$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh"
+    local gate="$HOME/.claude/hooks/kurama/archive-gate.sh"
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$settings" || return 1
+    assert_file_exists "$guard" || return 1
+    assert_file_exists "$gate" || return 1
+    grep -q 'hooks/kurama/' "$settings" || { echo "setup wrote no hooks block"; return 1; }
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$UNINSTALL_SCRIPT" --agent claude-code \
+        --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "a jq-less run that cannot clean settings.json must not exit 0; it said:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+
+    # The whole point: settings.json still names the hooks, so the hooks are
+    # still there. Deleting them first is what made every Edit/Write fail.
+    grep -q 'hooks/kurama/' "$settings" || { echo "the refused run mangled settings.json"; return 1; }
+    assert_file_exists "$guard" || {
+        echo "the write-guard hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$gate" || {
+        echo "the archive-gate hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$manifest" || { echo "the refused run deleted the receipt"; return 1; }
+    assert_dir_exists "$HOME/.claude/skills/sdd-apply" || {
+        echo "the refused run removed skills"; return 1; }
+
+    # It must name exactly what to remove by hand — the settings file and the
+    # hook scripts — or the user cannot get out of the state it just refused.
+    printf '%s\n' "$output" | grep -aqF "$settings" || {
+        echo "the refusal does not name settings.json; got:"; printf '%s\n' "$output"; return 1; }
+    printf '%s\n' "$output" | grep -aqF 'orchestrator-write-guard.sh' || {
+        echo "the refusal does not name the hook scripts; got:"; printf '%s\n' "$output"; return 1; }
+    return 0
+}
+
+test_uninstall_without_jq_still_clears_a_target_with_no_hooks_block() {
+    # The guard must be narrow: codex records no settings[] at all, so there is
+    # nothing jq is needed for and a jq-less uninstall must still complete.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "codex setup exited non-zero"; return 1; }
+    local skills="$HOME/.codex/skills"
+    assert_dir_exists "$skills/sdd-apply" || return 1
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$UNINSTALL_SCRIPT" --agent codex \
+        --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "a jq-less uninstall with nothing to strip must exit 0 (got $status):"
+        printf '%s\n' "$output" | tail -10
+        return 1
+    fi
+    if [ -d "$skills/sdd-apply" ]; then echo "sdd-apply survived the uninstall"; return 1; fi
+    if [ -f "$skills/.kurama-install-manifest.json" ]; then echo "receipt survived"; return 1; fi
+    return 0
+}
+
+test_uninstall_refuses_absolute_receipt_files_entry() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+
+    local outside="$TEST_TMPDIR/outside"
+    mkdir -p "$outside"
+    echo "do not touch" > "$outside/canary.txt"
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    inject_receipt_files_entry "$manifest" "$outside/canary.txt"
+    grep -qF "\"$outside/canary.txt\"," "$manifest" || {
+        echo "the crafted absolute entry was not injected"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+
+    assert_file_exists "$outside/canary.txt" || {
+        echo "an absolute receipt entry reached a file outside the target dir"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'refusing' || {
+        echo "the absolute entry was accepted silently (exit $status); got:"
+        printf '%s\n' "$output" | head -20
+        return 1
+    }
+    # A tampered receipt must be distinguishable from a clean uninstall by exit
+    # code alone — a caller that only checks $? would otherwise never know.
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
+    return 0
+}
+
+test_uninstall_refuses_parent_traversal_receipt_files_entry() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+
+    # A sibling of the target repo — reachable from it with a single "..", which
+    # is what a hostile or corrupt receipt in a cloned repo would use.
+    local outside="$TEST_TMPDIR/outside"
+    mkdir -p "$outside"
+    echo "do not touch" > "$outside/canary.txt"
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    inject_receipt_files_entry "$manifest" "../outside/canary.txt"
+    grep -qF '"../outside/canary.txt",' "$manifest" || {
+        echo "the crafted traversal entry was not injected"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+
+    assert_file_exists "$outside/canary.txt" || {
+        echo "a ../ receipt entry deleted a file outside the target repo"; return 1; }
+    # The prune walk runs off the same list: an accepted traversal entry also
+    # let rmdir climb out of the target.
+    assert_dir_exists "$outside" || {
+        echo "the prune walk removed a directory outside the target repo"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'refusing' || {
+        echo "the traversal entry was accepted silently (exit $status); got:"
+        printf '%s\n' "$output" | head -20
+        return 1
+    }
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
+    return 0
+}
+
+# Rewrite the receipt $1's "scope" scalar to $2, or delete the field entirely
+# when $2 is empty. Lets a case hand uninstall a receipt that LIES about its own
+# scope — which in project scope is not a hypothetical: the receipt is a file in
+# the target repo, written by whoever wrote that repo.
+set_receipt_scope() {
+    local manifest="$1" scope="$2"
+    local tmp="$manifest.tmp"
+    if [ -n "$scope" ]; then
+        awk -v s="$scope" '
+            /^[[:space:]]*"scope"[[:space:]]*:/ {
+                sub(/:[[:space:]]*"[^"]*"/, ": \"" s "\""); print; next
+            }
+            { print }
+        ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    else
+        awk '!/^[[:space:]]*"scope"[[:space:]]*:/' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    fi
+}
+
+test_uninstall_ignores_a_receipt_that_lies_about_its_scope() {
+    # The containment bound must come from HOW THE TARGET WAS ADDRESSED, not
+    # from a field inside the attacker-supplied receipt. A project receipt
+    # claiming "global" — or simply omitting "scope", which defaults to global —
+    # widened the bound to the PARENT of the repo, so the documented
+    # `--scope project --path <repo>` reached ../<sibling>/ and deleted it.
+    local claim
+    for claim in global ""; do
+        local repo="$TEST_TMPDIR/proj-${claim:-absent}"
+        make_git_repo "$repo"
+        bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+            --without-engram --non-interactive > /dev/null 2>&1 \
+            || { echo "project setup exited non-zero"; return 1; }
+
+        local outside="$TEST_TMPDIR/outside-${claim:-absent}"
+        mkdir -p "$outside"
+        echo "do not touch" > "$outside/canary.txt"
+
+        local manifest="$repo/.kurama-install-manifest.json"
+        inject_receipt_files_entry "$manifest" "../outside-${claim:-absent}/canary.txt"
+        set_receipt_scope "$manifest" "$claim"
+        # Precondition: the receipt really does claim what this case needs.
+        if [ -n "$claim" ]; then
+            grep -q '"scope"[[:space:]]*:[[:space:]]*"global"' "$manifest" || {
+                echo "the receipt was not made to claim global scope"; return 1; }
+        else
+            if grep -q '"scope"[[:space:]]*:' "$manifest"; then
+                echo "the scope field was not removed from the receipt"; return 1
+            fi
+        fi
+
+        local output status=0
+        output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+            --without-pi-packages 2>&1) || status=$?
+
+        assert_file_exists "$outside/canary.txt" || {
+            echo "a receipt claiming scope='${claim:-<absent>}' widened the bound and deleted outside the repo"
+            return 1
+        }
+        assert_dir_exists "$outside" || {
+            echo "the prune walk climbed out under a spoofed scope='${claim:-<absent>}'"; return 1; }
+        printf '%s\n' "$output" | grep -aq 'refusing' || {
+            echo "scope='${claim:-<absent>}' was accepted silently (exit $status); got:"
+            printf '%s\n' "$output" | head -20
+            return 1
+        }
+        if [ "$status" -eq 0 ]; then
+            echo "a refused entry under scope='${claim:-<absent>}' must not exit 0"
+            return 1
+        fi
+    done
+    return 0
+}
+
+test_uninstall_refuses_an_entry_behind_a_symlinked_directory() {
+    # Containment cannot be purely textual while rm is physical. git versions
+    # symlinks, so in project scope BOTH halves ship in the hostile repo: a
+    # symlinked directory and a receipt entry pointing through it. The textual
+    # check reads "repo/evil/id_rsa" as inside the repo; rm resolves `evil` and
+    # deletes the real file somewhere else entirely.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+
+    local secrets="$TEST_TMPDIR/secrets"
+    mkdir -p "$secrets"
+    echo "do not touch" > "$secrets/id_rsa"
+    ln -s "$secrets" "$repo/evil"
+    # Precondition: the symlink really does resolve out of the repo, so the
+    # textual reading and the physical one genuinely disagree.
+    assert_file_exists "$repo/evil/id_rsa" || {
+        echo "the symlinked directory does not resolve — this case would prove nothing"
+        return 1
+    }
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    inject_receipt_files_entry "$manifest" "evil/id_rsa"
+    grep -qF '"evil/id_rsa",' "$manifest" || {
+        echo "the crafted symlink entry was not injected"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+
+    assert_file_exists "$secrets/id_rsa" || {
+        echo "an entry behind a symlinked directory deleted a file outside the repo"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'refusing' || {
+        echo "the symlinked-directory entry was accepted silently (exit $status); got:"
+        printf '%s\n' "$output" | head -20
+        return 1
+    }
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
+    return 0
+}
+
+test_uninstall_still_removes_legitimate_parent_anchored_entries() {
+    # The containment rule must not be "reject every ..": a global receipt
+    # records agents and hooks as ../-anchored siblings of the skills dir, and
+    # rejecting those would leave 20 of 52 recorded files on disk forever.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+
+    local ups
+    ups=$(receipt_array_values "$manifest" "files" | grep -c '^\.\./' || true)
+    [ "${ups:-0}" -gt 0 ] || {
+        echo "the receipt records no ../-anchored entries — this case would prove nothing"
+        return 1
+    }
+    assert_dir_exists "$HOME/.claude/agents" || return 1
+    assert_file_exists "$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh" || return 1
+
+    local status=0
+    bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages \
+        > /dev/null 2>&1 || status=$?
+    # Also the "clean run" half of the exit-code contract the containment cases
+    # assert from the other side: an untampered receipt exits 0.
+    assert_eq "0" "$status" "the uninstall must exit 0" || return 1
+
+    local left
+    left=$(count_matching_files "$HOME/.claude/agents" 'sdd-*.md')
+    assert_eq "0" "$left" "../agents entries survived the uninstall" || return 1
+    if [ -d "$HOME/.claude/hooks/kurama" ]; then
+        echo "../hooks entries survived the uninstall"; return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}#33 — uninstall hardening (UNIT-B)${NC}"
+run_test "--agent with --scope project refuses and removes nothing" test_uninstall_rejects_agent_in_project_scope
+run_test "the all-or-nothing project uninstall clears every harness" test_uninstall_project_scope_removes_every_harness_without_agent
+run_test "without jq, uninstall refuses before deleting the hook scripts" test_uninstall_without_jq_refuses_before_deleting_hook_scripts
+run_test "without jq, a target with no hooks block still uninstalls" test_uninstall_without_jq_still_clears_a_target_with_no_hooks_block
+run_test "an absolute receipt files[] entry is refused" test_uninstall_refuses_absolute_receipt_files_entry
+run_test "a ../ receipt files[] entry is refused" test_uninstall_refuses_parent_traversal_receipt_files_entry
+run_test "a receipt that lies about its scope cannot widen the bound" test_uninstall_ignores_a_receipt_that_lies_about_its_scope
+run_test "an entry behind a symlinked directory is refused" test_uninstall_refuses_an_entry_behind_a_symlinked_directory
+run_test "legitimate ../-anchored entries are still removed" test_uninstall_still_removes_legitimate_parent_anchored_entries
+
 echo ""
 
 # ============================================================================
