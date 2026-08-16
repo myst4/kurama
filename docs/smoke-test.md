@@ -303,47 +303,26 @@ never auto-run, even in `auto`.
 
 ## Negative checks — prove the gates actually gate
 
-Run these once (Pass B is easiest to inspect on disk). They confirm the
-deterministic gates fail *closed*.
+The **deterministic hook mechanics** are already pinned by `scripts/install_test.sh`
+(no network, run on every PR) — do not re-verify them by hand:
 
-> These call `archive-gate.sh` by its **installed** path — the hook lives outside
-> your toy project, so a repo-relative `examples/...` path does **not** resolve from
-> inside `kurama-smoke`. Use whichever your pass installed: `~/.claude/hooks/kurama/`
-> for a **global** install, `.claude/hooks/kurama/` for a **project** install (see
-> [installation.md](installation.md)). The examples below use the global path — swap
-> in `.claude/hooks/kurama/archive-gate.sh` for a project install. The script
-> auto-detects the project root from `$PWD`, so run it from **inside `kurama-smoke`**
-> and it gates the toy project. (To exercise the repo source directly instead, call
-> it by an absolute path: `<kurama-repo>/examples/claude-code/hooks/archive-gate.sh`.)
+- `archive-gate.sh` refusing an archive with no verify report, blocking a `FAIL`
+  verdict, passing a `PASS`, blocking a **stale content-binding** receipt, and the
+  `KURAMA_ARCHIVE_OVERRIDE=1` bypass — see the `test_archive_gate_*` cases.
+- `orchestrator-write-guard.sh` allowing writes with no active cycle, blocking repo
+  code mid-cycle, exempting `openspec/`/`.kurama/`, standing down after archive, and
+  still blocking without `jq` — see the `test_write_guard_*` cases.
 
-1. **Archive without a PASS is refused.** Before Step 6, try `/sdd-archive add-sum`
-   (or run the hook CLI directly). It must block, naming the missing verify report:
-   ```bash
-   ~/.claude/hooks/kurama/archive-gate.sh add-sum   # exit 2, "no verify report / not passing"
-   ```
+What the suite **cannot** reach are the two gates that live inside the SDD *skills*
+and only fire in a live cycle. Verify these by hand (Pass B is easiest to inspect on
+disk):
 
-2. **Stale receipt is refused.** After a PASS in Step 6, edit a source file, then
-   attempt archive. The live tree hash no longer matches the receipt, so the gate
-   blocks with `verify receipt stale — re-run sdd-verify`:
-   ```bash
-   echo '// touch' >> index.js
-   ~/.claude/hooks/kurama/archive-gate.sh add-sum   # exit 2, STALE
-   ```
-   Re-running `/sdd-verify` re-stamps the hash and unblocks archive. (Writing the
-   verify report or moving the change folder does **not** trip this — only real
-   code changes do, because `openspec/` and `.kurama/` are excluded from the hash.)
-
-3. **Override is explicit and recorded.** `KURAMA_ARCHIVE_OVERRIDE=1` opens both the
-   verdict and stale-receipt gates — confirm it only bypasses the mechanism and that
-   `sdd-archive` still records the override reason in the archive report. Never
-   self-authorize this.
-
-4. **A `small` change with an empty inline spec is refused.** Classify a change `small`
+1. **A `small` change with an empty inline spec is refused.** Classify a change `small`
    but leave `## Spec (inline)` with no `### Requirement:` under it, then attempt archive.
    It must block with `next_recommended: sdd-propose` — a partial delta merged into the
    source of truth is worse than no archive at all.
 
-5. **A proposal with no `## Change Size` runs the long path.** Every change created before
+2. **A proposal with no `## Change Size` runs the long path.** Every change created before
    the size field existed lacks the section. No phase may fail on it, and it must resolve
    to `standard` — never guessed as `small`, which would silently strip two planning
    phases from in-flight work.
