@@ -27,6 +27,15 @@ ALL_AGENTS="claude-code opencode codex pi omp"
 
 DRY_RUN=false
 SCOPE="global"       # global | project (O1: mirrors setup.sh)
+# Set by remove_target when it refuses a target or refuses a recorded entry.
+# A GLOBAL flag rather than a non-zero return, because remove_target must be
+# called BARE: routing it through `|| FLAG=1` puts it in a condition context,
+# and bash suppresses errexit for the whole extent of that — for the entire body
+# of the one function in this script that calls rm. A `rm` or a `printf > tmp`
+# that failed would then be swallowed, and the run would report a file "removed"
+# that is still on disk, or mv a truncated settings.json into place, while
+# exiting 0.
+UNINSTALL_FAILED=0
 TARGET_PATH=""       # repo root for project scope, or explicit dir for --path
 PI_PACKAGES=""       # "", "yes", or "no" — O3 Pi package revert offer
 
@@ -539,10 +548,8 @@ remove_target() {
     echo -e "\n${BOLD}Uninstalling from $label${NC} ($dir)"
 
     # Absolute form of the target dir, plus the tree every recorded path has to
-    # stay inside (see receipt_containment_root). The receipt's own "scope" is
-    # what decides the bound, so --path targets are judged by what they record
-    # rather than by how they were addressed on the command line.
-    local dir_abs rscope root_abs
+    # stay inside (see receipt_containment_root).
+    local dir_abs rscope root_abs root_phys effective_scope
     dir_abs="$(cd "$dir" 2>/dev/null && pwd)" || dir_abs=""
     if [ -z "$dir_abs" ]; then
         case "$dir" in
@@ -550,8 +557,30 @@ remove_target() {
             *)  dir_abs="$(normalize_abs_path "$PWD/$dir")" ;;
         esac
     fi
+
+    # The receipt's own "scope" is NOT authority over how far this script may
+    # reach. In project scope the receipt lives inside the target repo, so its
+    # scope field is written by whoever wrote that repo: a hostile receipt
+    # claiming "global" (or omitting the field, which defaults to global) turned
+    # the bound into the PARENT of the repo, and the documented
+    # `uninstall.sh --scope project --path <repo>` then reached ../.ssh/id_rsa.
+    # Take the NARROWER of how the target was addressed (SCOPE) and what the
+    # receipt claims (rscope); the field is a hint, never a widening permission.
     rscope="$(manifest_field "$manifest" "scope")"; [ -n "$rscope" ] || rscope="global"
-    root_abs="$(receipt_containment_root "$dir_abs" "$rscope")"
+    effective_scope="global"
+    if [ "$SCOPE" = "project" ] || [ "$rscope" = "project" ]; then
+        effective_scope="project"
+    fi
+    root_abs="$(receipt_containment_root "$dir_abs" "$effective_scope")"
+
+    # Physically resolved root. Containment is checked against THIS, because rm
+    # resolves symlinks and normalize_abs_path does not (see the rm loop below).
+    root_phys="$(cd -P "$root_abs" 2>/dev/null && pwd -P)" || root_phys=""
+    if [ -z "$root_phys" ]; then
+        print_error "$label: cannot resolve the containment root ($root_abs) — refusing"
+        UNINSTALL_FAILED=1
+        return 0
+    fi
 
     # Filter files[] down to the entries that really belong to this install
     # BEFORE anything is removed. Both the rm loop and the prune walk read the
@@ -579,9 +608,6 @@ remove_target() {
     done <<EOF
 $raw_files
 EOF
-    if [ "$unsafe" -gt 0 ]; then
-        print_warn "$label: $unsafe receipt entry/entries ignored — a receipt may only name paths under $root_abs"
-    fi
 
     # jq-optional invariant: without jq the kurama hooks block cannot be stripped
     # from settings.json. The files[] sweep used to run FIRST, so the hook SCRIPTS
@@ -638,14 +664,45 @@ EOF
 $hookfiles
 EOF
             fi
-            return 1
+            # Flag rather than `return 1`: the caller invokes remove_target BARE
+            # so that `set -e` stays armed for this function's body, and a
+            # non-zero return would abort the whole run instead of letting --all
+            # sweep the remaining targets.
+            UNINSTALL_FAILED=1
+            return 0
         fi
     fi
 
-    local removed=0 target
+    # The lexical filter above cannot see a symlinked INTERMEDIATE DIRECTORY:
+    # normalize_abs_path is textual, but rm resolves that component. In project
+    # scope both halves come from the target repo — git versions symlinks, so
+    # `repo/evil -> /home/u/.ssh` plus a recorded "evil/id_rsa" passed the
+    # textual check as "inside the repo" and then deleted the real key. So the
+    # parent is resolved PHYSICALLY here and the very same resolved path is what
+    # gets checked and removed — no gap between what was validated and what is
+    # deleted. (A recorded file that is itself a symlink stays safe either way:
+    # rm -f unlinks the link, never what it points at.)
+    local removed=0 target tbase tdir tparent prune_dirs=""
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
-        target="$dir/$rel"
+        tbase="${rel##*/}"
+        tdir="${rel%/*}"
+        if [ "$tdir" = "$rel" ]; then tdir="."; fi
+        tparent="$(cd -P "$dir/$tdir" 2>/dev/null && pwd -P)" || tparent=""
+        # No parent directory on disk means nothing recorded there is left to
+        # remove — not a rejection, just an entry that is already gone.
+        [ -n "$tparent" ] || continue
+        target="$tparent/$tbase"
+        if ! path_within_root "$root_phys" "$target"; then
+            print_warn "$label: refusing receipt entry that resolves outside $root_phys: $rel"
+            unsafe=$((unsafe + 1))
+            continue
+        fi
+        # Banked for the prune walk, resolved HERE while $dir is still on disk.
+        # The walk cannot re-resolve these itself: it removes $dir partway
+        # through, and every ../-anchored entry is expressed relative to it.
+        prune_dirs="${prune_dirs}${tparent}
+"
         if [ -e "$target" ]; then
             if $DRY_RUN; then
                 print_info "would remove: $rel"
@@ -658,6 +715,14 @@ EOF
     done <<EOF
 $files
 EOF
+
+    # A tampered receipt is not a clean uninstall. Whatever was legitimately
+    # recorded has still been removed, but the run must not look identical to an
+    # untampered one from the outside.
+    if [ "$unsafe" -gt 0 ]; then
+        print_warn "$label: $unsafe receipt entry/entries refused — a receipt may only name paths under $root_phys"
+        UNINSTALL_FAILED=1
+    fi
 
     # O3: strip the Kurama hooks block from every settings.json the receipt
     # recorded, then offer to revert any recorded Pi packages. Both read the
@@ -741,8 +806,12 @@ EOF
     # records none of what setup_opencode wrote. Sweep those artifacts too —
     # gated on this receipt actually recording opencode, so removing claude-code
     # never reaches into ~/.config/opencode.
+    # Driven by the EFFECTIVE scope, not the receipt's claim: the sweep reaches
+    # into fixed $HOME/.config/opencode paths and only early-returns on
+    # "project", so a project receipt spoofing "global" would have swept the
+    # user's global OpenCode install from a project uninstall.
     if manifest_tools "$manifest" | grep -Fxq -- opencode; then
-        sweep_legacy_opencode_artifacts "$rscope"
+        sweep_legacy_opencode_artifacts "$effective_scope"
         removed=$((removed + LEGACY_SWEEP_REMOVED))
     fi
 
@@ -770,11 +839,14 @@ EOF
     # global receipt legitimately carries never satisfy — the walk climbed past
     # ~/.claude toward $HOME and beyond, calling rmdir on everything it found
     # empty on the way up.
-    printf '%s\n' "$files" | awk 'NF' | while IFS= read -r rel; do
-        pdir="$(normalize_abs_path "$(dirname "$dir_abs/$rel")")"
-        while path_within_root "$root_abs" "$pdir"; do
+    # Walks the physically-resolved parents banked by the rm loop, so it prunes
+    # exactly the directories whose contents were validated and removed — and
+    # never climbs out of the tree through a symlinked component, which a
+    # textual walk would have followed just as rmdir does.
+    printf '%s\n' "$prune_dirs" | awk 'NF' | while IFS= read -r pdir; do
+        while path_within_root "$root_phys" "$pdir"; do
             rmdir "$pdir" 2>/dev/null || break
-            pdir="$(dirname "$pdir")"
+            pdir="${pdir%/*}"
         done
     done
     rmdir "$dir_abs" 2>/dev/null || true
@@ -867,17 +939,13 @@ if $DRY_RUN; then
     echo -e "${YELLOW}${BOLD}Dry run — no files will be deleted.${NC}"
 fi
 
-# A target remove_target refused (jq-less with a settings.json it cannot clean)
-# must not be reported as a success. --all keeps sweeping the remaining agents
-# and the non-zero status is carried to the end.
-EXIT_CODE=0
-
 # O1: project scope removes the single repo-root receipt setup.sh wrote there.
+# Every remove_target call below is BARE on purpose — see UNINSTALL_FAILED.
 if [[ "$SCOPE" == "project" ]]; then
     TARGET_PATH="${CUSTOM_PATH:-$PWD}"
-    remove_target "$TARGET_PATH" "project (repo)" || EXIT_CODE=1
+    remove_target "$TARGET_PATH" "project (repo)"
 elif [[ -n "$CUSTOM_PATH" ]]; then
-    remove_target "$CUSTOM_PATH" "custom path" || EXIT_CODE=1
+    remove_target "$CUSTOM_PATH" "custom path"
 elif [[ -n "$AGENT" ]]; then
     target_dir="$(get_tool_path "$AGENT")"
     if [[ -z "$target_dir" ]]; then
@@ -885,19 +953,19 @@ elif [[ -n "$AGENT" ]]; then
         show_help
         exit 1
     fi
-    remove_target "$target_dir" "$AGENT" || EXIT_CODE=1
+    remove_target "$target_dir" "$AGENT"
 elif $ALL; then
     for agent in $ALL_AGENTS; do
-        remove_target "$(get_tool_path "$agent")" "$agent" || EXIT_CODE=1
+        remove_target "$(get_tool_path "$agent")" "$agent"
     done
 else
     show_help
     exit 1
 fi
 
-if [[ $EXIT_CODE -ne 0 ]]; then
-    echo -e "\n${RED}${BOLD}Uninstall incomplete — one or more targets were refused (see above).${NC}"
-    exit "$EXIT_CODE"
+if [[ $UNINSTALL_FAILED -ne 0 ]]; then
+    echo -e "\n${RED}${BOLD}Uninstall did not complete cleanly — see the messages above.${NC}"
+    exit 1
 fi
 
 echo -e "\n${GREEN}${BOLD}Done.${NC}"

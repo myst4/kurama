@@ -5704,6 +5704,12 @@ test_uninstall_refuses_absolute_receipt_files_entry() {
         printf '%s\n' "$output" | head -20
         return 1
     }
+    # A tampered receipt must be distinguishable from a clean uninstall by exit
+    # code alone — a caller that only checks $? would otherwise never know.
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
     return 0
 }
 
@@ -5740,6 +5746,129 @@ test_uninstall_refuses_parent_traversal_receipt_files_entry() {
         printf '%s\n' "$output" | head -20
         return 1
     }
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
+    return 0
+}
+
+# Rewrite the receipt $1's "scope" scalar to $2, or delete the field entirely
+# when $2 is empty. Lets a case hand uninstall a receipt that LIES about its own
+# scope — which in project scope is not a hypothetical: the receipt is a file in
+# the target repo, written by whoever wrote that repo.
+set_receipt_scope() {
+    local manifest="$1" scope="$2"
+    local tmp="$manifest.tmp"
+    if [ -n "$scope" ]; then
+        awk -v s="$scope" '
+            /^[[:space:]]*"scope"[[:space:]]*:/ {
+                sub(/:[[:space:]]*"[^"]*"/, ": \"" s "\""); print; next
+            }
+            { print }
+        ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    else
+        awk '!/^[[:space:]]*"scope"[[:space:]]*:/' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    fi
+}
+
+test_uninstall_ignores_a_receipt_that_lies_about_its_scope() {
+    # The containment bound must come from HOW THE TARGET WAS ADDRESSED, not
+    # from a field inside the attacker-supplied receipt. A project receipt
+    # claiming "global" — or simply omitting "scope", which defaults to global —
+    # widened the bound to the PARENT of the repo, so the documented
+    # `--scope project --path <repo>` reached ../<sibling>/ and deleted it.
+    local claim
+    for claim in global ""; do
+        local repo="$TEST_TMPDIR/proj-${claim:-absent}"
+        make_git_repo "$repo"
+        bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+            --without-engram --non-interactive > /dev/null 2>&1 \
+            || { echo "project setup exited non-zero"; return 1; }
+
+        local outside="$TEST_TMPDIR/outside-${claim:-absent}"
+        mkdir -p "$outside"
+        echo "do not touch" > "$outside/canary.txt"
+
+        local manifest="$repo/.kurama-install-manifest.json"
+        inject_receipt_files_entry "$manifest" "../outside-${claim:-absent}/canary.txt"
+        set_receipt_scope "$manifest" "$claim"
+        # Precondition: the receipt really does claim what this case needs.
+        if [ -n "$claim" ]; then
+            grep -q '"scope"[[:space:]]*:[[:space:]]*"global"' "$manifest" || {
+                echo "the receipt was not made to claim global scope"; return 1; }
+        else
+            if grep -q '"scope"[[:space:]]*:' "$manifest"; then
+                echo "the scope field was not removed from the receipt"; return 1
+            fi
+        fi
+
+        local output status=0
+        output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+            --without-pi-packages 2>&1) || status=$?
+
+        assert_file_exists "$outside/canary.txt" || {
+            echo "a receipt claiming scope='${claim:-<absent>}' widened the bound and deleted outside the repo"
+            return 1
+        }
+        assert_dir_exists "$outside" || {
+            echo "the prune walk climbed out under a spoofed scope='${claim:-<absent>}'"; return 1; }
+        printf '%s\n' "$output" | grep -aq 'refusing' || {
+            echo "scope='${claim:-<absent>}' was accepted silently (exit $status); got:"
+            printf '%s\n' "$output" | head -20
+            return 1
+        }
+        if [ "$status" -eq 0 ]; then
+            echo "a refused entry under scope='${claim:-<absent>}' must not exit 0"
+            return 1
+        fi
+    done
+    return 0
+}
+
+test_uninstall_refuses_an_entry_behind_a_symlinked_directory() {
+    # Containment cannot be purely textual while rm is physical. git versions
+    # symlinks, so in project scope BOTH halves ship in the hostile repo: a
+    # symlinked directory and a receipt entry pointing through it. The textual
+    # check reads "repo/evil/id_rsa" as inside the repo; rm resolves `evil` and
+    # deletes the real file somewhere else entirely.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "project setup exited non-zero"; return 1; }
+
+    local secrets="$TEST_TMPDIR/secrets"
+    mkdir -p "$secrets"
+    echo "do not touch" > "$secrets/id_rsa"
+    ln -s "$secrets" "$repo/evil"
+    # Precondition: the symlink really does resolve out of the repo, so the
+    # textual reading and the physical one genuinely disagree.
+    assert_file_exists "$repo/evil/id_rsa" || {
+        echo "the symlinked directory does not resolve — this case would prove nothing"
+        return 1
+    }
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    inject_receipt_files_entry "$manifest" "evil/id_rsa"
+    grep -qF '"evil/id_rsa",' "$manifest" || {
+        echo "the crafted symlink entry was not injected"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages 2>&1) || status=$?
+
+    assert_file_exists "$secrets/id_rsa" || {
+        echo "an entry behind a symlinked directory deleted a file outside the repo"; return 1; }
+    printf '%s\n' "$output" | grep -aq 'refusing' || {
+        echo "the symlinked-directory entry was accepted silently (exit $status); got:"
+        printf '%s\n' "$output" | head -20
+        return 1
+    }
+    if [ "$status" -eq 0 ]; then
+        echo "a refused receipt entry must not exit 0"
+        return 1
+    fi
     return 0
 }
 
@@ -5764,6 +5893,8 @@ test_uninstall_still_removes_legitimate_parent_anchored_entries() {
     local status=0
     bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages \
         > /dev/null 2>&1 || status=$?
+    # Also the "clean run" half of the exit-code contract the containment cases
+    # assert from the other side: an untampered receipt exits 0.
     assert_eq "0" "$status" "the uninstall must exit 0" || return 1
 
     local left
@@ -5782,6 +5913,8 @@ run_test "without jq, uninstall refuses before deleting the hook scripts" test_u
 run_test "without jq, a target with no hooks block still uninstalls" test_uninstall_without_jq_still_clears_a_target_with_no_hooks_block
 run_test "an absolute receipt files[] entry is refused" test_uninstall_refuses_absolute_receipt_files_entry
 run_test "a ../ receipt files[] entry is refused" test_uninstall_refuses_parent_traversal_receipt_files_entry
+run_test "a receipt that lies about its scope cannot widen the bound" test_uninstall_ignores_a_receipt_that_lies_about_its_scope
+run_test "an entry behind a symlinked directory is refused" test_uninstall_refuses_an_entry_behind_a_symlinked_directory
 run_test "legitimate ../-anchored entries are still removed" test_uninstall_still_removes_legitimate_parent_anchored_entries
 echo ""
 
