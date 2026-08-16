@@ -51,7 +51,7 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  --agent NAME     Install for a specific agent (forwarded to setup.sh)"
-    echo "  --path DIR       Target directory (with --agent custom; maps to setup.sh project scope)"
+    echo "  --path DIR       Target git repo for --agent custom (required for custom)"
     echo "  --with GROUP     Include an optional skill group (quality, review, optional, tdd, lang)"
     echo "  --without GROUP  Exclude an on-by-default skill group (quality, review, optional, tdd)"
     echo "  --version        Print the Kurama version and exit"
@@ -66,6 +66,12 @@ show_help() {
     echo "  --agent custom --path DIR                  → setup.sh --agent claude-code --scope project --path DIR"
     echo "  --with / --without GROUP                   → forwarded to setup.sh unchanged"
     echo "  (no --agent)                               → setup.sh interactive detect-and-install"
+    echo ""
+    echo "Note: project-local and custom run a setup.sh PROJECT install (skills, native"
+    echo "  agents, Claude Code hooks and the orchestrator merge under the target repo)."
+    echo "  The target must ALREADY EXIST and be a git repository — project-local uses the"
+    echo "  current directory; custom requires --path DIR. A non-existent or non-git target"
+    echo "  is rejected (it is not created for you)."
 }
 
 # Under `set -u` a bare value-taking flag at the end of the line would abort with a
@@ -134,9 +140,24 @@ case "${AGENT:-}" in
         ;;
     custom)
         # Historically "install skills into an arbitrary DIR". Maps to a setup.sh
-        # project trial rooted at that DIR.
-        target="${CUSTOM_PATH:-$PWD}"
-        exec bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$target" --non-interactive "${GROUP_ARGS[@]+"${GROUP_ARGS[@]}"}"
+        # project trial rooted at that DIR — which must already exist and be a git
+        # repo (setup.sh's project-scope preconditions). NO silent $PWD fallback:
+        # the pre-#38 `--agent custom` without --path PROMPTED for a path, and a full
+        # project install (CLAUDE.md orchestrator merge, .claude/settings.json hooks,
+        # 17 native agents) into whatever repo the user happens to be sitting in is
+        # not a safe default. Require --path; ask when a TTY is attached (old UX),
+        # otherwise fail loud.
+        custom_target="$CUSTOM_PATH"
+        if [ -z "$custom_target" ] && [ -t 0 ]; then
+            read -rp "Enter target path: " custom_target || custom_target=""
+        fi
+        if [ -z "$custom_target" ]; then
+            echo "--agent custom requires --path DIR (the target git repository)"
+            echo ""
+            show_help
+            exit 1
+        fi
+        exec bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$custom_target" --non-interactive "${GROUP_ARGS[@]+"${GROUP_ARGS[@]}"}"
         ;;
     *)
         echo "Unknown agent: $AGENT"
