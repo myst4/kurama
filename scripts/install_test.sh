@@ -148,12 +148,19 @@ assert_all_skills_installed() {
 # Run test function $1 in a subshell, echo its combined output, and exit with its
 # status.
 #
-# #31: `set -e` is re-armed INSIDE the subshell on purpose. run_test calls this
-# from an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — the suppression is inherited by the command substitution's subshell
-# too, so a bare failing command inside the test body neither aborted it nor
-# reached run_test. An explicit `set -e` in the subshell is the only way to undo
-# that; the outer shell's -u and pipefail are never suppressed and carry over.
+# #31: `set -e` is re-armed INSIDE the subshell on purpose. Callers disarm errexit
+# around the call so a failing body cannot abort the whole suite; this explicit
+# `set -e` is what puts it back for the body. The outer shell's -u and pipefail
+# are never suppressed and carry over either way.
+#
+# #55: the re-arm is honoured ONLY when the caller is NOT inside a POSIX
+# errexit-ignore context — an `if`/`while` condition, a `!` negation, or any
+# non-final command of an `&&`/`||` list. Bash <= 5.2 let a nested `set -e`
+# override that suppression; bash 5.3 (ubuntu-latest) follows POSIX strictly and
+# silently ignores it, which made every "run the thing, then return 0" test
+# unfailable again on CI while macOS bash 3.2 stayed green. So EVERY caller must
+# reach this function through a plain assignment (or a bare command) wrapped in
+# `set +e` / `set -e` — never from a condition and never from `|| status=$?`.
 invoke_test_body() {
     local func="$1"
     ( set -e; "$func" 2>&1 )
@@ -179,8 +186,16 @@ run_test() {
     TESTS_RUN=$((TESTS_RUN + 1))
     setup
     echo -n "  $name ... "
-    local output
-    if output=$(invoke_test_body "$func"); then
+    local output status
+    # #55: a plain assignment is not an errexit-ignore context, so the subshell's
+    # `set -e` is honoured on every bash from 3.2 to 5.3+. `set +e` here only keeps
+    # a failing body from aborting the suite — it does NOT reach the body, which
+    # re-arms errexit for itself. Do not fold this back into `if output=$(...)`.
+    set +e
+    output=$(invoke_test_body "$func")
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
         echo -e "${GREEN}PASS${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
@@ -195,16 +210,21 @@ run_test() {
 }
 
 # ============================================================================
-# Tests — the harness itself (#31)
+# Tests — the harness itself (#31, #55)
 #
 # A test suite that cannot fail is worse than no suite: it reports green over
-# every regression it was written to catch. `run_test` invokes the test function
-# as an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — including the command substitution's subshell. Every test shaped
-# "run the thing, then `return 0`" was therefore unfailable: the bare command's
-# non-zero status neither aborted the body nor reached run_test. invoke_test_body
-# re-arms errexit inside the subshell, which is the only place the suppression
-# can be undone; these two cases pin both halves of that contract.
+# every regression it was written to catch. Every test shaped "run the thing,
+# then `return 0`" is unfailable unless errexit is genuinely active inside the
+# body: the bare command's non-zero status would neither abort the body nor reach
+# run_test. invoke_test_body re-arms errexit inside its subshell to guarantee
+# that, and #55 added the other half of the contract — the caller must invoke it
+# from outside any errexit-ignore context, or strict-POSIX bash silently drops
+# the re-arm. These two cases pin both halves: a failing bare command must fail
+# its test, and a passing body must still pass.
+#
+# Both cases below therefore use the same `set +e` / plain call / `set -e` shape
+# as run_test. Reintroducing `|| status=$?` here would make them test a path the
+# harness no longer uses — and pass while the real one is broken.
 # ============================================================================
 
 # Fails on its first bare command, then claims success exactly as the unfailable
@@ -222,8 +242,11 @@ _fixture_test_body_succeeds() {
 }
 
 test_harness_bare_command_failure_fails_the_test() {
-    local output status=0
-    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero) || status=$?
+    local output status
+    set +e
+    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero)
+    status=$?
+    set -e
     if [ "$status" -eq 0 ]; then
         echo "invoke_test_body returned 0 for a body whose bare command failed —"
         echo "every 'run it, then return 0' test in this file is unfailable."
@@ -238,8 +261,11 @@ test_harness_bare_command_failure_fails_the_test() {
 }
 
 test_harness_passing_test_still_passes() {
-    local status=0
-    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1 || status=$?
+    local status
+    set +e
+    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1
+    status=$?
+    set -e
     assert_eq "0" "$status" "a body that succeeds must still be reported as a pass" || return 1
     return 0
 }
@@ -5487,6 +5513,385 @@ run_test "an unregistered @@TOKEN@@ fails loudly, naming it" test_build_examples
 run_test "the committed templates rebuild byte-for-byte" test_build_examples_rebuilds_committed_outputs_byte_for_byte
 echo ""
 
+# ===== UNIT-A (issue #32) =====
+#
+# update.sh hardening. #32 filed five defects; four reproduce against this tree
+# and are fixed here. The fifth — the first unusable receipt killing the whole
+# multi-target run under `set -e` — was already closed by ec8cdf3 for the
+# REFUSAL branch, so the pin below covers the other exit out of resync_target
+# (an unrecognized tool, filed as a failure) instead.
+#
+# Every test drives the real update.sh against a real install inside the
+# sandboxed $HOME run_test provides, so each assertion is about what the user
+# sees or what survives on disk — never an internal.
+
+# The documented contract of --dry-run is "report drift, change nothing". It
+# snapshotted every recorded file's hash and then threw the snapshot away,
+# printing a constant "would re-sync N recorded file(s)" — the same N for a
+# pristine install and for one whose skills had been hand-edited. A user
+# previewing the update saw nothing, ran the real update, and lost the edit.
+test_update_dry_run_reports_drifted_files() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    printf 'LOCAL EDIT\n' > "$HOME/.claude/skills/sdd-apply/SKILL.md"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    printf '%s\n' "$output" | grep -q 'sdd-apply/SKILL.md' || {
+        echo "the dry run never names the drifted file:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    # ...and it is still only a preview.
+    grep -q 'LOCAL EDIT' "$HOME/.claude/skills/sdd-apply/SKILL.md" || {
+        echo "the dry run modified the drifted file"; return 1; }
+    return 0
+}
+
+# The other direction: a pristine install must preview as clean. A drift report
+# that cries wolf on every recorded file is as useless as one that reports
+# nothing, and it is the case every user sees first.
+test_update_dry_run_clean_install_reports_no_drift() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    if printf '%s\n' "$output" | grep -qE 'drift:|missing:'; then
+        echo "a freshly installed target previewed as drifted:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'no drift' || {
+        echo "the dry run never states the target is in sync:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# ~/.claude/agents is a SHARED directory — users keep their own agents there.
+# The prune globbed every *.bak.* in it and deleted all but the lexically last
+# per name, so a user's own backup of their own agent was collected as
+# collateral on the next update. Only originals the receipt records may be
+# pruned.
+test_update_prune_spares_user_owned_agent_backups() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local agents="$HOME/.claude/agents"
+    assert_dir_exists "$agents" || return 1
+
+    # An agent Kurama never installed, with the user's own backups beside it.
+    printf 'mine\n' > "$agents/my-own-agent.md"
+    printf 'v1\n'   > "$agents/my-own-agent.md.bak.20200101000000"
+    printf 'v2\n'   > "$agents/my-own-agent.md.bak.20200102000000"
+    # ...and stale backups of an agent the receipt DOES record.
+    printf 'old\n'  > "$agents/sdd-spec.md.bak.20200101000000"
+    printf 'old\n'  > "$agents/sdd-spec.md.bak.20200102000000"
+
+    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
+        || { echo "update.sh failed"; return 1; }
+
+    assert_file_exists "$agents/my-own-agent.md" || return 1
+    assert_file_exists "$agents/my-own-agent.md.bak.20200101000000" || {
+        echo "update deleted a backup of a user-owned agent"; return 1; }
+    assert_file_exists "$agents/my-own-agent.md.bak.20200102000000" || {
+        echo "update deleted a backup of a user-owned agent"; return 1; }
+
+    # The recorded agent is still pruned to a single backup — the one this very
+    # re-sync wrote, whose timestamp sorts after both 2020 ones.
+    local kept
+    kept=$(count_matching_files "$agents" 'sdd-spec.md.bak.*')
+    assert_eq "1" "$kept" "a recorded agent keeps exactly one backup" || return 1
+    if [ -f "$agents/sdd-spec.md.bak.20200101000000" ]; then
+        echo "the stale backup of a recorded agent was not pruned"; return 1
+    fi
+    return 0
+}
+
+# The re-sync delegates to setup.sh with stdout AND stderr on /dev/null, so
+# every failure surfaced as a bare "Re-sync failed for <slug>" — on the exact
+# path a user walks while recovering a broken install. The cause must reach them.
+test_update_failure_shows_delegated_setup_output() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" --non-interactive > /dev/null 2>&1 \
+        || { echo "project-scope setup failed"; return 1; }
+    # The target stops being a git repo (a deleted .git, a moved checkout, a
+    # restored backup): setup.sh refuses it in non-interactive mode and says so.
+    rm -rf "$repo/.git"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --scope project --path "$repo" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "update exited 0 although the delegated setup.sh failed"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Re-sync failed' || {
+        echo "no per-target failure line:"; printf '%s\n' "$output"; return 1; }
+    printf '%s\n' "$output" | grep -q 'not a git repository' || {
+        echo "the delegated setup.sh output never reaches the user:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# Same mechanism as the OpenCode mode/profile loss fixed in #22: update.sh
+# delegates with --non-interactive, where ask_engram defaults to "no", so the
+# FIRST update re-stamped the receipt engram: no and the choice was gone. The
+# receipt already records it — re-pass it like the --with-logo carry-over.
+test_update_carries_engram_across_resync() {
+    bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code --with-engram failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q '"engram": "yes"' "$manifest" || {
+        echo "setup did not record engram: yes"; return 1; }
+
+    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
+        || { echo "update.sh failed"; return 1; }
+
+    grep -q '"engram": "yes"' "$manifest" || {
+        echo "update.sh re-stamped the receipt — the Engram choice is lost:"
+        grep '"engram"' "$manifest"
+        return 1
+    }
+    return 0
+}
+
+# ec8cdf3 fixed the multi-target abort for the REFUSAL branch (a mode-less
+# OpenCode receipt). An unrecognized tool leaves resync_target by the other
+# door — it is filed as a failure, not a refusal — so pin that branch too: the
+# targets queued behind it must still be updated, and the run must close with a
+# summary naming the one it skipped.
+test_update_unrecognized_tool_does_not_abort_the_other_targets() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup codex failed"; return 1; }
+
+    # A receipt from a harness Kurama no longer supports. ALL_AGENTS puts
+    # claude-code FIRST, so this unusable target is handled before codex.
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local rewritten
+    rewritten=$(awk '{ gsub(/"claude-code"/, "\"gemini-cli\""); print }' "$manifest")
+    printf '%s\n' "$rewritten" > "$manifest"
+
+    local codex_skill="$HOME/.codex/skills/sdd-apply/SKILL.md"
+    assert_file_exists "$codex_skill" || return 1
+    printf 'clobbered\n' > "$codex_skill"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "an unusable receipt must still make the run exit non-zero"; return 1
+    fi
+    if grep -q '^clobbered$' "$codex_skill"; then
+        echo "codex was never re-synced — the unusable receipt aborted the loop"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Not updated' || {
+        echo "no end-of-run summary naming the skipped target:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# A drift preview that compared NOTHING must not report "no drift". Every
+# recorded file whose path has no repo mapping is skipped, and a receipt where
+# every file is skipped used to still print "No drift — all N recorded file(s)
+# match": a green light over zero comparisons, on the script users reach for when
+# they already suspect the install is broken. The headline counts only what was
+# actually compared, and says so when that is nothing.
+test_update_dry_run_says_when_nothing_was_comparable() {
+    bash "$SETUP_SCRIPT" --agent omp --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup omp failed"; return 1; }
+    local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    # omp's RULES.md is the one recorded path with no repo source mapping. A
+    # receipt holding only it is a target where nothing is comparable.
+    assert_file_exists "$HOME/.omp/agent/RULES.md" || return 1
+    printf '%s\n' \
+        '{' \
+        '  "name": "kurama",' \
+        '  "version": "6.0.0",' \
+        '  "tool": "omp",' \
+        '  "tools": [' \
+        '    "omp"' \
+        '  ],' \
+        '  "scope": "global",' \
+        '  "engram": "no",' \
+        '  "files": [' \
+        '    "../RULES.md"' \
+        '  ],' \
+        '  "settings": [],' \
+        '  "pi_packages": [],' \
+        '  "engram_mcp": [],' \
+        '  "prompts": [],' \
+        '  "tui_plugins": [],' \
+        '  "opencode_configs": []' \
+        '}' > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent omp --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview claimed 'no drift' having compared nothing:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'nothing comparable' || {
+        echo "the preview never says it could compare nothing:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# The preview must not describe a target the real run would refuse. The tool
+# validation used to sit BELOW the dry-run return, so a receipt with an
+# unrecognized tool got a plausible drift report and no hint that `update.sh`
+# without --dry-run would refuse it outright.
+test_update_dry_run_refuses_what_the_real_run_would_refuse() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local rewritten
+    rewritten=$(awk '{ gsub(/"claude-code"/, "\"gemini-cli\""); print }' "$manifest")
+    printf '%s\n' "$rewritten" > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "the preview exited 0 for a target the real run refuses:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Unrecognized tool' || {
+        echo "the preview never names the unusable tool:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview reported a drift verdict for a refused target:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}#32 — update.sh hardening${NC}"
+run_test "--dry-run names the recorded files that drifted" test_update_dry_run_reports_drifted_files
+run_test "--dry-run on a pristine install reports no drift" test_update_dry_run_clean_install_reports_no_drift
+run_test "--dry-run says when nothing was comparable" test_update_dry_run_says_when_nothing_was_comparable
+run_test "--dry-run refuses what the real run would refuse" test_update_dry_run_refuses_what_the_real_run_would_refuse
+run_test "the backup prune spares user-owned agent backups" test_update_prune_spares_user_owned_agent_backups
+run_test "a failed re-sync shows the delegated setup.sh output" test_update_failure_shows_delegated_setup_output
+run_test "--with-engram survives a re-sync" test_update_carries_engram_across_resync
+run_test "an unusable receipt does not abort the queued targets" test_update_unrecognized_tool_does_not_abort_the_other_targets
+# ===== UNIT-C (issue #35) =====
+#
+# #35: plugin.json shipped two defects — homepage/repository still pointed at
+# the pre-rename Gentleman-Programming/agent-teams-lite repo instead of this
+# repo's real origin, and the "agents" array hand-listed only the 9 SDD-phase
+# agents, silently missing the 8 review-layer agents (the 4R lenses,
+# review-refuter, the two Judgment Day judges, and jd-fix-agent) that
+# setup.sh's install_native_agents() copies wholesale from
+# examples/claude-code/agents/*.md for --agent claude-code. The Claude Code
+# plugin schema's "agents" field takes file paths (a string or an array), not
+# a directory glob like "skills" gets, so the manifest list has to be
+# hand-enumerated — which means nothing stops it drifting from the on-disk
+# set the next time an agent is added or removed there. These tests close
+# that gap: one confirms the repository URL fix, the other two fail loudly
+# the moment examples/claude-code/agents/ and plugin.json's "agents" array
+# disagree, in either direction.
+
+# Print the sorted basenames of every *.md file directly under dir $1.
+list_agent_basenames() {
+    local dir="$1"
+    local f base
+    for f in "$dir"/*.md; do
+        [ -e "$f" ] || continue
+        base="${f##*/}"
+        echo "$base"
+    done | sort
+}
+
+# Print the sorted basenames referenced by plugin.json's "agents" array.
+# jq preferred; a portable grep fallback keeps this working without jq,
+# per the jq-optional invariant every script path here must honor.
+plugin_json_agent_basenames() {
+    local plugin_file="$1"
+    local paths
+    if command -v jq > /dev/null 2>&1; then
+        paths=$(jq -r '.agents[]?' "$plugin_file" 2>/dev/null)
+    else
+        paths=$(grep -oE '"\./examples/claude-code/agents/[A-Za-z0-9_-]+\.md"' "$plugin_file" \
+            | tr -d '"')
+    fi
+    local p
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        echo "${p##*/}"
+    done <<< "$paths" | sort
+}
+
+test_plugin_json_repository_url() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    assert_file_exists "$plugin_file" || return 1
+    if grep -q 'Gentleman-Programming/agent-teams-lite' "$plugin_file"; then
+        echo "plugin.json still points at the pre-rename Gentleman-Programming/agent-teams-lite repo"
+        return 1
+    fi
+    grep -q '"homepage": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'homepage' does not point at https://github.com/myst4/kurama"; return 1; }
+    grep -q '"repository": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'repository' does not point at https://github.com/myst4/kurama"; return 1; }
+    return 0
+}
+
+test_plugin_json_agents_match_disk_set() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local agents_dir="$REPO_DIR/examples/claude-code/agents"
+    assert_file_exists "$plugin_file" || return 1
+    assert_dir_exists "$agents_dir" || return 1
+
+    local disk_names manifest_names
+    disk_names=$(list_agent_basenames "$agents_dir")
+    manifest_names=$(plugin_json_agent_basenames "$plugin_file")
+
+    if [ -z "$disk_names" ]; then
+        echo "no *.md agent files found in $agents_dir"
+        return 1
+    fi
+    if [ -z "$manifest_names" ]; then
+        echo "plugin.json 'agents' field is empty or unparseable"
+        return 1
+    fi
+
+    assert_eq "$disk_names" "$manifest_names" \
+        "plugin.json 'agents' list has drifted from examples/claude-code/agents/ on disk"
+}
+
+test_plugin_json_agents_count_is_17() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local count
+    count=$(plugin_json_agent_basenames "$plugin_file" | wc -l | tr -d ' ')
+    assert_eq "17" "$count" "plugin.json must register all 17 Claude Code agents"
+}
+
+echo -e "${BOLD}UNIT-C (issue #35) — plugin.json manifest drift${NC}"
+run_test "plugin.json homepage/repository point at myst4/kurama" test_plugin_json_repository_url
+run_test "plugin.json 'agents' matches examples/claude-code/agents/ on disk" test_plugin_json_agents_match_disk_set
+run_test "plugin.json registers all 17 agents" test_plugin_json_agents_count_is_17
+
 # ===== UNIT-B (issue #33) =====
 # ============================================================================
 # uninstall.sh hardening — three defects, all on the highest-blast-radius path
@@ -5916,6 +6321,7 @@ run_test "a ../ receipt files[] entry is refused" test_uninstall_refuses_parent_
 run_test "a receipt that lies about its scope cannot widen the bound" test_uninstall_ignores_a_receipt_that_lies_about_its_scope
 run_test "an entry behind a symlinked directory is refused" test_uninstall_refuses_an_entry_behind_a_symlinked_directory
 run_test "legitimate ../-anchored entries are still removed" test_uninstall_still_removes_legitimate_parent_anchored_entries
+
 echo ""
 
 # ============================================================================
