@@ -350,17 +350,30 @@ stat_agents() {
 # panel used to print 0 for every configured machine without jq, since $n was
 # only ever assigned inside the jq branch.
 #
-# The awk pass locates the mcpServers/mcp key, walks from its opening brace and
-# counts the colons at depth 1, tracking strings and nesting so a value's own
-# colons never count. It is line-oriented only until the key is found, then
-# character-oriented until the object closes, which keeps it bounded on a large
-# ~/.claude.json and correct on a minified one. A JSON file with no such key
-# declares no servers, so that is a 0; anything that does not even open with `{`
-# is unknown and prints nothing, because "I could not read it" must not arrive
-# at the panel as "you have none".
+# The awk scan tracks brace depth from the FIRST byte of the file and accepts the
+# mcpServers/mcp key ONLY at depth 1 (a direct member of the root object), and
+# only when it is immediately followed by a colon. Both guards are load-bearing:
+# Claude Code writes ~/.claude.json with a per-project (usually empty) mcpServers
+# nested under "projects" and the real top-level key near the end of the file —
+# 118 "mcpServers" occurrences on a measured install, the top-level one last — so
+# a scan that took the FIRST occurrence returned 0 while jq returned 3. The colon
+# guard rejects a string VALUE that happens to equal "mcp" (e.g. a description),
+# which the old index()-based match counted as the key. Once the key's value
+# object is open, servers are its depth-2 colons, strings and nesting tracked so
+# a value's own colons never count. Bounded on a 350KB file (~0.2s, jq-less path
+# only) and correct on a minified one. A JSON file with no such key declares no
+# servers, so that is a 0; anything that does not even open with `{` is unknown
+# and prints nothing — "I could not read it" must never reach the panel as "you
+# have none". jq wins on precedence when a file somehow declares BOTH top-level
+# keys (never seen: claude.json uses mcpServers, opencode.json uses mcp, and they
+# are different files); this fallback takes whichever the file lists first.
 #
-# Checked against jq on: three servers, an empty object, a minified file, braces
-# and colons inside string values, a corrupt file, and a missing file.
+# Checked against jq on: three servers; a nested empty mcpServers before a
+# populated top-level one; a nested project mcpServers before a populated
+# top-level one; the opencode "mcp" shape; a string value equal to "mcp"; a
+# minified file; braces and colons inside string values; an escaped quote; an
+# empty object; a null value; no key at all; a corrupt file; a missing file; and
+# a real 357KB ~/.claude.json (118 occurrences, answer 3).
 mcp_count_in() { # file -> integer, or empty when unknown
     local f="$1" n
     if command -v jq >/dev/null 2>&1; then
@@ -370,7 +383,8 @@ mcp_count_in() { # file -> integer, or empty when unknown
     fi
     command -v awk >/dev/null 2>&1 || return 0
     LC_ALL=C awk '
-        BEGIN { st = 0; depth = 0; n = 0; instr = 0; esc = 0; done = 0; json = 0; seen = 0 }
+        BEGIN { depth = 0; instr = 0; esc = 0; buf = ""; laststr = "";
+                want = 0; counting = 0; countdepth = 0; found = 0; n = 0; seen = 0; json = 0 }
         {
             line = $0
             if (!seen) {
@@ -378,38 +392,39 @@ mcp_count_in() { # file -> integer, or empty when unknown
                 sub(/^[[:space:]]+/, "", probe)
                 if (probe != "") { seen = 1; json = (substr(probe, 1, 1) == "{") }
             }
-            if (st == 0) {
-                p = index(line, "\"mcpServers\"")
-                if (p > 0) { line = substr(line, p + 12) }
-                else {
-                    p = index(line, "\"mcp\"")
-                    if (p == 0) next
-                    line = substr(line, p + 5)
-                }
-                st = 1
-            }
             L = length(line)
             for (i = 1; i <= L; i++) {
                 c = substr(line, i, 1)
-                if (st == 1) {
-                    if (c == "{") { st = 2; depth = 1 }
-                    else if (c == "," || c == "}") { done = 1; break }   # null/scalar value
-                    continue
-                }
                 if (instr) {
                     if (esc) { esc = 0 }
                     else if (c == "\\") { esc = 1 }
-                    else if (c == "\"") { instr = 0 }
+                    else if (c == "\"") { instr = 0; laststr = buf }
+                    else { buf = buf c }
                     continue
                 }
-                if (c == "\"") { instr = 1; continue }
+                # A depth-1 key matched: the next non-space is its value. An
+                # object opens the count; anything else means 0 servers, but the
+                # key WAS found, so fall through to handle that character.
+                if (want) {
+                    if (c == " " || c == "\t") { continue }
+                    if (c == "{") { depth++; counting = 1; countdepth = depth; found = 1; want = 0; continue }
+                    found = 1; want = 0
+                }
+                if (c == "\"") { instr = 1; buf = ""; continue }
+                if (c == ":") {
+                    if (!found && depth == 1 && (laststr == "mcpServers" || laststr == "mcp")) { want = 1 }
+                    else if (counting && depth == countdepth) { n++ }
+                    continue
+                }
                 if (c == "{" || c == "[") { depth++; continue }
-                if (c == "}" || c == "]") { depth--; if (depth <= 0) { done = 1; break }; continue }
-                if (c == ":" && depth == 1) n++
+                if (c == "}" || c == "]") {
+                    if (counting && depth == countdepth && c == "}") { counting = 0 }
+                    depth--
+                    continue
+                }
             }
-            if (done) exit
         }
-        END { if (st >= 1) print n; else if (json) print 0 }
+        END { if (found) print n; else if (json) print 0 }
     ' "$f" 2>/dev/null
 }
 

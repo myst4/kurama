@@ -5732,6 +5732,77 @@ test_banner_mcp_says_n_a_when_the_config_cannot_be_read() {
     return 0
 }
 
+# The shape Claude Code actually writes: a per-project (usually empty) mcpServers
+# nested under "projects", with the real top-level key AFTER it. $2 servers at
+# the top level. This is the file that broke the first-occurrence scan — jq reads
+# the top-level key, an unanchored scan reads the nested empty one and says 0.
+unit_d_write_claude_nested_before_toplevel() { # file top_count
+    local file="$1" n="$2" i=1 body=""
+    mkdir -p "$(dirname "$file")"
+    while [ "$i" -le "$n" ]; do
+        [ -n "$body" ] && body="$body,"
+        body="$body
+    \"srv$i\": { \"command\": \"x\", \"args\": [\"--a\", \"1\"] }"
+        i=$(( i + 1 ))
+    done
+    # projects.<path>.mcpServers = {} comes first and is empty; the real one is last.
+    printf '{\n  "projects": {\n    "/some/repo": { "mcpServers": {}, "allowedTools": [] }\n  },\n  "mcpServers": {%s\n  },\n  "model": "x"\n}\n' \
+        "$body" > "$file"
+}
+
+# The OpenCode config shape: the "mcp" key (not "mcpServers"), preceded by a
+# string VALUE equal to "mcp" that the old index()-based match counted as the
+# key. $2 servers.
+unit_d_write_opencode_mcp() { # file count
+    local file="$1" n="$2" i=1 body=""
+    mkdir -p "$(dirname "$file")"
+    while [ "$i" -le "$n" ]; do
+        [ -n "$body" ] && body="$body,"
+        body="$body
+    \"srv$i\": { \"type\": \"local\" }"
+        i=$(( i + 1 ))
+    done
+    # "description": "mcp" is a string VALUE equal to the key name — the exact
+    # thing the old index() match counted as the key.
+    printf '{\n  "theme": "opencode",\n  "description": "mcp",\n  "mcp": {%s\n  }\n}\n' \
+        "$body" > "$file"
+}
+
+# The Critical regression: on the real Claude Code file the top-level key is not
+# the first "mcpServers" in the file, it is the last. Anchoring the scan at
+# depth 1 is the whole fix. Red against the first-occurrence scan (it returns 0),
+# green once the scan tracks brace depth.
+test_banner_counts_mcp_under_nested_project_shape() {
+    local bindir="$TEST_TMPDIR/nojq-bin" got
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    unit_d_write_claude_nested_before_toplevel "$HOME/.claude.json" 3
+
+    got="$(unit_d_banner_mcp_value "$bindir")"
+    assert_eq "3" "$got" "a nested project mcpServers shadowed the top-level count" || return 1
+    got="$(unit_d_banner_mcp_value "$PATH")"
+    assert_eq "3" "$got" "the ambient (jq) path disagrees on the nested shape" || return 1
+    return 0
+}
+
+# Exercises the "mcp" branch AND the string-value guard: the "description": "mcp"
+# value must not be mistaken for the key. Red against the old index() match
+# (which false-matched the value and returned 0), green with the colon guard.
+test_banner_counts_opencode_mcp_key_shape() {
+    local bindir="$TEST_TMPDIR/nojq-bin" got
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    # No claude.json, so the walk falls through to the opencode candidate.
+    rm -f "$HOME/.claude.json"
+    unit_d_write_opencode_mcp "$HOME/.config/opencode/opencode.json" 2
+
+    got="$(unit_d_banner_mcp_value "$bindir")"
+    assert_eq "2" "$got" "the opencode \"mcp\" key was miscounted without jq" || return 1
+    got="$(unit_d_banner_mcp_value "$PATH")"
+    assert_eq "2" "$got" "the ambient (jq) path disagrees on the opencode shape" || return 1
+    return 0
+}
+
 # ---- setup-tui.sh: the command it shows is the command it runs --------------
 
 # The preview seam runs above the gum precondition, so it works on a PATH with
@@ -5872,6 +5943,8 @@ run_test "the size probe asks the tty, not terminfo" test_banner_size_probe_read
 run_test "MCP servers are counted without jq" test_banner_counts_mcp_servers_without_jq
 run_test "a legitimate 0 does not shadow the next config" test_banner_mcp_count_does_not_stop_at_a_legitimate_zero
 run_test "an unreadable config reports n/a, never 0" test_banner_mcp_says_n_a_when_the_config_cannot_be_read
+run_test "a nested project mcpServers does not shadow the top-level count" test_banner_counts_mcp_under_nested_project_shape
+run_test "the opencode mcp key shape is counted without jq" test_banner_counts_opencode_mcp_key_shape
 run_test "the TUI preview is the argv it runs" test_tui_preview_is_the_argv_it_runs
 run_test "the preview re-splits, spaces and all" test_tui_preview_quotes_a_path_with_spaces
 run_test "the maintenance preview is absolute too" test_tui_maintenance_preview_is_absolute
