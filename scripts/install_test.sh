@@ -148,12 +148,19 @@ assert_all_skills_installed() {
 # Run test function $1 in a subshell, echo its combined output, and exit with its
 # status.
 #
-# #31: `set -e` is re-armed INSIDE the subshell on purpose. run_test calls this
-# from an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — the suppression is inherited by the command substitution's subshell
-# too, so a bare failing command inside the test body neither aborted it nor
-# reached run_test. An explicit `set -e` in the subshell is the only way to undo
-# that; the outer shell's -u and pipefail are never suppressed and carry over.
+# #31: `set -e` is re-armed INSIDE the subshell on purpose. Callers disarm errexit
+# around the call so a failing body cannot abort the whole suite; this explicit
+# `set -e` is what puts it back for the body. The outer shell's -u and pipefail
+# are never suppressed and carry over either way.
+#
+# #55: the re-arm is honoured ONLY when the caller is NOT inside a POSIX
+# errexit-ignore context — an `if`/`while` condition, a `!` negation, or any
+# non-final command of an `&&`/`||` list. Bash <= 5.2 let a nested `set -e`
+# override that suppression; bash 5.3 (ubuntu-latest) follows POSIX strictly and
+# silently ignores it, which made every "run the thing, then return 0" test
+# unfailable again on CI while macOS bash 3.2 stayed green. So EVERY caller must
+# reach this function through a plain assignment (or a bare command) wrapped in
+# `set +e` / `set -e` — never from a condition and never from `|| status=$?`.
 invoke_test_body() {
     local func="$1"
     ( set -e; "$func" 2>&1 )
@@ -179,8 +186,16 @@ run_test() {
     TESTS_RUN=$((TESTS_RUN + 1))
     setup
     echo -n "  $name ... "
-    local output
-    if output=$(invoke_test_body "$func"); then
+    local output status
+    # #55: a plain assignment is not an errexit-ignore context, so the subshell's
+    # `set -e` is honoured on every bash from 3.2 to 5.3+. `set +e` here only keeps
+    # a failing body from aborting the suite — it does NOT reach the body, which
+    # re-arms errexit for itself. Do not fold this back into `if output=$(...)`.
+    set +e
+    output=$(invoke_test_body "$func")
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
         echo -e "${GREEN}PASS${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
@@ -195,16 +210,21 @@ run_test() {
 }
 
 # ============================================================================
-# Tests — the harness itself (#31)
+# Tests — the harness itself (#31, #55)
 #
 # A test suite that cannot fail is worse than no suite: it reports green over
-# every regression it was written to catch. `run_test` invokes the test function
-# as an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — including the command substitution's subshell. Every test shaped
-# "run the thing, then `return 0`" was therefore unfailable: the bare command's
-# non-zero status neither aborted the body nor reached run_test. invoke_test_body
-# re-arms errexit inside the subshell, which is the only place the suppression
-# can be undone; these two cases pin both halves of that contract.
+# every regression it was written to catch. Every test shaped "run the thing,
+# then `return 0`" is unfailable unless errexit is genuinely active inside the
+# body: the bare command's non-zero status would neither abort the body nor reach
+# run_test. invoke_test_body re-arms errexit inside its subshell to guarantee
+# that, and #55 added the other half of the contract — the caller must invoke it
+# from outside any errexit-ignore context, or strict-POSIX bash silently drops
+# the re-arm. These two cases pin both halves: a failing bare command must fail
+# its test, and a passing body must still pass.
+#
+# Both cases below therefore use the same `set +e` / plain call / `set -e` shape
+# as run_test. Reintroducing `|| status=$?` here would make them test a path the
+# harness no longer uses — and pass while the real one is broken.
 # ============================================================================
 
 # Fails on its first bare command, then claims success exactly as the unfailable
@@ -222,8 +242,11 @@ _fixture_test_body_succeeds() {
 }
 
 test_harness_bare_command_failure_fails_the_test() {
-    local output status=0
-    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero) || status=$?
+    local output status
+    set +e
+    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero)
+    status=$?
+    set -e
     if [ "$status" -eq 0 ]; then
         echo "invoke_test_body returned 0 for a body whose bare command failed —"
         echo "every 'run it, then return 0' test in this file is unfailable."
@@ -238,8 +261,11 @@ test_harness_bare_command_failure_fails_the_test() {
 }
 
 test_harness_passing_test_still_passes() {
-    local status=0
-    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1 || status=$?
+    local status
+    set +e
+    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1
+    status=$?
+    set -e
     assert_eq "0" "$status" "a body that succeeds must still be reported as a pass" || return 1
     return 0
 }
