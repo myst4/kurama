@@ -255,7 +255,7 @@ detect_agents() {
     echo ""
     if [[ ${#DETECTED_AGENTS[@]} -eq 0 ]]; then
         warn "No agents detected in PATH"
-        info "You can still install manually with: ./install.sh"
+        info "Install for a specific agent anyway with: ./setup.sh --agent <name>  (claude-code, opencode, codex, pi, omp)"
     else
         echo -e "  ${GREEN}${BOLD}${#DETECTED_AGENTS[@]} agent(s) detected${NC}"
     fi
@@ -2240,7 +2240,8 @@ show_summary() {
 interactive_menu() {
     if [[ ${#DETECTED_AGENTS[@]} -eq 0 ]]; then
         echo ""
-        warn "No agents detected. Use ./install.sh for manual installation."
+        warn "No agents detected on PATH — nothing to set up interactively."
+        info "Install for a specific agent with: ./setup.sh --agent <name>  (claude-code, opencode, codex, pi, omp)"
         exit 0
     fi
 
@@ -2436,6 +2437,21 @@ for skill_dir in "$SKILLS_SRC"/sdd-*/; do
 done
 if [ ! -f "$MANIFEST_FILE" ]; then
     fail "Missing: skills/manifest.json (the skill list source of truth)"
+    fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
+    exit 1
+fi
+# examples/ is not optional and its absence must FAIL LOUD before any write (#41):
+# the OpenCode target installs its /sdd-* command files from it, and every target's
+# orchestrator merge reads a prompt file under it. Without this, a checkout with
+# skills/ but no examples/ warns per-source, skips the commands, still prints "Done!"
+# and writes a receipt for a PARTIAL install — exit 0 where it must be exit 1. Ported
+# from install.sh's validate_source when the two installers collapsed (#38).
+if [ ! -d "$EXAMPLES_DIR" ]; then
+    fail "Missing: examples/ (agent configs and the OpenCode /sdd-* commands)"
+    fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
+    exit 1
+elif [ ! -d "$EXAMPLES_DIR/opencode/commands" ]; then
+    fail "Missing: examples/opencode/commands (the OpenCode /sdd-* command files)"
     fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
     exit 1
 fi
