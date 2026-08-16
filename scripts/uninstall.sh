@@ -199,8 +199,13 @@ remove_tui_plugin_from_config() {
     [ -f "$file" ] || return 0
 
     if ! command -v jq >/dev/null 2>&1; then
+        # The real-run jq-less case is refused up front (see the tui.json guard in
+        # remove_target, before any file is removed). This branch is reached only
+        # in --dry-run, where nothing is deleted; print the EXACT manual step so a
+        # user without jq still knows precisely what to de-register.
         print_warn "jq not found — cannot strip the Kurama logo entry from $file"
-        print_info "Manually remove the tui-plugins/kurama-logo.tsx entry from plugin[]"
+        print_info "De-register it by hand: remove the plugin[] array entry ending in"
+        print_info "  \"tui-plugins/kurama-logo.tsx\" from $file"
         return 0
     fi
     if ! jq -e . "$file" >/dev/null 2>&1; then
@@ -600,6 +605,52 @@ EOF
             # so that `set -e` stays armed for this function's body, and a
             # non-zero return would abort the whole run instead of letting --all
             # sweep the remaining targets.
+            UNINSTALL_FAILED=1
+            return 0
+        fi
+    fi
+
+    # jq-optional invariant (issue #40): without jq the Kurama logo entry cannot be
+    # stripped from tui.json, yet the files[] sweep below deletes the plugin .tsx it
+    # points at. A jq-less run would leave tui.json's plugin[] referencing a file
+    # that is gone — a dangling TUI plugin that breaks OpenCode's TUI on next start.
+    # Detect it here, before a single file is removed, and refuse the whole target —
+    # exactly as the settings.json guard above does for the hooks block.
+    local tfile tpath blocked_tui="" tui_plugins_pf
+    tui_plugins_pf="$(manifest_json_array "$manifest" "tui_plugins")"
+    if ! command -v jq >/dev/null 2>&1; then
+        while IFS= read -r tfile; do
+            [ -n "$tfile" ] || continue
+            case "$tfile" in
+                /*) tpath="$(normalize_abs_path "$tfile")" ;;
+                *)  tpath="$(normalize_abs_path "$dir_abs/$tfile")" ;;
+            esac
+            [ -f "$tpath" ] || continue
+            # Textual probe, not a JSON parse: setup.sh registers the logo as a
+            # plugin[] string ending in tui-plugins/kurama-logo.tsx. No match means
+            # nothing of ours is registered and there is nothing for jq to strip.
+            grep -qF 'tui-plugins/kurama-logo.tsx' "$tpath" 2>/dev/null || continue
+            blocked_tui="${blocked_tui}$tpath
+"
+        done <<EOF
+$tui_plugins_pf
+EOF
+    fi
+    if [ -n "$blocked_tui" ]; then
+        if $DRY_RUN; then
+            print_warn "$label: jq not found — a real run would REFUSE this target"
+            print_info "the Kurama logo entry cannot be stripped from tui.json without jq"
+        else
+            print_error "$label: jq not found — cannot strip the Kurama logo from tui.json"
+            print_info "Nothing was removed. Deleting the logo plugin while tui.json still"
+            print_info "references it leaves OpenCode's TUI loading a plugin that is gone."
+            print_info "Install jq and re-run, or de-register it by hand first — remove the"
+            print_info "plugin[] array entry ending in \"tui-plugins/kurama-logo.tsx\" from:"
+            while IFS= read -r tpath; do
+                [ -n "$tpath" ] && print_info "    $tpath"
+            done <<EOF
+$blocked_tui
+EOF
             UNINSTALL_FAILED=1
             return 0
         fi

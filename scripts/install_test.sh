@@ -7442,9 +7442,71 @@ test_h_setup_interactive_without_gum_prints_guide_exits_2() {
     return 0
 }
 
+# ---- R3: jq-less logo de-registration is honest; doctor flags a dangling logo ----
+
+# Installing --with-logo (jq present) registers the plugin in tui.json AND records
+# the .tsx in files[]. Uninstalling WITHOUT jq cannot strip the registration, so it
+# must refuse rather than delete the .tsx and leave tui.json pointing at a ghost:
+# tui.json untouched, the .tsx kept, a non-zero exit, and the exact manual snippet.
+test_h_uninstall_jqless_logo_path_is_honest() {
+    run_setup_opencode --with-logo || { echo "opencode --with-logo install failed"; return 1; }
+    local tui="$HOME/.config/opencode/tui.json"
+    local tsx="$HOME/.config/opencode/tui-plugins/kurama-logo.tsx"
+    assert_file_exists "$tui" || return 1
+    grep -q 'kurama-logo.tsx' "$tui" \
+        || { echo "logo was not registered in tui.json (jq missing at install?)"; return 1; }
+    assert_file_exists "$tsx" || return 1
+    local before; before="$(cat "$tui")"
+    # Restricted PATH without jq (symlink farm), so jq's absence is deterministic.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    mkdir -p "$bindir"
+    local tool p
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date \
+                chmod rm ls awk sed tr wc find mktemp sort head tail printf test git; do
+        p="$(command -v "$tool" 2>/dev/null)" || continue
+        ln -sf "$p" "$bindir/$tool"
+    done
+    if [ -e "$bindir/jq" ]; then
+        echo "jq is reachable on the restricted PATH — the test proves nothing"
+        return 1
+    fi
+    local out status=0
+    out="$(PATH="$bindir" bash "$UNINSTALL_SCRIPT" --agent opencode 2>&1)" || status=$?
+    [ "$status" -ne 0 ] \
+        || { echo "uninstall exited 0 while unable to de-register the logo (broken state)"; return 1; }
+    local after; after="$(cat "$tui" 2>/dev/null)"
+    assert_eq "$before" "$after" "tui.json must be left untouched without jq" || return 1
+    # Refused before the file sweep, so the plugin .tsx survives too — no dangling ref.
+    assert_file_exists "$tsx" || return 1
+    printf '%s\n' "$out" | grep -q 'tui-plugins/kurama-logo.tsx' \
+        || { echo "no exact manual de-registration snippet printed (got: $out)"; return 1; }
+    return 0
+}
+
+# A logo still registered in tui.json whose .tsx is gone is a dangling TUI plugin.
+# doctor must flag it (hard fail), not report the install healthy.
+test_h_doctor_flags_registered_but_missing_logo() {
+    run_setup_opencode --with-logo || { echo "opencode --with-logo install failed"; return 1; }
+    local tsx="$HOME/.config/opencode/tui-plugins/kurama-logo.tsx"
+    assert_file_exists "$tsx" || return 1
+    # Broken state: delete the plugin file, leave tui.json referencing it.
+    rm -f "$tsx"
+    local shim="$TEST_TMPDIR/docshims"
+    make_doctor_shims "$shim"
+    local out status=0
+    out="$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent opencode 2>&1)" || status=$?
+    [ "$status" -ne 0 ] \
+        || { echo "doctor exited 0 over a dangling logo registration"; return 1; }
+    printf '%s\n' "$out" | grep -qi 'registered in .* but its plugin file is gone' \
+        || { echo "doctor did not flag the dangling logo (got: $out)"; return 1; }
+    return 0
+}
+
 echo -e "${BOLD}UNIT-H (issue #40): simplification decisions${NC}"
 run_test "setup.sh interactive + gum hands off to the TUI" test_h_setup_interactive_with_gum_delegates_to_tui
 run_test "setup.sh interactive - gum prints the flag guide and exits 2" test_h_setup_interactive_without_gum_prints_guide_exits_2
+run_test "uninstall.sh jq-less logo path leaves tui.json untouched" test_h_uninstall_jqless_logo_path_is_honest
+run_test "doctor.sh flags a registered-but-missing logo plugin" test_h_doctor_flags_registered_but_missing_logo
 
 echo ""
 
