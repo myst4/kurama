@@ -392,6 +392,32 @@ abspath() {
     fi
 }
 
+# True when $1 resolves into the git work tree of the Kurama clone at $2.
+# Compares git TOPLEVELS rather than the paths themselves, which is what makes
+# this cover the clone root, every subdirectory below it, and any path that
+# reaches the clone through a symlink — `cd "$link" && pwd` keeps the logical
+# path, so abspath alone never sees through one, while git resolves physically.
+#
+# Deliberately conservative: a target outside every repo, a Kurama copy that is
+# not a git checkout (release tarball), or a missing git binary all leave a side
+# unresolved, and an unresolved side is never a match. The plain path equality in
+# validate_project_target still guards the clone root in those cases.
+resolves_into_kurama_clone() {
+    local target="$1" repo="$2"
+    local target_top repo_top repo_phys
+    # git reports toplevels with symlinks resolved, so compare against the
+    # PHYSICAL path of this copy of Kurama; abspath keeps the logical one.
+    repo_phys="$(cd "$repo" 2>/dev/null && pwd -P)" || return 1
+    repo_top="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || return 1
+    # Only a Kurama CLONE is protected. When the copy running this script is not
+    # the root of its own work tree it is vendored inside somebody else's
+    # repository — and that repository is a perfectly legitimate --path target,
+    # so the toplevel comparison below would be a false refusal.
+    [ -n "$repo_top" ] && [ "$repo_top" = "$repo_phys" ] || return 1
+    target_top="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null)" || return 1
+    [ "$target_top" = "$repo_top" ]
+}
+
 # Validate TARGET_PATH for project scope: must exist, be a git repo, and never be
 # the Kurama clone itself. In non-interactive mode a non-repo aborts; interactive
 # mode asks once before proceeding. Sets TARGET_PATH to its absolute form.
@@ -407,11 +433,17 @@ validate_project_target() {
     fi
     TARGET_PATH="$(abspath "$TARGET_PATH")"
 
-    # Never install into the Kurama repo itself — that would pollute the source.
+    # Never install into the Kurama clone itself — that would pollute the source
+    # tree. The string compare below catches the clone root; the toplevel compare
+    # catches everything else that resolves into the same work tree. Comparing
+    # only the root used to let `--path <kurama>/docs` through, and a project
+    # install then wrote .claude/, CLAUDE.md and a receipt into Kurama's own
+    # sources (#39).
     local repo_abs
     repo_abs="$(abspath "$REPO_DIR")"
-    if [ "$TARGET_PATH" = "$repo_abs" ]; then
+    if [ "$TARGET_PATH" = "$repo_abs" ] || resolves_into_kurama_clone "$TARGET_PATH" "$REPO_DIR"; then
         fail "Refusing to install into the Kurama repo itself: $TARGET_PATH"
+        info "That path resolves inside Kurama's own source tree ($repo_abs)."
         info "Point --path at the repository you want to try Kurama in."
         exit 1
     fi
@@ -796,10 +828,9 @@ install_native_agents() {
         agent_base="$(basename "$agent_file")"
         agent_dest="$agents_target/$agent_base"
         if [ -f "$agent_dest" ]; then
-            make_backup "$agent_dest"
             make_writable "$agent_dest"
         fi
-        atomic_replace "$agent_dest" < "$agent_file"
+        atomic_replace --backup "$agent_dest" < "$agent_file"
         RECEIPT_FILES="$RECEIPT_FILES
 $(receipt_rel "$agent_dest")"
         acount=$((acount + 1))
@@ -831,10 +862,9 @@ install_omp_rules() {
     fi
     mkdir -p "$(dirname "$rules_dest")"
     if [ -f "$rules_dest" ]; then
-        make_backup "$rules_dest"
         make_writable "$rules_dest"
     fi
-    atomic_replace "$rules_dest" < "$rules_src"
+    atomic_replace --backup "$rules_dest" < "$rules_src"
     RECEIPT_FILES="$RECEIPT_FILES
 $(receipt_rel "$rules_dest")"
     ok "omp sticky rules installed → $rules_dest"
@@ -846,7 +876,10 @@ $(receipt_rel "$rules_dest")"
 # bash-4-only syntax. These helpers protect user files from corruption.
 # ============================================================================
 
-# Write a timestamped backup before modifying a file (no-op if it is absent).
+# Write a timestamped backup of a file (no-op if it is absent). Called by
+# atomic_replace --backup, not directly: the decision "is this write going to
+# change anything at all" belongs to the writer, and only a write that really
+# changes the file is worth a backup.
 make_backup() {
     local target="$1"
     [ -f "$target" ] || return 0
@@ -859,7 +892,18 @@ make_backup() {
 # Atomically replace a file with content read from stdin. The temp file lives in
 # the SAME directory as the target (so the mv is atomic, not a cross-device copy)
 # and the original file's permissions are preserved when it already exists.
+#
+# With --backup, the target is copied aside (make_backup) immediately before it
+# is replaced. That flag is the ONLY way a backup is taken, and it is honoured
+# only when the new content actually differs — a write that would not change a
+# single byte is dropped whole: the temp file is discarded, no backup is taken,
+# and the target keeps its inode and mtime. Backups used to run unconditionally
+# ahead of every write, so a plain idempotent re-run of setup.sh piled 19
+# byte-identical <file>.bak.<timestamp> copies into the user's config dir, and
+# another 19 on the run after that, unbounded (#39).
 atomic_replace() {
+    local backup=false
+    if [ "${1:-}" = "--backup" ]; then backup=true; shift; fi
     local target="$1"
     local tmp
     tmp="$(mktemp "${target}.XXXXXX")" || { fail "Could not create temp file for $target"; exit 1; }
@@ -867,6 +911,14 @@ atomic_replace() {
         cp -p "$target" "$tmp" 2>/dev/null || true
     fi
     cat > "$tmp"
+    # Unchanged content: nothing to back up and nothing to write. A missing `cmp`
+    # simply fails the test, degrading to the always-write path rather than
+    # skipping a write it could not prove redundant.
+    if [ -f "$target" ] && cmp -s "$tmp" "$target"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    if $backup; then make_backup "$target"; fi
     mv "$tmp" "$target"
 }
 
@@ -1029,8 +1081,7 @@ merge_hooks_settings() {
     jq_merge_ok "$merged" \
         || { fail "Hook merge produced no usable JSON — $settings_file left unchanged"; return 1; }
 
-    if [ -f "$settings_file" ]; then make_backup "$settings_file"; fi
-    printf '%s\n' "$merged" | atomic_replace "$settings_file"
+    printf '%s\n' "$merged" | atomic_replace --backup "$settings_file"
     HOOKS_SETTINGS_WRITTEN=true
     ok "hooks merged into $settings_file"
 }
@@ -1088,7 +1139,6 @@ $(receipt_rel "$prompt_path")"
         # literal newlines in a -v value, and -v also mangles backslashes.
         if grep -qF "$MARKER_BEGIN" "$prompt_path"; then
             # Our markers exist — replace content between them
-            make_backup "$prompt_path"
             local cfile updated
             cfile="$(mktemp)"
             printf '%s\n' "$content" > "$cfile"
@@ -1103,7 +1153,7 @@ $(receipt_rel "$prompt_path")"
                 !skip     { print }
             ' "$prompt_path"); then
                 rm -f "$cfile"
-                printf '%s\n' "$updated" | atomic_replace "$prompt_path"
+                printf '%s\n' "$updated" | atomic_replace --backup "$prompt_path"
                 ok "Orchestrator updated in $prompt_path"
             else
                 rm -f "$cfile"
@@ -1111,7 +1161,6 @@ $(receipt_rel "$prompt_path")"
             fi
         elif grep -qF "$GAI_MARKER_BEGIN" "$prompt_path"; then
             # gentle-ai markers exist — replace content between GAI markers with ours
-            make_backup "$prompt_path"
             local cfile updated
             cfile="$(mktemp)"
             printf '%s\n' "$content" > "$cfile"
@@ -1127,7 +1176,7 @@ $(receipt_rel "$prompt_path")"
                 !skip         { print }
             ' "$prompt_path"); then
                 rm -f "$cfile"
-                printf '%s\n' "$updated" | atomic_replace "$prompt_path"
+                printf '%s\n' "$updated" | atomic_replace --backup "$prompt_path"
                 ok "Orchestrator updated in $prompt_path (replaced gentle-ai section)"
             else
                 rm -f "$cfile"
@@ -1144,12 +1193,11 @@ $(receipt_rel "$prompt_path")"
             # Kurama wrote every byte of this file, so replace it whole with the
             # marked block (backup first). The fingerprint is deliberately the
             # same one uninstall.sh's legacy sweep uses.
-            make_backup "$prompt_path"
             {
                 echo "$MARKER_BEGIN"
                 echo "$content"
                 echo "$MARKER_END"
-            } | atomic_replace "$prompt_path"
+            } | atomic_replace --backup "$prompt_path"
             ok "Orchestrator re-merged with markers in $prompt_path (was an unmarked full copy)"
         else
             # Check if orchestrator content already exists (no markers)
@@ -1168,14 +1216,13 @@ $(receipt_rel "$prompt_path")"
                 info "  $MARKER_END"
             else
                 # No existing content — append our marked section atomically
-                make_backup "$prompt_path"
                 {
                     cat "$prompt_path"
                     echo ""
                     echo "$MARKER_BEGIN"
                     echo "$content"
                     echo "$MARKER_END"
-                } | atomic_replace "$prompt_path"
+                } | atomic_replace --backup "$prompt_path"
                 ok "Orchestrator appended to $prompt_path"
             fi
         fi
@@ -1341,8 +1388,7 @@ install_opencode_profile() {
     jq_merge_ok "$merged" \
         || { warn "Profile splice produced no usable JSON — $config_file left unchanged"; return 0; }
 
-    make_backup "$config_file"
-    printf '%s\n' "$merged" | atomic_replace "$config_file"
+    printf '%s\n' "$merged" | atomic_replace --backup "$config_file"
     ok "OpenCode profile '$name' installed (kurama-orchestrator + 9 sdd-<phase>-$name agents)"
 }
 
@@ -1488,8 +1534,7 @@ $(receipt_rel "$commands_target/$(basename "$cmd_file")")"
                 exit 1
             }
 
-            make_backup "$config_file"
-            printf '%s\n' "$merged" | atomic_replace "$config_file"
+            printf '%s\n' "$merged" | atomic_replace --backup "$config_file"
             ok "Agent config merged into $config_file ($OPENCODE_MODE mode)"
         else
             mkdir -p "$(dirname "$config_file")"
@@ -1638,7 +1683,6 @@ $(receipt_rel "$dest")"
         merged=$(jq --arg p "$dest" '
             .plugin = ((.plugin // []) | if index($p) then . else . + [$p] end)
         ' "$tui_file") || { warn "Failed to merge $tui_file"; return 0; }
-        make_backup "$tui_file"
     else
         # Missing or empty: create it with the schema line opencode writes.
         mkdir -p "$(dirname "$tui_file")"
@@ -1650,7 +1694,7 @@ $(receipt_rel "$dest")"
     jq_merge_ok "$merged" \
         || { warn "TUI plugin registration produced no usable JSON — $tui_file left unchanged"; return 0; }
 
-    printf '%s\n' "$merged" | atomic_replace "$tui_file"
+    printf '%s\n' "$merged" | atomic_replace --backup "$tui_file"
     RECEIPT_TUI_PLUGINS="$RECEIPT_TUI_PLUGINS
 $(receipt_rel "$tui_file")"
     ok "Kurama logo TUI plugin installed → $dest"
@@ -1911,8 +1955,7 @@ engram_merge_json() {
     jq_merge_ok "$merged" \
         || { fail "Engram registration produced no usable JSON — $file left unchanged"; return 1; }
 
-    [ -f "$file" ] && make_backup "$file"
-    printf '%s\n' "$merged" | atomic_replace "$file"
+    printf '%s\n' "$merged" | atomic_replace --backup "$file"
     ok "Engram MCP registered → $file"
     RECEIPT_ENGRAM_MCP="$RECEIPT_ENGRAM_MCP
 $(receipt_rel "$file")"
@@ -1927,7 +1970,6 @@ register_engram_codex() {
 
     local existing="" stripped
     if [ -f "$file" ]; then
-        make_backup "$file"
         existing="$(cat "$file")"
     fi
     stripped="$(printf '%s\n' "$existing" | awk '
@@ -1943,7 +1985,7 @@ register_engram_codex() {
         printf '[mcp_servers.engram]\n'
         printf 'command = "%s"\n' "$cmd"
         printf 'args = ["mcp", "--tools=agent"]\n'
-    } | atomic_replace "$file"
+    } | atomic_replace --backup "$file"
     ok "Engram MCP registered → $file (codex TOML)"
     RECEIPT_ENGRAM_MCP="$RECEIPT_ENGRAM_MCP
 $(receipt_rel "$file")"

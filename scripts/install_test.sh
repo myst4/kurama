@@ -6325,6 +6325,217 @@ run_test "legitimate ../-anchored entries are still removed" test_uninstall_stil
 echo ""
 
 # ============================================================================
+# ===== UNIT-E (issue #39) =====
+#
+# setup.sh minor hardening. Two independent defects, one section:
+#   1. Backups were unconditional. `make_backup` ran before every write with no
+#      comparison against what was about to be written, so a plain idempotent
+#      re-run copied 19 byte-identical files aside as <file>.bak.<timestamp>
+#      (measured on a sandboxed HOME: 3 runs → 38 files, all identical).
+#   2. The `--scope project` guard only string-compared the target against the
+#      clone root, so any SUBDIRECTORY of the Kurama clone was accepted and got
+#      .claude/, CLAUDE.md and the receipt written into the source tree.
+# ============================================================================
+
+# A throwaway copy of the Kurama clone: its own git repo, its own scripts/setup.sh,
+# and the sources a project install reads. The clone-guard tests below point
+# --path INTO this copy, so a regression writes into $TEST_TMPDIR instead of the
+# real source tree — and the guard still faces a genuine "target inside the clone
+# that is running setup", because the setup.sh under test is the staged one.
+stage_kurama_clone_files() {
+    local dest="$1"
+    mkdir -p "$dest/scripts" "$dest/docs" || return 1
+    cp "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/banner.sh" "$dest/scripts/" || return 1
+    cp -R "$REPO_DIR/examples" "$REPO_DIR/skills" "$dest/" || return 1
+    cp "$REPO_DIR/VERSION" "$dest/VERSION" || return 1
+    printf '# staged docs\n' > "$dest/docs/index.md" || return 1
+    [ -d "$dest/skills/sdd-apply" ] || return 1
+    return 0
+}
+
+stage_kurama_clone() {
+    stage_kurama_clone_files "$1" || return 1
+    make_git_repo "$1"
+    return 0
+}
+
+# Report (and clear) the artifacts a project-scope install leaves in a directory.
+# Named paths only — never a glob — so a failing guard test cleans up after
+# itself without ever being able to delete something it did not create.
+project_install_artifacts_cleared() {
+    local dir="$1" leaked=0 stray
+    for stray in "$dir/.claude" "$dir/CLAUDE.md" "$dir/.kurama-install-manifest.json"; do
+        if [ -e "$stray" ]; then
+            rm -rf "$stray"
+            leaked=1
+        fi
+    done
+    [ "$leaked" -eq 0 ]
+}
+
+test_setup_rerun_writes_no_new_backups() {
+    # The whole point of an idempotent installer: running it twice leaves the disk
+    # where the first run left it. Nothing setup writes changes between two
+    # identical runs, so a second wave of .bak files is pure noise in the user's
+    # config dir — and it is unbounded, one wave per re-run, forever.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the first setup run exited non-zero"; return 1; }
+    local first
+    first=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
+    assert_eq "0" "$first" "a fresh install has nothing to back up" || return 1
+
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the second setup run exited non-zero"; return 1; }
+    local second
+    second=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
+    if [ "$second" -ne 0 ]; then
+        echo "an unchanged re-run wrote $second backup file(s), e.g.:"
+        find "$HOME" -name '*.bak.*' | sed "s|$HOME|~|" | head -5
+        return 1
+    fi
+    return 0
+}
+
+test_setup_rerun_still_backs_up_a_hand_edited_file() {
+    # The other half of the contract: the skip is content-based, NOT "never back
+    # up on a re-run". A file the user edited by hand is still copied aside
+    # before setup overwrites it — and it is the ONLY file backed up.
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the first setup run exited non-zero"; return 1; }
+    local victim="$HOME/.claude/agents/review-risk.md"
+    assert_file_exists "$victim" || return 1
+    printf 'HAND EDITED BODY\n' > "$victim"
+
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the second setup run exited non-zero"; return 1; }
+
+    local baks bak
+    baks=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
+    if [ "$baks" -ne 1 ]; then
+        echo "expected exactly one backup (the hand-edited file), got $baks:"
+        find "$HOME" -name '*.bak.*' | sed "s|$HOME|~|" | head -5
+        return 1
+    fi
+    bak=$(find "$HOME" -name 'review-risk.md.bak.*' | head -1)
+    [ -n "$bak" ] || { echo "the hand-edited agent was not the file backed up"; return 1; }
+    grep -qF 'HAND EDITED BODY' "$bak" || {
+        echo "the backup does not hold the hand-edited content"; return 1; }
+    if grep -qF 'HAND EDITED BODY' "$victim"; then
+        echo "the file was backed up but never replaced with the shipped version"
+        return 1
+    fi
+    return 0
+}
+
+test_scope_project_rejects_a_subdirectory_of_the_clone() {
+    # `--path <clone>/docs` used to be accepted: the guard compared the target
+    # string against the clone ROOT only, so every subdirectory slipped through
+    # and Kurama installed itself into its own source tree.
+    local clone="$TEST_TMPDIR/staged-clone"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --scope project \
+        --path "$clone/docs" --without-engram --non-interactive 2>&1) || status=$?
+
+    local clean=0
+    project_install_artifacts_cleared "$clone/docs" || clean=1
+    if [ "$status" -eq 0 ]; then
+        echo "setup accepted a subdirectory of its own clone as a project target"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    if [ "$clean" -ne 0 ]; then
+        echo "setup refused the target but still wrote into the clone's docs/"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'Refusing to install into the Kurama' || {
+        echo "the refusal never says the target is the Kurama clone:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    return 0
+}
+
+test_scope_project_rejects_a_symlink_into_the_clone() {
+    # The same rejection through a symlink: `cd $link && pwd` keeps the LOGICAL
+    # path, so no string comparison against the clone root can see through it.
+    # Comparing git toplevels does, because git resolves the path physically.
+    local clone="$TEST_TMPDIR/staged-clone-link"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+    local link="$TEST_TMPDIR/linked-docs"
+    ln -s "$clone/docs" "$link" || { echo "could not create the symlink"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --scope project \
+        --path "$link" --without-engram --non-interactive 2>&1) || status=$?
+
+    local clean=0
+    project_install_artifacts_cleared "$clone/docs" || clean=1
+    if [ "$status" -eq 0 ]; then
+        echo "setup followed a symlink into its own clone and installed there"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    if [ "$clean" -ne 0 ]; then
+        echo "setup refused the symlink but still wrote through it into the clone"
+        return 1
+    fi
+    return 0
+}
+
+test_scope_project_guard_does_not_misfire_on_a_non_repo() {
+    # The guard rejects a target that resolves INTO the clone, not every target it
+    # cannot resolve. A plain directory outside any repo still gets the
+    # pre-existing "not a git repository" abort, with its own remedy.
+    local plain="$TEST_TMPDIR/plain-dir"
+    mkdir -p "$plain"
+
+    local output status=0
+    output=$(bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$plain" \
+        --without-engram --non-interactive 2>&1) || status=$?
+
+    [ "$status" -ne 0 ] || { echo "a non-git target must still abort"; return 1; }
+    printf '%s\n' "$output" | grep -qF 'not a git repository' || {
+        echo "a non-git target lost its own diagnostic:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    if printf '%s\n' "$output" | grep -qF 'Refusing to install into the Kurama'; then
+        echo "the clone guard misfired on a directory outside the clone:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    return 0
+}
+
+test_scope_project_allows_a_repo_that_vendors_a_kurama_copy() {
+    # The guard protects a Kurama CLONE, not "every work tree that happens to
+    # contain a copy of Kurama". A project that vendors an unpacked (non-git)
+    # Kurama under tools/ shares its git toplevel with that copy, so a bare
+    # toplevel comparison would refuse the user's own repository.
+    local proj="$TEST_TMPDIR/vendoring-project"
+    make_git_repo "$proj"
+    stage_kurama_clone_files "$proj/tools/kurama" \
+        || { echo "could not stage the vendored Kurama copy"; return 1; }
+
+    bash "$proj/tools/kurama/scripts/setup.sh" --agent claude-code --scope project \
+        --path "$proj" --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup refused a project that merely vendors a Kurama copy"; return 1; }
+    assert_dir_exists "$proj/.claude/skills/sdd-apply" || return 1
+    return 0
+}
+
+echo -e "${BOLD}#39 — setup.sh minor hardening (backups + clone guard)${NC}"
+run_test "an unchanged re-run writes no new .bak files" test_setup_rerun_writes_no_new_backups
+run_test "a hand-edited file is still backed up, and only it" test_setup_rerun_still_backs_up_a_hand_edited_file
+run_test "--scope project refuses a subdirectory of the clone" test_scope_project_rejects_a_subdirectory_of_the_clone
+run_test "--scope project refuses a symlink into the clone" test_scope_project_rejects_a_symlink_into_the_clone
+run_test "the clone guard does not misfire on a non-repo target" test_scope_project_guard_does_not_misfire_on_a_non_repo
+run_test "a repo that vendors a Kurama copy is still installable" test_scope_project_allows_a_repo_that_vendors_a_kurama_copy
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 
