@@ -7372,6 +7372,166 @@ run_test "setup.sh fails loud on a clone missing examples/ (no partial receipt)"
 echo ""
 
 # ============================================================================
+# ===== UNIT-H (issue #40) =====
+# Simplification decisions: one interactive front-end (the TUI), an honest
+# jq-less logo de-registration path, and a doctor check for a dangling logo.
+# ============================================================================
+
+# ---- R2: setup.sh interactive front-end delegates to the TUI ----
+
+# A bare, interactive `./setup.sh` with gum available must hand off to
+# setup-tui.sh (the one interactive experience) rather than run its own menu.
+# KURAMA_TUI_PROBE makes the delegated TUI print its probe line and exit 0 before
+# the wizard — an observable proof of the hand-off that the removed text menu
+# could never produce.
+test_h_setup_interactive_with_gum_delegates_to_tui() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+    # An OpenCode project install gives the TUI probe a receipt to report.
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+    # A fake gum on PATH makes setup.sh's interactive branch take the delegation.
+    local bindir="$TEST_TMPDIR/gumbin"
+    mkdir -p "$bindir"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$bindir/gum"
+    chmod +x "$bindir/gum"
+    local out status=0
+    out="$(cd "$repo" && PATH="$bindir:$PATH" KURAMA_NO_BANNER=1 KURAMA_TUI_PROBE=1 \
+        bash "$SETUP_SCRIPT" 2>/dev/null)" || status=$?
+    assert_eq "0" "$status" "interactive + gum must delegate and exit 0 via the TUI probe" || return 1
+    printf '%s\n' "$out" | grep -q 'project' \
+        || { echo "no TUI probe output — delegation did not happen (got: $out)"; return 1; }
+    printf '%s\n' "$out" | grep -q 'opencode' \
+        || { echo "probe missing opencode — not the TUI's output (got: $out)"; return 1; }
+    return 0
+}
+
+# Without gum, setup.sh cannot conjure a TUI and installs nothing interactively:
+# it must print the non-interactive flag guide and exit 2 — never half-install a
+# guessed default.
+test_h_setup_interactive_without_gum_prints_guide_exits_2() {
+    # Restricted PATH (symlink farm) that deliberately omits gum, so its absence
+    # is deterministic on any host — same trick as the TUI-probe test.
+    local bindir="$TEST_TMPDIR/nogum-bin"
+    mkdir -p "$bindir"
+    local tool p
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date \
+                chmod rm ls awk sed tr wc find mktemp sort head tail printf test git; do
+        p="$(command -v "$tool" 2>/dev/null)" || continue
+        ln -sf "$p" "$bindir/$tool"
+    done
+    if [ -e "$bindir/gum" ]; then
+        echo "gum is reachable on the restricted PATH — the test proves nothing"
+        return 1
+    fi
+    local out status=0
+    out="$(PATH="$bindir" KURAMA_NO_BANNER=1 bash "$SETUP_SCRIPT" 2>&1)" || status=$?
+    assert_eq "2" "$status" "interactive without gum must exit 2, never half-install" || return 1
+    printf '%s\n' "$out" | grep -q -- '--non-interactive' \
+        || { echo "flag guide does not mention --non-interactive (got: $out)"; return 1; }
+    printf '%s\n' "$out" | grep -qi 'gum' \
+        || { echo "guide does not explain gum drives the interactive TUI (got: $out)"; return 1; }
+    # Never half-install: no skills written under the fresh HOME.
+    if [ -d "$HOME/.claude/skills" ]; then
+        echo "half-install: ~/.claude/skills was created on a refused interactive run"
+        return 1
+    fi
+    return 0
+}
+
+# The TUI hand-off takes NO arguments, so an underspecified run (no --agent/--all)
+# carrying a run-shaping flag would have that flag SILENTLY DROPPED. `--without
+# review` is the sharp case: the review group would install ANYWAY, contradicting
+# the explicit flag. setup.sh must REFUSE (non-zero, naming the flag) and install
+# nothing — never silently honor nothing (review fix I1).
+test_h_setup_interactive_refuses_unforwardable_flags() {
+    local out status=0
+    out="$(KURAMA_NO_BANNER=1 bash "$SETUP_SCRIPT" --without review 2>&1)" || status=$?
+    [ "$status" -ne 0 ] \
+        || { echo "'--without review' with no target exited 0 (silently honored nothing)"; return 1; }
+    printf '%s\n' "$out" | grep -q -- '--without' \
+        || { echo "refusal did not name the offending flag (got: $out)"; return 1; }
+    # It installed nothing — least of all the review group it was told to skip.
+    if [ -d "$HOME/.claude/skills" ]; then
+        echo "half-install: ~/.claude/skills created on a refused underspecified run"
+        return 1
+    fi
+    return 0
+}
+
+# ---- R3: jq-less logo de-registration is honest; doctor flags a dangling logo ----
+
+# Installing --with-logo (jq present) registers the plugin in tui.json AND records
+# the .tsx in files[]. Uninstalling WITHOUT jq cannot strip the registration, so it
+# must refuse rather than delete the .tsx and leave tui.json pointing at a ghost:
+# tui.json untouched, the .tsx kept, a non-zero exit, and the exact manual snippet.
+test_h_uninstall_jqless_logo_path_is_honest() {
+    run_setup_opencode --with-logo || { echo "opencode --with-logo install failed"; return 1; }
+    local tui="$HOME/.config/opencode/tui.json"
+    local tsx="$HOME/.config/opencode/tui-plugins/kurama-logo.tsx"
+    assert_file_exists "$tui" || return 1
+    grep -q 'kurama-logo.tsx' "$tui" \
+        || { echo "logo was not registered in tui.json (jq missing at install?)"; return 1; }
+    assert_file_exists "$tsx" || return 1
+    local before; before="$(cat "$tui")"
+    # Restricted PATH without jq (symlink farm), so jq's absence is deterministic.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    mkdir -p "$bindir"
+    local tool p
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date \
+                chmod rm ls awk sed tr wc find mktemp sort head tail printf test git; do
+        p="$(command -v "$tool" 2>/dev/null)" || continue
+        ln -sf "$p" "$bindir/$tool"
+    done
+    if [ -e "$bindir/jq" ]; then
+        echo "jq is reachable on the restricted PATH — the test proves nothing"
+        return 1
+    fi
+    local out status=0
+    out="$(PATH="$bindir" bash "$UNINSTALL_SCRIPT" --agent opencode 2>&1)" || status=$?
+    [ "$status" -ne 0 ] \
+        || { echo "uninstall exited 0 while unable to de-register the logo (broken state)"; return 1; }
+    local after; after="$(cat "$tui" 2>/dev/null)"
+    assert_eq "$before" "$after" "tui.json must be left untouched without jq" || return 1
+    # Refused before the file sweep, so the plugin .tsx survives too — no dangling ref.
+    assert_file_exists "$tsx" || return 1
+    printf '%s\n' "$out" | grep -q 'tui-plugins/kurama-logo.tsx' \
+        || { echo "no exact manual de-registration snippet printed (got: $out)"; return 1; }
+    return 0
+}
+
+# A logo still registered in tui.json whose .tsx is gone is a dangling TUI plugin.
+# doctor must flag it (hard fail), not report the install healthy.
+test_h_doctor_flags_registered_but_missing_logo() {
+    run_setup_opencode --with-logo || { echo "opencode --with-logo install failed"; return 1; }
+    local tsx="$HOME/.config/opencode/tui-plugins/kurama-logo.tsx"
+    assert_file_exists "$tsx" || return 1
+    # Broken state: delete the plugin file, leave tui.json referencing it.
+    rm -f "$tsx"
+    local shim="$TEST_TMPDIR/docshims"
+    make_doctor_shims "$shim"
+    local out status=0
+    out="$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent opencode 2>&1)" || status=$?
+    [ "$status" -ne 0 ] \
+        || { echo "doctor exited 0 over a dangling logo registration"; return 1; }
+    printf '%s\n' "$out" | grep -qi 'registered in .* but its plugin file is gone' \
+        || { echo "doctor did not flag the dangling logo (got: $out)"; return 1; }
+    return 0
+}
+
+echo -e "${BOLD}UNIT-H (issue #40): simplification decisions${NC}"
+run_test "setup.sh interactive + gum hands off to the TUI" test_h_setup_interactive_with_gum_delegates_to_tui
+run_test "setup.sh interactive - gum prints the flag guide and exits 2" test_h_setup_interactive_without_gum_prints_guide_exits_2
+run_test "setup.sh refuses unforwardable flags (--without review) instead of honoring nothing" test_h_setup_interactive_refuses_unforwardable_flags
+run_test "uninstall.sh jq-less logo path leaves tui.json untouched" test_h_uninstall_jqless_logo_path_is_honest
+run_test "doctor.sh flags a registered-but-missing logo plugin" test_h_doctor_flags_registered_but_missing_logo
+
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 

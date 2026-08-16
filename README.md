@@ -66,7 +66,7 @@ installed agents, copies the skills to the right user-level directory, and wires
 the orchestrator prompt with idempotent markers (safe to re-run):
 
 ```bash
-./scripts/setup.sh          # interactive — asks which detected agents to set up
+./scripts/setup.sh          # interactive gum TUI (no gum? use --all or --agent below)
 ./scripts/setup.sh --all    # non-interactive — set up every detected agent
 ```
 
@@ -103,7 +103,7 @@ yourself, use the installer scripts and then append the orchestrator prompt from
 `examples/<your-agent>/` as printed in the "Next step" notice:
 
 ```bash
-./scripts/setup.sh          # interactive detect + install, or: --agent <name>
+./scripts/setup.sh          # interactive gum TUI, or (no gum): --agent <name> / --all
 ```
 
 `scripts/install.sh` still works as a thin compatibility wrapper — it maps its old
@@ -294,7 +294,7 @@ inline. All are detailed in [docs/installation.md](docs/installation.md).
 - [docs/companion-skills.md](docs/companion-skills.md) — optional pairings with external process skills like superpowers.
 - [docs/token-economics.md](docs/token-economics.md) — the cost analysis behind context isolation.
 - [docs/smoke-test.md](docs/smoke-test.md) — a ~15-minute manual end-to-end walk through the SDD cycle.
-- [docs/migration.md](docs/migration.md) — upgrade notes for existing installs, phase by phase.
+- [docs/migration.md](docs/migration.md) — upgrade notes for existing installs (current + previous release series).
 - [docs/changelog.md](docs/changelog.md) — release history.
 
 ## Banner

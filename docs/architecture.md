@@ -196,7 +196,7 @@ kurama/
 │   ├── changelog.md                  ← Release history
 │   ├── concepts.md                   ← Delta specs, RFC 2119 keywords, archive cycle
 │   ├── installation.md               ← Per-tool setup (automated + manual + plugin/extension)
-│   ├── migration.md                  ← Breaking-change and upgrade guide across phases
+│   ├── migration.md                  ← Breaking-change and upgrade guide (current + previous series)
 │   ├── persistence.md                ← Artifact store modes and OpenSpec file structure
 │   ├── sub-agents.md                 ← SDD phase sub-agent reference, native subagents, and agent-teams mode
 │   ├── tdd.md                        ← Optional TDD module: activation, cycle, verify audits

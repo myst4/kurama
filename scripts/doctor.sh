@@ -573,6 +573,58 @@ $entries
 EOF
 }
 
+# issue #40: a Kurama logo still registered in an OpenCode tui.json whose plugin
+# .tsx is gone is a DANGLING TUI plugin — OpenCode loads plugin[] on start, and a
+# missing file breaks the splash. check_receipt_files flags the missing FILE; this
+# flags the stale REGISTRATION that points at it, so the fix ("de-register it") is
+# obvious rather than "reinstall". Reads tui_plugins[] (the tui.json files setup.sh
+# registered the logo in) and degrades without jq (grep-extracts the plugin path).
+check_tui_logo() {
+    local receipt_dir="$1"
+    local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
+    local entries rel tui refs ref
+    entries="$(manifest_json_array "$manifest" "tui_plugins")"
+    [ -n "$entries" ] || return 0
+
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        case "$rel" in
+            /*) tui="$rel" ;;
+            *)  tui="$receipt_dir/$rel" ;;
+        esac
+        if [ ! -f "$tui" ]; then
+            note "TUI logo was registered in $rel, but that tui.json is gone"
+            continue
+        fi
+        # Pull every plugin[] entry pointing at our logo. jq when it parses the
+        # file; a quoted-string grep otherwise (the jq-optional invariant).
+        if command -v jq >/dev/null 2>&1 && jq -e . "$tui" >/dev/null 2>&1; then
+            refs="$(jq -r '(.plugin // [])[]
+                | select(type == "string" and endswith("tui-plugins/kurama-logo.tsx"))' \
+                "$tui" 2>/dev/null)"
+        else
+            refs="$(grep -oE '"[^"]*tui-plugins/kurama-logo\.tsx"' "$tui" 2>/dev/null | tr -d '"')"
+        fi
+        if [ -z "$refs" ]; then
+            note "no Kurama logo registered in $rel (already de-registered)"
+            continue
+        fi
+        while IFS= read -r ref; do
+            [ -n "$ref" ] || continue
+            if [ -f "$ref" ]; then
+                pass "Kurama logo registered and its plugin file is present: $ref"
+            else
+                bad "Kurama logo registered in $rel but its plugin file is gone: $ref"
+                note "  de-register it: remove \"$ref\" from the plugin[] array in $tui (or re-run setup --with-logo)"
+            fi
+        done <<REFS
+$refs
+REFS
+    done <<EOF
+$entries
+EOF
+}
+
 check_tooling() {
     local scope="$1"
     header "Environment tooling"
@@ -672,6 +724,7 @@ TOOLS
     check_markers "$tools" "$scope" "$receipt_dir"
     check_hooks "$tools" "$scope" "$receipt_dir"
     check_engram_mcp "$receipt_dir"
+    check_tui_logo "$receipt_dir"
 }
 
 # ============================================================================

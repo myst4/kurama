@@ -2234,58 +2234,29 @@ show_summary() {
 }
 
 # ============================================================================
-# Interactive Menu
+# Interactive front-end (issue #40)
 # ============================================================================
-
-interactive_menu() {
-    if [[ ${#DETECTED_AGENTS[@]} -eq 0 ]]; then
-        echo ""
-        warn "No agents detected on PATH — nothing to set up interactively."
-        info "Install for a specific agent with: ./setup.sh --agent <name>  (claude-code, opencode, codex, pi, omp)"
-        exit 0
-    fi
-
+#
+# setup.sh no longer carries its own text menu: the TUI (setup-tui.sh) is the one
+# interactive experience, and the in-script prompt-and-select flow was removed to
+# stop three front-ends drifting apart. A bare, interactive `./setup.sh` now hands
+# off to the TUI when gum is available. When gum is not — and setup.sh does not
+# install gum, so a TUI cannot be conjured — there is nothing to fall back to but
+# the flags. Print them and exit non-zero; NEVER half-install a guessed default.
+print_interactive_unavailable() {
     echo ""
-    echo -e "${BOLD}Set up all detected agents? [Y/n]${NC} "
-    # EOF (piped/closed stdin) is not an answer: say so and change nothing,
-    # rather than dying under `set -e` or silently installing five harnesses.
-    local answer=""
-    if ! read -r answer; then
-        echo ""
-        warn "No answer available (stdin closed) — nothing was set up."
-        info "Re-run with --all to set up every detected agent, or --agent NAME for one."
-        exit 0
-    fi
-    answer="${answer:-Y}"
-
-    if [[ "$answer" =~ ^[Yy] ]]; then
-        for agent in "${DETECTED_AGENTS[@]}"; do
-            setup_agent "$agent"
-            INSTALLED_AGENTS+=("$agent")
-        done
-    else
-        echo ""
-        echo -e "${BOLD}Select agents to set up (space-separated numbers):${NC}"
-        echo ""
-        local i=1
-        for agent in "${DETECTED_AGENTS[@]}"; do
-            echo "  $i) $agent"
-            i=$((i + 1))
-        done
-        echo ""
-        # EOF here means "no selection": the loop below simply does nothing.
-        local choices=""
-        read -rp "Choice: " choices || choices=""
-
-        for choice in $choices; do
-            local idx=$((choice - 1))
-            if [[ $idx -ge 0 ]] && [[ $idx -lt ${#DETECTED_AGENTS[@]} ]]; then
-                local agent="${DETECTED_AGENTS[$idx]}"
-                setup_agent "$agent"
-                INSTALLED_AGENTS+=("$agent")
-            fi
-        done
-    fi
+    warn "Interactive setup needs gum, and gum is not installed."
+    echo ""
+    info "gum is optional (https://github.com/charmbracelet/gum). Install it for the guided TUI:"
+    echo "    macOS  : brew install gum"
+    echo "    Linux  : https://github.com/charmbracelet/gum#installation"
+    echo ""
+    info "Or specify the run on the command line — no gum required:"
+    echo "    ./setup.sh --all                 # every detected agent"
+    echo "    ./setup.sh --agent NAME          # one agent: claude-code, opencode, codex, pi, omp"
+    echo "    ./setup.sh --non-interactive     # no prompts (for external installers)"
+    echo "    ./setup.sh --help                # every flag"
+    echo ""
 }
 
 # ============================================================================
@@ -2295,13 +2266,9 @@ interactive_menu() {
 detect_os
 setup_colors
 
-if ! print_banner; then
-    echo ""
-    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}${BOLD}║    Kurama — Full Setup          ║${NC}"
-    echo -e "${CYAN}${BOLD}║   Detect • Install • Configure            ║${NC}"
-    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
-fi
+# The banner is drawn LATER, once a run is fully specified (after arg parsing).
+# A bare interactive invocation hands off to setup-tui.sh, which draws its own
+# banner — drawing one here too would paint the fox twice.
 
 # Parse arguments
 AGENT=""
@@ -2313,6 +2280,12 @@ OPENCODE_PROFILE_MODEL=""  # optional provider/model applied to every profile ag
 STARTUP_LOGO=""            # "yes" (via --with-logo) installs the Kurama startup logo; anything else skips it. Never prompted for — the default install stays clean.
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
 ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
+# Run-shaping flags seen on this invocation that the interactive TUI hand-off
+# (issue #40) cannot forward — it takes NO arguments and asks its own questions.
+# An underspecified run (no --agent/--all) carrying any of these is REFUSED rather
+# than silently honoring nothing. --agent/--all/--non-interactive/--help are not
+# blockers and are never appended here.
+HANDOFF_BLOCKED_FLAGS=()
 
 # Every value-taking flag goes through this first: under `set -u` a bare
 # `--agent` at the end of the line used to abort with a raw
@@ -2347,20 +2320,22 @@ while [[ $# -gt 0 ]]; do
         --all)            ALL=true; shift ;;
         --non-interactive) NON_INTERACTIVE=true; ALL=true; shift ;;
         --scope)
+            HANDOFF_BLOCKED_FLAGS+=("--scope")
             require_flag_value --scope "${2:-}"
             case "$2" in
                 global|project) SCOPE="$2"; shift 2 ;;
                 *) echo "Invalid scope: $2 (use 'global' or 'project')"; exit 1 ;;
             esac
             ;;
-        --path)           require_flag_value --path "${2:-}"; TARGET_PATH="$2"; shift 2 ;;
-        --with-pi-packages)    PI_PACKAGES="yes"; shift ;;
-        --without-pi-packages) PI_PACKAGES="no"; shift ;;
-        --with-engram)         ENGRAM="yes"; shift ;;
-        --without-engram)      ENGRAM="no"; shift ;;
-        --with)    require_flag_value --with "${2:-}";    setup_validate_group_name "$2"; setup_enable_group "$2"; shift 2 ;;
-        --without) require_flag_value --without "${2:-}"; setup_validate_group_name "$2"; setup_disable_group "$2"; shift 2 ;;
+        --path)           HANDOFF_BLOCKED_FLAGS+=("--path"); require_flag_value --path "${2:-}"; TARGET_PATH="$2"; shift 2 ;;
+        --with-pi-packages)    HANDOFF_BLOCKED_FLAGS+=("--with-pi-packages");    PI_PACKAGES="yes"; shift ;;
+        --without-pi-packages) HANDOFF_BLOCKED_FLAGS+=("--without-pi-packages"); PI_PACKAGES="no"; shift ;;
+        --with-engram)         HANDOFF_BLOCKED_FLAGS+=("--with-engram");         ENGRAM="yes"; shift ;;
+        --without-engram)      HANDOFF_BLOCKED_FLAGS+=("--without-engram");      ENGRAM="no"; shift ;;
+        --with)    HANDOFF_BLOCKED_FLAGS+=("--with");    require_flag_value --with "${2:-}";    setup_validate_group_name "$2"; setup_enable_group "$2"; shift 2 ;;
+        --without) HANDOFF_BLOCKED_FLAGS+=("--without"); require_flag_value --without "${2:-}"; setup_validate_group_name "$2"; setup_disable_group "$2"; shift 2 ;;
         --opencode-mode)
+            HANDOFF_BLOCKED_FLAGS+=("--opencode-mode")
             require_flag_value --opencode-mode "${2:-}"
             if [[ "$2" == "single" || "$2" == "multi" ]]; then
                 OPENCODE_MODE="$2"; shift 2
@@ -2371,6 +2346,7 @@ while [[ $# -gt 0 ]]; do
         --opencode-profile)
             # Grammar: NAME[:provider/model]. Split on the FIRST colon so the
             # model's own "/" survives; an empty NAME defaults to "kurama".
+            HANDOFF_BLOCKED_FLAGS+=("--opencode-profile")
             require_flag_value --opencode-profile "${2:-}"
             _prof_val="$2"
             _prof_name="${_prof_val%%:*}"
@@ -2384,8 +2360,8 @@ while [[ $# -gt 0 ]]; do
             OPENCODE_PROFILE_MODEL="$_prof_rest"
             shift 2
             ;;
-        --with-logo)    STARTUP_LOGO="yes"; shift ;;
-        --without-logo) STARTUP_LOGO="no"; shift ;;
+        --with-logo)    HANDOFF_BLOCKED_FLAGS+=("--with-logo");    STARTUP_LOGO="yes"; shift ;;
+        --without-logo) HANDOFF_BLOCKED_FLAGS+=("--without-logo"); STARTUP_LOGO="no"; shift ;;
         -h|--help)
             echo "Usage: setup.sh [OPTIONS]"
             echo ""
@@ -2419,9 +2395,54 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --path only makes sense with project scope.
+# --path only makes sense with project scope. Checked BEFORE the TUI hand-off
+# (issue #40 review I1) so `./setup.sh --path DIR` still errors here rather than
+# being swallowed by the interactive branch below.
 if [ -n "$TARGET_PATH" ] && [ "$SCOPE" != "project" ]; then
     echo "--path requires --scope project"; exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Interactive front-end: hand off to the TUI (issue #40)
+# ---------------------------------------------------------------------------
+# A run that names neither --agent nor --all/--non-interactive is not a fully
+# specified run. setup.sh no longer prompts for the missing pieces itself — the
+# in-script text menu was removed so the three front-ends stop drifting apart,
+# and the TUI (setup-tui.sh) is now the one interactive experience. Delegate to
+# it when gum is present (it draws its own banner and re-invokes this script per
+# choice with explicit flags, so we never recurse into this branch). When gum is
+# absent, setup.sh cannot install it, so a TUI is impossible: print the flag
+# guide and exit 2 rather than half-install a guessed default.
+if [[ -z "$AGENT" ]] && ! $ALL; then
+    # The hand-off passes NO arguments and the TUI asks its own questions, so any
+    # run-shaping flag given here would be silently dropped (review I1) — e.g.
+    # `--without review` would install review anyway, contradicting the flag.
+    # Refuse instead of honoring nothing: name the flags and point at the two ways
+    # to make them apply — a concrete target, or a non-interactive run.
+    if [ "${#HANDOFF_BLOCKED_FLAGS[@]}" -gt 0 ]; then
+        echo ""
+        fail "These flags need an explicit target and cannot be forwarded to the interactive TUI:"
+        fail "  ${HANDOFF_BLOCKED_FLAGS[*]}"
+        info "Name the target so they apply: add --agent <name> (or --all),"
+        info "or re-run non-interactively (./setup.sh --non-interactive …) with those flags."
+        exit 2
+    fi
+    if command -v gum >/dev/null 2>&1; then
+        exec bash "$SCRIPT_DIR/setup-tui.sh"
+    fi
+    print_interactive_unavailable
+    exit 2
+fi
+
+# A run is fully specified from here (--agent, or --all/--non-interactive). Draw
+# the banner once — the interactive path above never reaches this line, so the
+# TUI's own banner is the only one shown on that path.
+if ! print_banner; then
+    echo ""
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║    Kurama — Full Setup          ║${NC}"
+    echo -e "${CYAN}${BOLD}║   Detect • Install • Configure            ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
 fi
 
 # O1: validate the project target (exists, git repo, not the Kurama repo) once.
@@ -2460,8 +2481,10 @@ if [[ -n "$AGENT" ]]; then
     # Single agent mode
     setup_agent "$AGENT"
     INSTALLED_AGENTS+=("$AGENT")
-elif $ALL; then
-    # Auto-detect + install all
+else
+    # --all / --non-interactive: auto-detect + install all. (The interactive,
+    # no-flags case was handled above by the TUI hand-off, so it never reaches
+    # here; $ALL is the only remaining possibility.)
     detect_agents
     # Guard the expansion: on bash 3.2 (macOS stock) "${arr[@]}" of an empty
     # array trips `set -u`. This is the --all/--non-interactive zero-agents path.
@@ -2471,10 +2494,6 @@ elif $ALL; then
             INSTALLED_AGENTS+=("$agent")
         done
     fi
-else
-    # Interactive
-    detect_agents
-    interactive_menu
 fi
 
 if [[ ${#INSTALLED_AGENTS[@]} -gt 0 ]]; then

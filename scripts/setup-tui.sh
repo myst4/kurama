@@ -282,10 +282,13 @@ This front-end needs `gum` (https://github.com/charmbracelet/gum).
   macOS  : brew install gum
   Linux  : see https://github.com/charmbracelet/gum#installation
 
-gum is optional — Kurama installs fine without it:
+gum is optional — Kurama installs fine without it, but only non-interactively
+(the interactive experience IS this gum front-end). Specify the run instead:
 
-  ./scripts/setup.sh          # interactive
-  ./scripts/setup.sh --help   # every flag this front-end can build
+  ./scripts/setup.sh --all              # every detected agent
+  ./scripts/setup.sh --agent NAME       # one agent (claude-code, opencode, codex, pi, omp)
+  ./scripts/setup.sh --non-interactive  # no prompts (for external installers)
+  ./scripts/setup.sh --help             # every flag this front-end can build
 EOF
     exit 1
 fi
