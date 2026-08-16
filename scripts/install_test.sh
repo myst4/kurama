@@ -5513,6 +5513,289 @@ run_test "an unregistered @@TOKEN@@ fails loudly, naming it" test_build_examples
 run_test "the committed templates rebuild byte-for-byte" test_build_examples_rebuilds_committed_outputs_byte_for_byte
 echo ""
 
+# ===== UNIT-A (issue #32) =====
+#
+# update.sh hardening. #32 filed five defects; four reproduce against this tree
+# and are fixed here. The fifth — the first unusable receipt killing the whole
+# multi-target run under `set -e` — was already closed by ec8cdf3 for the
+# REFUSAL branch, so the pin below covers the other exit out of resync_target
+# (an unrecognized tool, filed as a failure) instead.
+#
+# Every test drives the real update.sh against a real install inside the
+# sandboxed $HOME run_test provides, so each assertion is about what the user
+# sees or what survives on disk — never an internal.
+
+# The documented contract of --dry-run is "report drift, change nothing". It
+# snapshotted every recorded file's hash and then threw the snapshot away,
+# printing a constant "would re-sync N recorded file(s)" — the same N for a
+# pristine install and for one whose skills had been hand-edited. A user
+# previewing the update saw nothing, ran the real update, and lost the edit.
+test_update_dry_run_reports_drifted_files() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    printf 'LOCAL EDIT\n' > "$HOME/.claude/skills/sdd-apply/SKILL.md"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    printf '%s\n' "$output" | grep -q 'sdd-apply/SKILL.md' || {
+        echo "the dry run never names the drifted file:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    # ...and it is still only a preview.
+    grep -q 'LOCAL EDIT' "$HOME/.claude/skills/sdd-apply/SKILL.md" || {
+        echo "the dry run modified the drifted file"; return 1; }
+    return 0
+}
+
+# The other direction: a pristine install must preview as clean. A drift report
+# that cries wolf on every recorded file is as useless as one that reports
+# nothing, and it is the case every user sees first.
+test_update_dry_run_clean_install_reports_no_drift() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    if printf '%s\n' "$output" | grep -qE 'drift:|missing:'; then
+        echo "a freshly installed target previewed as drifted:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'no drift' || {
+        echo "the dry run never states the target is in sync:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# ~/.claude/agents is a SHARED directory — users keep their own agents there.
+# The prune globbed every *.bak.* in it and deleted all but the lexically last
+# per name, so a user's own backup of their own agent was collected as
+# collateral on the next update. Only originals the receipt records may be
+# pruned.
+test_update_prune_spares_user_owned_agent_backups() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local agents="$HOME/.claude/agents"
+    assert_dir_exists "$agents" || return 1
+
+    # An agent Kurama never installed, with the user's own backups beside it.
+    printf 'mine\n' > "$agents/my-own-agent.md"
+    printf 'v1\n'   > "$agents/my-own-agent.md.bak.20200101000000"
+    printf 'v2\n'   > "$agents/my-own-agent.md.bak.20200102000000"
+    # ...and stale backups of an agent the receipt DOES record.
+    printf 'old\n'  > "$agents/sdd-spec.md.bak.20200101000000"
+    printf 'old\n'  > "$agents/sdd-spec.md.bak.20200102000000"
+
+    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
+        || { echo "update.sh failed"; return 1; }
+
+    assert_file_exists "$agents/my-own-agent.md" || return 1
+    assert_file_exists "$agents/my-own-agent.md.bak.20200101000000" || {
+        echo "update deleted a backup of a user-owned agent"; return 1; }
+    assert_file_exists "$agents/my-own-agent.md.bak.20200102000000" || {
+        echo "update deleted a backup of a user-owned agent"; return 1; }
+
+    # The recorded agent is still pruned to a single backup — the one this very
+    # re-sync wrote, whose timestamp sorts after both 2020 ones.
+    local kept
+    kept=$(count_matching_files "$agents" 'sdd-spec.md.bak.*')
+    assert_eq "1" "$kept" "a recorded agent keeps exactly one backup" || return 1
+    if [ -f "$agents/sdd-spec.md.bak.20200101000000" ]; then
+        echo "the stale backup of a recorded agent was not pruned"; return 1
+    fi
+    return 0
+}
+
+# The re-sync delegates to setup.sh with stdout AND stderr on /dev/null, so
+# every failure surfaced as a bare "Re-sync failed for <slug>" — on the exact
+# path a user walks while recovering a broken install. The cause must reach them.
+test_update_failure_shows_delegated_setup_output() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" --non-interactive > /dev/null 2>&1 \
+        || { echo "project-scope setup failed"; return 1; }
+    # The target stops being a git repo (a deleted .git, a moved checkout, a
+    # restored backup): setup.sh refuses it in non-interactive mode and says so.
+    rm -rf "$repo/.git"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --scope project --path "$repo" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "update exited 0 although the delegated setup.sh failed"; return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Re-sync failed' || {
+        echo "no per-target failure line:"; printf '%s\n' "$output"; return 1; }
+    printf '%s\n' "$output" | grep -q 'not a git repository' || {
+        echo "the delegated setup.sh output never reaches the user:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# Same mechanism as the OpenCode mode/profile loss fixed in #22: update.sh
+# delegates with --non-interactive, where ask_engram defaults to "no", so the
+# FIRST update re-stamped the receipt engram: no and the choice was gone. The
+# receipt already records it — re-pass it like the --with-logo carry-over.
+test_update_carries_engram_across_resync() {
+    bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code --with-engram failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    grep -q '"engram": "yes"' "$manifest" || {
+        echo "setup did not record engram: yes"; return 1; }
+
+    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
+        || { echo "update.sh failed"; return 1; }
+
+    grep -q '"engram": "yes"' "$manifest" || {
+        echo "update.sh re-stamped the receipt — the Engram choice is lost:"
+        grep '"engram"' "$manifest"
+        return 1
+    }
+    return 0
+}
+
+# ec8cdf3 fixed the multi-target abort for the REFUSAL branch (a mode-less
+# OpenCode receipt). An unrecognized tool leaves resync_target by the other
+# door — it is filed as a failure, not a refusal — so pin that branch too: the
+# targets queued behind it must still be updated, and the run must close with a
+# summary naming the one it skipped.
+test_update_unrecognized_tool_does_not_abort_the_other_targets() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup codex failed"; return 1; }
+
+    # A receipt from a harness Kurama no longer supports. ALL_AGENTS puts
+    # claude-code FIRST, so this unusable target is handled before codex.
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local rewritten
+    rewritten=$(awk '{ gsub(/"claude-code"/, "\"gemini-cli\""); print }' "$manifest")
+    printf '%s\n' "$rewritten" > "$manifest"
+
+    local codex_skill="$HOME/.codex/skills/sdd-apply/SKILL.md"
+    assert_file_exists "$codex_skill" || return 1
+    printf 'clobbered\n' > "$codex_skill"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "an unusable receipt must still make the run exit non-zero"; return 1
+    fi
+    if grep -q '^clobbered$' "$codex_skill"; then
+        echo "codex was never re-synced — the unusable receipt aborted the loop"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Not updated' || {
+        echo "no end-of-run summary naming the skipped target:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# A drift preview that compared NOTHING must not report "no drift". Every
+# recorded file whose path has no repo mapping is skipped, and a receipt where
+# every file is skipped used to still print "No drift — all N recorded file(s)
+# match": a green light over zero comparisons, on the script users reach for when
+# they already suspect the install is broken. The headline counts only what was
+# actually compared, and says so when that is nothing.
+test_update_dry_run_says_when_nothing_was_comparable() {
+    bash "$SETUP_SCRIPT" --agent omp --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup omp failed"; return 1; }
+    local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    # omp's RULES.md is the one recorded path with no repo source mapping. A
+    # receipt holding only it is a target where nothing is comparable.
+    assert_file_exists "$HOME/.omp/agent/RULES.md" || return 1
+    printf '%s\n' \
+        '{' \
+        '  "name": "kurama",' \
+        '  "version": "6.0.0",' \
+        '  "tool": "omp",' \
+        '  "tools": [' \
+        '    "omp"' \
+        '  ],' \
+        '  "scope": "global",' \
+        '  "engram": "no",' \
+        '  "files": [' \
+        '    "../RULES.md"' \
+        '  ],' \
+        '  "settings": [],' \
+        '  "pi_packages": [],' \
+        '  "engram_mcp": [],' \
+        '  "prompts": [],' \
+        '  "tui_plugins": [],' \
+        '  "opencode_configs": []' \
+        '}' > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent omp --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview claimed 'no drift' having compared nothing:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'nothing comparable' || {
+        echo "the preview never says it could compare nothing:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# The preview must not describe a target the real run would refuse. The tool
+# validation used to sit BELOW the dry-run return, so a receipt with an
+# unrecognized tool got a plausible drift report and no hint that `update.sh`
+# without --dry-run would refuse it outright.
+test_update_dry_run_refuses_what_the_real_run_would_refuse() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local rewritten
+    rewritten=$(awk '{ gsub(/"claude-code"/, "\"gemini-cli\""); print }' "$manifest")
+    printf '%s\n' "$rewritten" > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "the preview exited 0 for a target the real run refuses:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Unrecognized tool' || {
+        echo "the preview never names the unusable tool:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview reported a drift verdict for a refused target:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}#32 — update.sh hardening${NC}"
+run_test "--dry-run names the recorded files that drifted" test_update_dry_run_reports_drifted_files
+run_test "--dry-run on a pristine install reports no drift" test_update_dry_run_clean_install_reports_no_drift
+run_test "--dry-run says when nothing was comparable" test_update_dry_run_says_when_nothing_was_comparable
+run_test "--dry-run refuses what the real run would refuse" test_update_dry_run_refuses_what_the_real_run_would_refuse
+run_test "the backup prune spares user-owned agent backups" test_update_prune_spares_user_owned_agent_backups
+run_test "a failed re-sync shows the delegated setup.sh output" test_update_failure_shows_delegated_setup_output
+run_test "--with-engram survives a re-sync" test_update_carries_engram_across_resync
+run_test "an unusable receipt does not abort the queued targets" test_update_unrecognized_tool_does_not_abort_the_other_targets
 # ===== UNIT-C (issue #35) =====
 #
 # #35: plugin.json shipped two defects — homepage/repository still pointed at
