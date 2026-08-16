@@ -55,6 +55,7 @@ if [ ! -f "$KURAMA_LIB" ]; then
 fi
 # shellcheck source=lib/receipt.sh disable=SC1091
 . "$KURAMA_LIB"
+command -v manifest_json_array >/dev/null 2>&1 || { echo "kurama: scripts/lib/receipt.sh is present but did not define the receipt parser" >&2; exit 1; }
 
 # Every harness setup.sh accepts, paired with the binary that proves it is
 # installed. Kept in the same order setup.sh's detect_agents() checks them.

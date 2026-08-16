@@ -32,6 +32,7 @@ if [ ! -f "$KURAMA_LIB" ]; then
 fi
 # shellcheck source=lib/receipt.sh disable=SC1091
 . "$KURAMA_LIB"
+command -v manifest_json_array >/dev/null 2>&1 || { echo "kurama: scripts/lib/receipt.sh is present but did not define the receipt parser" >&2; exit 1; }
 
 # Name of the per-target install manifest — identical to install.sh so
 # scripts/uninstall.sh can remove exactly what a setup.sh install wrote.
@@ -585,15 +586,11 @@ finalize_receipt() {
     version="$(read_version)"
     commit="$(read_commit)"
 
-    # tools[]: every harness recorded here. v6 and legacy install.sh receipts only
-    # carry the scalar "tool", so fall back to it; the current tool goes last and
-    # stays the value of "tool".
+    # tools[]: every harness already recorded here. The v6/legacy scalar-"tool"
+    # fallback is manifest_tools' single decision now (issue #37), not re-sniffed.
+    # The current tool goes last and stays the value of "tool".
     local prev_tools
-    prev_tools="$(receipt_json_array "$manifest_path" "tools")"
-    if [ -z "$prev_tools" ]; then
-        prev_tools="$(receipt_field "$manifest_path" "tool")"
-    fi
-    prev_tools="$(printf '%s\n' "$prev_tools" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
+    prev_tools="$(manifest_tools "$manifest_path" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
 
     local tools files settings pi_packages engram_mcp prompts tui_plugins opencode_configs
     tools="$(_merge_lines "$prev_tools" "$RECEIPT_TOOL")"

@@ -100,21 +100,23 @@ manifest_files() {
 
 # ----------------------------------------------------------------------------
 # receiptSchema (#37): an integer version stamped into every newly written
-# receipt. Consumers gate on it; receipts that lack it are read by the frozen
-# legacy shape-sniff below.
+# receipt so a FUTURE shape change can be selected on the field instead of
+# re-sniffing shapes. No consumer needs to gate on it today (the current and
+# legacy shapes read identically — see manifest_tools), so the field is written
+# and readable but not yet branched on. When the receipt shape next changes, add
+# the schema-gated modern branch THEN — receipt_schema() already reads the field.
 # ----------------------------------------------------------------------------
 
 # The schema version this build stamps into receipts it writes. Bump only
-# alongside a receipt shape change, and add the matching modern branch to any
-# consumer that gates on it. Referenced by the writers (setup.sh/install.sh),
+# alongside a receipt shape change. Referenced by the writers (setup.sh/install.sh),
 # which source this file — hence unused from shellcheck's single-file view.
 # shellcheck disable=SC2034
 RECEIPT_SCHEMA=1
 
 # Read the integer receiptSchema field of a receipt. Returns 0 when the field is
 # absent (a pre-#37 receipt), the file is missing, or the value is non-numeric —
-# so callers gate with a plain `-ge`. manifest_field cannot read this: it matches
-# only quoted string values, and receiptSchema is a bare JSON number.
+# so a future caller can gate with a plain `-ge`. manifest_field cannot read this:
+# it matches only quoted string values, and receiptSchema is a bare JSON number.
 receipt_schema() {
     local manifest="$1" v=""
     [ -f "$manifest" ] || { printf '0'; return 0; }
@@ -130,28 +132,18 @@ receipt_schema() {
     printf '%s' "$v"
 }
 
-# Resolve every harness a receipt records: setup.sh writes them all into tools[];
+# Resolve every harness a receipt records. setup.sh writes them all into tools[];
 # install.sh's minimal receipt and every pre-tools[] (v6 / legacy) receipt carry
-# only the scalar "tool", which is the fallback.
-_manifest_tools_read() {
+# only the scalar "tool", which is the fallback. ONE frozen path for all shapes:
+# a modern install.sh receipt legitimately omits tools[] too, so there is no
+# schema-dependent decision to make today. A receiptSchema>=1 modern branch is
+# added HERE when the shape next changes — not before, so a field-less legacy
+# receipt is never read by anything but this single, genuinely frozen body.
+manifest_tools() {
     local manifest="$1" tools
     tools="$(manifest_json_array "$manifest" "tools" | awk 'NF')"
     [ -n "$tools" ] || tools="$(manifest_field "$manifest" "tool")"
     printf '%s\n' "$tools"
-}
-
-# Public entry: gated on receiptSchema. Behavior-preserving today — a modern
-# install.sh receipt legitimately omits tools[] too, so both paths keep the scalar
-# fallback and resolve every current receipt identically. The split isolates the
-# legacy shape so the NEXT schema bump edits only the modern branch and never
-# disturbs how a field-less legacy receipt is read.
-manifest_tools() {
-    local manifest="$1"
-    if [ "$(receipt_schema "$manifest")" -ge 1 ]; then
-        _manifest_tools_read "$manifest"   # modern (receiptSchema >= 1)
-    else
-        _manifest_tools_read "$manifest"   # frozen legacy (no receiptSchema)
-    fi
 }
 
 # ----------------------------------------------------------------------------

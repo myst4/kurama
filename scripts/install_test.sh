@@ -7083,30 +7083,56 @@ test_lib_skills_path_global_project_and_omp() {
 
 # --- (b) integration: every script sources the one lib, and fails loud without it
 
+# Every script must both SOURCE the lib and carry the missing-lib GUARD — grepping
+# the source line alone would let someone delete the guard from one script (the
+# deletion path is uninstall.sh) and stay green while a partial clone runs it with
+# an undefined parser.
 test_lib_all_six_scripts_source_it() {
     local s missing=""
     for s in setup.sh install.sh uninstall.sh update.sh doctor.sh setup-tui.sh; do
         # shellcheck disable=SC2016  # matching the literal source lines as written
         grep -qF 'KURAMA_LIB="$SCRIPT_DIR/lib/receipt.sh"' "$SCRIPT_DIR/$s" \
+            && grep -qF '[ ! -f "$KURAMA_LIB" ]' "$SCRIPT_DIR/$s" \
             && grep -qF '. "$KURAMA_LIB"' "$SCRIPT_DIR/$s" \
             || missing="$missing $s"
     done
-    [ -z "$missing" ] || { echo "scripts not sourcing lib/receipt.sh:$missing"; return 1; }
+    [ -z "$missing" ] || { echo "scripts missing the source line or the guard:$missing"; return 1; }
     return 0
 }
 
 test_lib_missing_aborts_loud() {
-    # A partial clone: the script without its lib sibling must abort with a clear
-    # message, never run on with an undefined parser. The guard sits at the top,
-    # so even --help trips it.
-    local nolib="$TEST_TMPDIR/nolib"
-    mkdir -p "$nolib"
-    cp "$INSTALL_SCRIPT" "$nolib/install.sh"
-    local output status=0
-    output=$(bash "$nolib/install.sh" --help 2>&1) || status=$?
-    [ "$status" -ne 0 ] || { echo "a missing lib/receipt.sh must abort non-zero"; return 1; }
-    printf '%s\n' "$output" | grep -qF 'lib/receipt.sh' || {
-        echo "the abort never names the missing lib:"; printf '%s\n' "$output" | tail -3; return 1; }
+    # A partial clone: EACH script without its lib sibling must abort non-zero and
+    # name the lib, never run on with an undefined parser. The guard sits above arg
+    # parsing, so --help trips it. Looped over all six — the deletion path
+    # (uninstall.sh) is exactly the one a single-script test would miss.
+    local nolib="$TEST_TMPDIR/nolib" s output status
+    for s in setup.sh install.sh uninstall.sh update.sh doctor.sh setup-tui.sh; do
+        rm -rf "$nolib"; mkdir -p "$nolib"
+        cp "$SCRIPT_DIR/$s" "$nolib/$s"
+        status=0
+        output=$(bash "$nolib/$s" --help 2>&1) || status=$?
+        [ "$status" -ne 0 ] || { echo "$s: a missing lib/receipt.sh must abort non-zero"; return 1; }
+        printf '%s\n' "$output" | grep -qF 'lib/receipt.sh' || {
+            echo "$s: the abort never names the missing lib:"; printf '%s\n' "$output" | tail -3; return 1; }
+    done
+    return 0
+}
+
+test_lib_truncated_lib_aborts_loud() {
+    # A present-but-empty lib (truncated download / bad merge) leaves the parser
+    # undefined. Each script must catch that too — via the command -v guard after
+    # the source — instead of running on with a missing manifest_json_array.
+    local dir="$TEST_TMPDIR/emptylib" s output status
+    for s in setup.sh install.sh uninstall.sh update.sh doctor.sh setup-tui.sh; do
+        rm -rf "$dir"; mkdir -p "$dir/lib"
+        cp "$SCRIPT_DIR/$s" "$dir/$s"
+        : > "$dir/lib/receipt.sh"
+        status=0
+        output=$(bash "$dir/$s" --help 2>&1) || status=$?
+        [ "$status" -ne 0 ] || { echo "$s: an empty lib must abort non-zero"; return 1; }
+        printf '%s\n' "$output" | grep -qF 'did not define the receipt parser' || {
+            echo "$s: the abort never flags the undefined parser:"; printf '%s\n' "$output" | tail -3; return 1; }
+    done
     return 0
 }
 
@@ -7119,8 +7145,9 @@ run_test "lib reads a scalar field, empty when absent" test_lib_manifest_field_r
 run_test "receipt_schema reads the int, 0 when absent/missing" test_lib_receipt_schema_present_absent_and_nonnumeric
 run_test "manifest_tools: modern tools[] and legacy scalar fallback" test_lib_manifest_tools_modern_and_legacy
 run_test "skills_path: global, project, and omp relocation" test_lib_skills_path_global_project_and_omp
-run_test "all six scripts source scripts/lib/receipt.sh" test_lib_all_six_scripts_source_it
-run_test "a missing lib/receipt.sh aborts loud, before writing" test_lib_missing_aborts_loud
+run_test "all six scripts source + guard scripts/lib/receipt.sh" test_lib_all_six_scripts_source_it
+run_test "all six abort loud when lib/receipt.sh is missing" test_lib_missing_aborts_loud
+run_test "all six abort loud when lib/receipt.sh is empty/truncated" test_lib_truncated_lib_aborts_loud
 
 echo ""
 

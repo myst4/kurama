@@ -41,6 +41,7 @@ if [ ! -f "$KURAMA_LIB" ]; then
 fi
 # shellcheck source=lib/receipt.sh disable=SC1091
 . "$KURAMA_LIB"
+command -v manifest_json_array >/dev/null 2>&1 || { echo "kurama: scripts/lib/receipt.sh is present but did not define the receipt parser" >&2; exit 1; }
 
 INSTALL_MANIFEST_NAME=".kurama-install-manifest.json"
 EXAMPLES_DIR="$REPO_DIR/examples"
@@ -139,11 +140,7 @@ $path"
 orphan_skills_dir() {
     local agent="$1" scope="$2" base="$3"
     if [ "$scope" = "project" ]; then
-        case "$agent" in
-            pi)  echo "$base/.pi/skills" ;;
-            omp) echo "$base/.omp/skills" ;;
-            *)   echo "$base/.claude/skills" ;;
-        esac
+        skills_path "$agent" project "$base"
     else
         global_skills_path "$agent"
     fi
