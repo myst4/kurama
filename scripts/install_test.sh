@@ -4288,8 +4288,9 @@ test_install_without_group_removes_excluded_skills() {
 test_install_incomplete_checkout_aborts_early() {
     # #38: install.sh is a wrapper — a checkout missing the real installer (setup.sh)
     # must abort loudly and write nothing, not silently do nothing. (The examples/
-    # completeness check moved to setup.sh, the sole installer; this pins the
-    # wrapper's own delegate-present guard.)
+    # completeness check now lives in setup.sh, the sole installer — enforced there
+    # and pinned by test_g_setup_missing_examples_fails_loud_before_write; this test
+    # pins the wrapper's own delegate-present guard.)
     local fake="$TEST_TMPDIR/partial-repo"
     mkdir -p "$fake/scripts"
     cp "$INSTALL_SCRIPT" "$fake/scripts/install.sh"
@@ -7318,6 +7319,42 @@ test_g_wrapper_writes_no_display_name_tool() {
     return 0
 }
 
+# --- (d) setup.sh fails loud on an incomplete source tree (I3, ported from install.sh)
+
+test_g_setup_missing_examples_fails_loud_before_write() {
+    # I3 (#38): the examples/ completeness check that used to live in install.sh's
+    # validate_source moved into setup.sh when the two installers collapsed. examples/
+    # is not optional — the OpenCode target installs its /sdd-* commands from it and
+    # every orchestrator merge reads a prompt file under it — so a clone with skills/
+    # but no examples/ must FAIL LOUD (exit 1, naming the missing path) BEFORE any
+    # write, honouring the #41 fail-loud invariant. The pre-collapse hazard: warn
+    # per-source, skip the commands, still print "Done!" and write a receipt for a
+    # PARTIAL install — exit 0 where it must be exit 1.
+    local clone="$TEST_TMPDIR/staged-clone-no-examples"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+    rm -rf "$clone/examples" || { echo "could not remove examples/ from the staged clone"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "setup.sh installed from a clone missing examples/ instead of aborting"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'Missing: examples/' || {
+        echo "the abort never names the missing examples/ path:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    local receipt="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if [ -e "$receipt" ]; then
+        echo "setup.sh wrote a receipt for a partial install: $receipt"
+        return 1
+    fi
+    return 0
+}
+
 echo -e "${BOLD}UNIT-G (issue #38) — collapse install.sh into setup.sh${NC}"
 run_test "setup.sh --without review is a full review-free setup" test_g_setup_without_review_is_a_full_review_free_setup
 run_test "setup.sh --without sdd-core is rejected" test_g_setup_without_rejects_required_group
@@ -7330,6 +7367,7 @@ run_test "wrapper answers --version/--help locally" test_g_wrapper_version_and_h
 run_test "wrapper prints a deprecation notice" test_g_wrapper_prints_deprecation_notice
 run_test "wrapper never truncates the setup.sh receipt (#24)" test_g_wrapper_does_not_truncate_setup_receipt
 run_test "wrapper writes no display-name receipt of its own" test_g_wrapper_writes_no_display_name_tool
+run_test "setup.sh fails loud on a clone missing examples/ (no partial receipt)" test_g_setup_missing_examples_fails_loud_before_write
 
 echo ""
 
