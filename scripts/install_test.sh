@@ -148,12 +148,19 @@ assert_all_skills_installed() {
 # Run test function $1 in a subshell, echo its combined output, and exit with its
 # status.
 #
-# #31: `set -e` is re-armed INSIDE the subshell on purpose. run_test calls this
-# from an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — the suppression is inherited by the command substitution's subshell
-# too, so a bare failing command inside the test body neither aborted it nor
-# reached run_test. An explicit `set -e` in the subshell is the only way to undo
-# that; the outer shell's -u and pipefail are never suppressed and carry over.
+# #31: `set -e` is re-armed INSIDE the subshell on purpose. Callers disarm errexit
+# around the call so a failing body cannot abort the whole suite; this explicit
+# `set -e` is what puts it back for the body. The outer shell's -u and pipefail
+# are never suppressed and carry over either way.
+#
+# #55: the re-arm is honoured ONLY when the caller is NOT inside a POSIX
+# errexit-ignore context — an `if`/`while` condition, a `!` negation, or any
+# non-final command of an `&&`/`||` list. Bash <= 5.2 let a nested `set -e`
+# override that suppression; bash 5.3 (ubuntu-latest) follows POSIX strictly and
+# silently ignores it, which made every "run the thing, then return 0" test
+# unfailable again on CI while macOS bash 3.2 stayed green. So EVERY caller must
+# reach this function through a plain assignment (or a bare command) wrapped in
+# `set +e` / `set -e` — never from a condition and never from `|| status=$?`.
 invoke_test_body() {
     local func="$1"
     ( set -e; "$func" 2>&1 )
@@ -179,8 +186,16 @@ run_test() {
     TESTS_RUN=$((TESTS_RUN + 1))
     setup
     echo -n "  $name ... "
-    local output
-    if output=$(invoke_test_body "$func"); then
+    local output status
+    # #55: a plain assignment is not an errexit-ignore context, so the subshell's
+    # `set -e` is honoured on every bash from 3.2 to 5.3+. `set +e` here only keeps
+    # a failing body from aborting the suite — it does NOT reach the body, which
+    # re-arms errexit for itself. Do not fold this back into `if output=$(...)`.
+    set +e
+    output=$(invoke_test_body "$func")
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
         echo -e "${GREEN}PASS${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
@@ -195,16 +210,21 @@ run_test() {
 }
 
 # ============================================================================
-# Tests — the harness itself (#31)
+# Tests — the harness itself (#31, #55)
 #
 # A test suite that cannot fail is worse than no suite: it reports green over
-# every regression it was written to catch. `run_test` invokes the test function
-# as an `if` condition, and bash suppresses errexit for the whole extent of a
-# condition — including the command substitution's subshell. Every test shaped
-# "run the thing, then `return 0`" was therefore unfailable: the bare command's
-# non-zero status neither aborted the body nor reached run_test. invoke_test_body
-# re-arms errexit inside the subshell, which is the only place the suppression
-# can be undone; these two cases pin both halves of that contract.
+# every regression it was written to catch. Every test shaped "run the thing,
+# then `return 0`" is unfailable unless errexit is genuinely active inside the
+# body: the bare command's non-zero status would neither abort the body nor reach
+# run_test. invoke_test_body re-arms errexit inside its subshell to guarantee
+# that, and #55 added the other half of the contract — the caller must invoke it
+# from outside any errexit-ignore context, or strict-POSIX bash silently drops
+# the re-arm. These two cases pin both halves: a failing bare command must fail
+# its test, and a passing body must still pass.
+#
+# Both cases below therefore use the same `set +e` / plain call / `set -e` shape
+# as run_test. Reintroducing `|| status=$?` here would make them test a path the
+# harness no longer uses — and pass while the real one is broken.
 # ============================================================================
 
 # Fails on its first bare command, then claims success exactly as the unfailable
@@ -222,8 +242,11 @@ _fixture_test_body_succeeds() {
 }
 
 test_harness_bare_command_failure_fails_the_test() {
-    local output status=0
-    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero) || status=$?
+    local output status
+    set +e
+    output=$(invoke_test_body _fixture_test_body_fails_then_returns_zero)
+    status=$?
+    set -e
     if [ "$status" -eq 0 ]; then
         echo "invoke_test_body returned 0 for a body whose bare command failed —"
         echo "every 'run it, then return 0' test in this file is unfailable."
@@ -238,8 +261,11 @@ test_harness_bare_command_failure_fails_the_test() {
 }
 
 test_harness_passing_test_still_passes() {
-    local status=0
-    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1 || status=$?
+    local status
+    set +e
+    invoke_test_body _fixture_test_body_succeeds > /dev/null 2>&1
+    status=$?
+    set -e
     assert_eq "0" "$status" "a body that succeeds must still be reported as a pass" || return 1
     return 0
 }
@@ -5770,6 +5796,101 @@ run_test "the backup prune spares user-owned agent backups" test_update_prune_sp
 run_test "a failed re-sync shows the delegated setup.sh output" test_update_failure_shows_delegated_setup_output
 run_test "--with-engram survives a re-sync" test_update_carries_engram_across_resync
 run_test "an unusable receipt does not abort the queued targets" test_update_unrecognized_tool_does_not_abort_the_other_targets
+# ===== UNIT-C (issue #35) =====
+#
+# #35: plugin.json shipped two defects — homepage/repository still pointed at
+# the pre-rename Gentleman-Programming/agent-teams-lite repo instead of this
+# repo's real origin, and the "agents" array hand-listed only the 9 SDD-phase
+# agents, silently missing the 8 review-layer agents (the 4R lenses,
+# review-refuter, the two Judgment Day judges, and jd-fix-agent) that
+# setup.sh's install_native_agents() copies wholesale from
+# examples/claude-code/agents/*.md for --agent claude-code. The Claude Code
+# plugin schema's "agents" field takes file paths (a string or an array), not
+# a directory glob like "skills" gets, so the manifest list has to be
+# hand-enumerated — which means nothing stops it drifting from the on-disk
+# set the next time an agent is added or removed there. These tests close
+# that gap: one confirms the repository URL fix, the other two fail loudly
+# the moment examples/claude-code/agents/ and plugin.json's "agents" array
+# disagree, in either direction.
+
+# Print the sorted basenames of every *.md file directly under dir $1.
+list_agent_basenames() {
+    local dir="$1"
+    local f base
+    for f in "$dir"/*.md; do
+        [ -e "$f" ] || continue
+        base="${f##*/}"
+        echo "$base"
+    done | sort
+}
+
+# Print the sorted basenames referenced by plugin.json's "agents" array.
+# jq preferred; a portable grep fallback keeps this working without jq,
+# per the jq-optional invariant every script path here must honor.
+plugin_json_agent_basenames() {
+    local plugin_file="$1"
+    local paths
+    if command -v jq > /dev/null 2>&1; then
+        paths=$(jq -r '.agents[]?' "$plugin_file" 2>/dev/null)
+    else
+        paths=$(grep -oE '"\./examples/claude-code/agents/[A-Za-z0-9_-]+\.md"' "$plugin_file" \
+            | tr -d '"')
+    fi
+    local p
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        echo "${p##*/}"
+    done <<< "$paths" | sort
+}
+
+test_plugin_json_repository_url() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    assert_file_exists "$plugin_file" || return 1
+    if grep -q 'Gentleman-Programming/agent-teams-lite' "$plugin_file"; then
+        echo "plugin.json still points at the pre-rename Gentleman-Programming/agent-teams-lite repo"
+        return 1
+    fi
+    grep -q '"homepage": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'homepage' does not point at https://github.com/myst4/kurama"; return 1; }
+    grep -q '"repository": "https://github.com/myst4/kurama"' "$plugin_file" \
+        || { echo "plugin.json 'repository' does not point at https://github.com/myst4/kurama"; return 1; }
+    return 0
+}
+
+test_plugin_json_agents_match_disk_set() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local agents_dir="$REPO_DIR/examples/claude-code/agents"
+    assert_file_exists "$plugin_file" || return 1
+    assert_dir_exists "$agents_dir" || return 1
+
+    local disk_names manifest_names
+    disk_names=$(list_agent_basenames "$agents_dir")
+    manifest_names=$(plugin_json_agent_basenames "$plugin_file")
+
+    if [ -z "$disk_names" ]; then
+        echo "no *.md agent files found in $agents_dir"
+        return 1
+    fi
+    if [ -z "$manifest_names" ]; then
+        echo "plugin.json 'agents' field is empty or unparseable"
+        return 1
+    fi
+
+    assert_eq "$disk_names" "$manifest_names" \
+        "plugin.json 'agents' list has drifted from examples/claude-code/agents/ on disk"
+}
+
+test_plugin_json_agents_count_is_17() {
+    local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
+    local count
+    count=$(plugin_json_agent_basenames "$plugin_file" | wc -l | tr -d ' ')
+    assert_eq "17" "$count" "plugin.json must register all 17 Claude Code agents"
+}
+
+echo -e "${BOLD}UNIT-C (issue #35) — plugin.json manifest drift${NC}"
+run_test "plugin.json homepage/repository point at myst4/kurama" test_plugin_json_repository_url
+run_test "plugin.json 'agents' matches examples/claude-code/agents/ on disk" test_plugin_json_agents_match_disk_set
+run_test "plugin.json registers all 17 agents" test_plugin_json_agents_count_is_17
 echo ""
 
 # ============================================================================
