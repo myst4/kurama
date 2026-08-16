@@ -7372,6 +7372,83 @@ run_test "setup.sh fails loud on a clone missing examples/ (no partial receipt)"
 echo ""
 
 # ============================================================================
+# ===== UNIT-H (issue #40) =====
+# Simplification decisions: one interactive front-end (the TUI), an honest
+# jq-less logo de-registration path, and a doctor check for a dangling logo.
+# ============================================================================
+
+# ---- R2: setup.sh interactive front-end delegates to the TUI ----
+
+# A bare, interactive `./setup.sh` with gum available must hand off to
+# setup-tui.sh (the one interactive experience) rather than run its own menu.
+# KURAMA_TUI_PROBE makes the delegated TUI print its probe line and exit 0 before
+# the wizard — an observable proof of the hand-off that the removed text menu
+# could never produce.
+test_h_setup_interactive_with_gum_delegates_to_tui() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    local shim="$TEST_TMPDIR/npmshim"
+    make_npm_shim "$shim"
+    # An OpenCode project install gives the TUI probe a receipt to report.
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "opencode project setup exited non-zero"; return 1; }
+    # A fake gum on PATH makes setup.sh's interactive branch take the delegation.
+    local bindir="$TEST_TMPDIR/gumbin"
+    mkdir -p "$bindir"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$bindir/gum"
+    chmod +x "$bindir/gum"
+    local out status=0
+    out="$(cd "$repo" && PATH="$bindir:$PATH" KURAMA_NO_BANNER=1 KURAMA_TUI_PROBE=1 \
+        bash "$SETUP_SCRIPT" 2>/dev/null)" || status=$?
+    assert_eq "0" "$status" "interactive + gum must delegate and exit 0 via the TUI probe" || return 1
+    printf '%s\n' "$out" | grep -q 'project' \
+        || { echo "no TUI probe output — delegation did not happen (got: $out)"; return 1; }
+    printf '%s\n' "$out" | grep -q 'opencode' \
+        || { echo "probe missing opencode — not the TUI's output (got: $out)"; return 1; }
+    return 0
+}
+
+# Without gum, setup.sh cannot conjure a TUI and installs nothing interactively:
+# it must print the non-interactive flag guide and exit 2 — never half-install a
+# guessed default.
+test_h_setup_interactive_without_gum_prints_guide_exits_2() {
+    # Restricted PATH (symlink farm) that deliberately omits gum, so its absence
+    # is deterministic on any host — same trick as the TUI-probe test.
+    local bindir="$TEST_TMPDIR/nogum-bin"
+    mkdir -p "$bindir"
+    local tool p
+    for tool in bash sh env uname grep egrep dirname basename mkdir cp mv cat date \
+                chmod rm ls awk sed tr wc find mktemp sort head tail printf test git; do
+        p="$(command -v "$tool" 2>/dev/null)" || continue
+        ln -sf "$p" "$bindir/$tool"
+    done
+    if [ -e "$bindir/gum" ]; then
+        echo "gum is reachable on the restricted PATH — the test proves nothing"
+        return 1
+    fi
+    local out status=0
+    out="$(PATH="$bindir" KURAMA_NO_BANNER=1 bash "$SETUP_SCRIPT" 2>&1)" || status=$?
+    assert_eq "2" "$status" "interactive without gum must exit 2, never half-install" || return 1
+    printf '%s\n' "$out" | grep -q -- '--non-interactive' \
+        || { echo "flag guide does not mention --non-interactive (got: $out)"; return 1; }
+    printf '%s\n' "$out" | grep -qi 'gum' \
+        || { echo "guide does not explain gum drives the interactive TUI (got: $out)"; return 1; }
+    # Never half-install: no skills written under the fresh HOME.
+    if [ -d "$HOME/.claude/skills" ]; then
+        echo "half-install: ~/.claude/skills was created on a refused interactive run"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-H (issue #40): simplification decisions${NC}"
+run_test "setup.sh interactive + gum hands off to the TUI" test_h_setup_interactive_with_gum_delegates_to_tui
+run_test "setup.sh interactive - gum prints the flag guide and exits 2" test_h_setup_interactive_without_gum_prints_guide_exits_2
+
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 
