@@ -5487,6 +5487,398 @@ run_test "an unregistered @@TOKEN@@ fails loudly, naming it" test_build_examples
 run_test "the committed templates rebuild byte-for-byte" test_build_examples_rebuilds_committed_outputs_byte_for_byte
 echo ""
 
+# ===== UNIT-D (issue #36) =====
+# ============================================================================
+# #36 — the first thing anyone sees: banner.sh's degradation ladder and size
+# probe, its MCP count without jq, and setup-tui.sh's copy-this-command preview.
+#
+# Self-contained: helpers, cases and run_test calls all live in this block so it
+# can move as one piece.
+#
+# What is NOT asserted here, because a test suite has no terminal: the fade-in
+# itself. `animate()` requires `[ -t 1 ]`, so every render below is the one-shot
+# path. The five-frame repaint was verified by hand in a pty — see the notes in
+# the PR — and the property that makes it correct (the whole render fits the
+# terminal on both axes) is exactly what these cases pin.
+# ============================================================================
+
+BANNER_SCRIPT="$SCRIPT_DIR/banner.sh"
+
+# Render the banner as if the terminal were $1 x $2. NO_COLOR so the assertions
+# measure glyphs instead of escape sequences; --no-anim because there is no tty
+# to animate on anyway and the flag makes that explicit.
+unit_d_render_banner() { # cols rows outfile
+    NO_COLOR=1 KURAMA_BANNER_COLS="$1" KURAMA_BANNER_ROWS="$2" \
+        bash "$BANNER_SCRIPT" --no-anim > "$3" 2>&1
+}
+
+# Widest DISPLAY column of any line in $1 — bytes minus UTF-8 continuation
+# bytes, the same locale-independent count banner.sh's dispw does. `wc -m` and
+# awk are not reliably UTF-8 aware on macOS, and the art is Braille.
+unit_d_widest_col() { # file
+    local line tot cont w max=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        tot=$(printf '%s' "$line" | LC_ALL=C wc -c | tr -d ' ')
+        cont=$(printf '%s' "$line" | LC_ALL=C tr -cd '\200-\277' | LC_ALL=C wc -c | tr -d ' ')
+        w=$(( tot - cont ))
+        [ "$w" -gt "$max" ] && max=$w
+    done < "$1"
+    printf '%s' "$max"
+}
+
+# Fail unless the render in $3 fits a $1 x $2 terminal on BOTH axes. Overflowing
+# either one is what made the fade-in stack five frames on top of each other.
+unit_d_assert_fits() { # cols rows file
+    local cols="$1" rows="$2" file="$3" lines widest
+    lines=$(wc -l < "$file" | tr -d ' ')
+    widest=$(unit_d_widest_col "$file")
+    if [ "$widest" -gt "$cols" ]; then
+        echo "  ${cols}x${rows}: a line is $widest columns wide — it wraps"
+        return 1
+    fi
+    if [ "$lines" -gt "$rows" ]; then
+        echo "  ${cols}x${rows}: $lines lines — it scrolls"
+        return 1
+    fi
+    return 0
+}
+
+# Every rung of the ladder, and the sizes on either side of each threshold.
+test_banner_never_overflows_the_terminal() {
+    local out="$TEST_TMPDIR/banner.txt" size cols rows
+    for size in 200x50 145x40 145x24 144x40 100x30 95x36 95x24 80x24 80x23 \
+                80x20 48x23 47x23 40x10 12x6 12x3 9x40 1x1; do
+        cols="${size%x*}"; rows="${size#*x}"
+        unit_d_render_banner "$cols" "$rows" "$out"
+        unit_d_assert_fits "$cols" "$rows" "$out" || return 1
+    done
+    return 0
+}
+
+# The widest rung: fox and wordmark side by side, 145 columns of art.
+test_banner_draws_the_full_art_when_it_fits() {
+    local out="$TEST_TMPDIR/banner.txt" widest lines
+    unit_d_render_banner 200 50 "$out"
+    widest=$(unit_d_widest_col "$out")
+    lines=$(wc -l < "$out" | tr -d ' ')
+    if [ "$widest" -lt 140 ]; then
+        echo "  a 200-column terminal drew only $widest columns — the wordmark is missing"
+        return 1
+    fi
+    if [ "$lines" -gt 25 ]; then
+        echo "  side-by-side art should be ~21 lines, got $lines (it stacked instead)"
+        return 1
+    fi
+    return 0
+}
+
+# The regression the issue is about: 80x24 used to emit 32 lines, ten of them
+# 89-95 columns wide. It must now keep the fox AND fit.
+test_banner_keeps_the_fox_on_an_80x24_terminal() {
+    local out="$TEST_TMPDIR/banner.txt" lines
+    unit_d_render_banner 80 24 "$out"
+    unit_d_assert_fits 80 24 "$out" || return 1
+    lines=$(wc -l < "$out" | tr -d ' ')
+    if [ "$lines" -lt 15 ]; then
+        echo "  80x24 fell all the way past the fox ($lines lines)"
+        return 1
+    fi
+    if ! grep -q 'KURAMA' "$out"; then
+        echo "  80x24 drew art but never says KURAMA"
+        return 1
+    fi
+    return 0
+}
+
+# Narrower than the fox: the one-line mark, the same rung the generated logo
+# plugins fall back to.
+test_banner_degrades_to_the_one_line_mark() {
+    local out="$TEST_TMPDIR/banner.txt" lines
+    unit_d_render_banner 40 10 "$out"
+    unit_d_assert_fits 40 10 "$out" || return 1
+    lines=$(wc -l < "$out" | tr -d ' ')
+    if [ "$lines" -gt 6 ]; then
+        echo "  40x10 should be the one-line mark plus the panel, got $lines lines"
+        return 1
+    fi
+    if ! grep -q 'KURAMA' "$out"; then
+        echo "  the compact rung dropped the name entirely"
+        return 1
+    fi
+    return 0
+}
+
+# Last rung: nothing at all, and still exit 0 — banner.sh is chained in front of
+# agent launches with &&.
+test_banner_draws_nothing_when_even_the_mark_does_not_fit() {
+    local out="$TEST_TMPDIR/banner.txt" status=0
+    NO_COLOR=1 KURAMA_BANNER_COLS=8 KURAMA_BANNER_ROWS=40 \
+        bash "$BANNER_SCRIPT" --no-anim > "$out" 2>&1 || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "  banner.sh exited $status on a terminal too small to draw in"
+        return 1
+    fi
+    if [ -s "$out" ]; then
+        echo "  8 columns is narrower than '✦ KURAMA ✦' but something was drawn:"
+        cat "$out"
+        return 1
+    fi
+    return 0
+}
+
+test_banner_size_probe_prefers_explicit_overrides() {
+    local out
+    out="$(KURAMA_BANNER_COLS=145 KURAMA_BANNER_ROWS=40 bash "$BANNER_SCRIPT" --probe-size 2>/dev/null)" \
+        || { echo "  --probe-size exited non-zero"; return 1; }
+    assert_eq "145 40" "$out" "the override was not honored" || return 1
+    return 0
+}
+
+# Junk overrides must fall THROUGH to the real probe, not be believed and not
+# crash the arithmetic that sizes the ladder.
+test_banner_size_probe_ignores_junk_overrides() {
+    local junk plain
+    junk="$(KURAMA_BANNER_COLS=abc KURAMA_BANNER_ROWS=-5 bash "$BANNER_SCRIPT" --probe-size 2>/dev/null)" \
+        || { echo "  --probe-size exited non-zero on junk input"; return 1; }
+    plain="$(bash "$BANNER_SCRIPT" --probe-size 2>/dev/null)" \
+        || { echo "  --probe-size exited non-zero"; return 1; }
+    assert_eq "$plain" "$junk" "junk overrides changed the resolved size" || return 1
+    case "$junk" in
+        *[!0-9\ ]*|'' ) echo "  resolved size is not two numbers: [$junk]"; return 1 ;;
+    esac
+    return 0
+}
+
+# The defect itself: `tput cols` reads the window size from fd 2, so with stderr
+# redirected — which is how all three callers invoke this script — it answers
+# with terminfo's 80 whatever the terminal is. The probe must ask the tty.
+test_banner_size_probe_reads_the_tty_not_terminfo() {
+    local out tty_size t_rows t_cols
+    out="$(TERM='' COLUMNS='' LINES='' bash "$BANNER_SCRIPT" --probe-size 2>/dev/null)" \
+        || { echo "  --probe-size exited non-zero"; return 1; }
+    tty_size="$(stty size 2>/dev/null </dev/tty || true)"
+    if [ -n "$tty_size" ]; then
+        t_rows="${tty_size%% *}"; t_cols="${tty_size##* }"
+        assert_eq "$t_cols $t_rows" "$out" "the probe ignored the controlling tty" || return 1
+    else
+        # No controlling tty and no terminfo (CI): the documented default, and
+        # specifically not 0, empty, or an error.
+        assert_eq "80 24" "$out" "no tty and no terminfo should resolve to 80x24" || return 1
+    fi
+    return 0
+}
+
+# Write a config declaring $2 MCP servers to $1.
+unit_d_write_mcp_config() { # file count
+    local file="$1" n="$2" i=1 body=""
+    mkdir -p "$(dirname "$file")"
+    while [ "$i" -le "$n" ]; do
+        [ -n "$body" ] && body="$body,"
+        body="$body
+    \"srv$i\": { \"command\": \"x\", \"args\": [\"--a\", \"1\"] }"
+        i=$(( i + 1 ))
+    done
+    printf '{\n  "mcpServers": {%s\n  },\n  "model": "x"\n}\n' "$body" > "$file"
+}
+
+unit_d_banner_mcp_value() { # PATH file-for-output
+    NO_COLOR=1 KURAMA_BANNER_COLS=120 KURAMA_BANNER_ROWS=40 PATH="$1" \
+        bash "$BANNER_SCRIPT" --no-anim 2>&1 \
+        | sed -n 's/.*MCP: \([^ ]*\) server(s).*/\1/p'
+}
+
+# Without jq the count was never assigned, so the panel reported "0 server(s)"
+# on every machine that has any.
+test_banner_counts_mcp_servers_without_jq() {
+    local bindir="$TEST_TMPDIR/nojq-bin" got
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    unit_d_write_mcp_config "$HOME/.claude.json" 3
+
+    got="$(unit_d_banner_mcp_value "$bindir")"
+    assert_eq "3" "$got" "the no-jq fallback did not count the servers" || return 1
+
+    # And the jq path — when this host has jq — must agree to the digit.
+    got="$(unit_d_banner_mcp_value "$PATH")"
+    assert_eq "3" "$got" "the ambient (jq) path disagrees with the fallback" || return 1
+    return 0
+}
+
+# A legitimate 0 in the first candidate is an answer about THAT file, not about
+# the machine: the walk has to continue to the second one.
+test_banner_mcp_count_does_not_stop_at_a_legitimate_zero() {
+    local bindir="$TEST_TMPDIR/nojq-bin" got
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    printf '{ "mcpServers": {} }\n' > "$HOME/.claude.json"
+    unit_d_write_mcp_config "$HOME/.config/opencode/opencode.json" 2
+
+    got="$(unit_d_banner_mcp_value "$bindir")"
+    assert_eq "2" "$got" "an empty first config shadowed the second" || return 1
+    got="$(unit_d_banner_mcp_value "$PATH")"
+    assert_eq "2" "$got" "an empty first config shadowed the second (jq path)" || return 1
+    return 0
+}
+
+# "I could not read it" must never arrive at the panel as "you have none".
+test_banner_mcp_says_n_a_when_the_config_cannot_be_read() {
+    local bindir="$TEST_TMPDIR/nojq-bin" got
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    printf 'this is not json\n' > "$HOME/.claude.json"
+
+    got="$(unit_d_banner_mcp_value "$bindir")"
+    assert_eq "n/a" "$got" "an unreadable config was reported as zero servers" || return 1
+    return 0
+}
+
+# ---- setup-tui.sh: the command it shows is the command it runs --------------
+
+# The preview seam runs above the gum precondition, so it works on a PATH with
+# no gum — which is every CI runner here.
+unit_d_tui_preview() { # runs setup-tui.sh's preview probe with the env it reads
+    KURAMA_TUI_PROBE=preview bash "$TUI_SCRIPT" 2>&1
+}
+
+# The headline "copy this command" line used to be a hand-written
+# `./scripts/setup.sh …`: relative to the user's own repo under the invocation
+# this script documents, and missing the --non-interactive the run appends.
+test_tui_preview_is_the_argv_it_runs() {
+    local line
+    line="$(KURAMA_TUI_CHOSEN=opencode KURAMA_TUI_SCOPE=global \
+            KURAMA_TUI_OPENCODE_MODE=multi KURAMA_TUI_ENGRAM=no KURAMA_TUI_LOGO=yes \
+            unit_d_tui_preview)" || { echo "  the preview probe failed: $line"; return 1; }
+
+    case "$line" in
+        *"./scripts/"*)
+            echo "  the preview is still cwd-relative: $line"; return 1 ;;
+    esac
+    case "$line" in
+        *"$SETUP_SCRIPT"*) ;;
+        *) echo "  the preview does not name this checkout's setup.sh: $line"; return 1 ;;
+    esac
+    case "$line" in
+        *--non-interactive*) ;;
+        *) echo "  the preview omits --non-interactive, so pasting it blocks on a prompt: $line"; return 1 ;;
+    esac
+    case "$line" in
+        *"--agent opencode"*) ;;
+        *) echo "  the preview lost the harness: $line"; return 1 ;;
+    esac
+    return 0
+}
+
+# The preview is advertised as pasteable. Pasting it has to reproduce the argv,
+# including a repo path with spaces in it.
+test_tui_preview_quotes_a_path_with_spaces() {
+    local weird="$TEST_TMPDIR/my repo/with spaces" line found_path=no found_ni=no a
+    line="$(KURAMA_TUI_CHOSEN=claude-code KURAMA_TUI_SCOPE=project \
+            KURAMA_TUI_PATH="$weird" KURAMA_TUI_ENGRAM=no KURAMA_TUI_LOGO=no \
+            unit_d_tui_preview)" || { echo "  the preview probe failed: $line"; return 1; }
+
+    eval "set -- $line"
+    for a in "$@"; do
+        [ "$a" = "$weird" ] && found_path=yes
+        [ "$a" = "--non-interactive" ] && found_ni=yes
+    done
+    if [ "$found_path" != "yes" ]; then
+        echo "  the pasted line does not rebuild the path as ONE argument:"
+        echo "    $line"
+        return 1
+    fi
+    [ "$found_ni" = "yes" ] || { echo "  --non-interactive lost when re-split"; return 1; }
+    if [ "$1" != "bash" ] || [ "$2" != "$SETUP_SCRIPT" ]; then
+        echo "  the pasted line does not start with this checkout's setup.sh: $1 $2"
+        return 1
+    fi
+    return 0
+}
+
+# The maintenance branch had the same relative-path defect, from the same cause.
+test_tui_maintenance_preview_is_absolute() {
+    local line
+    line="$(KURAMA_TUI_MAINT=update.sh KURAMA_TUI_SCOPE=global unit_d_tui_preview)" \
+        || { echo "  the preview probe failed: $line"; return 1; }
+    case "$line" in
+        *"./scripts/"*) echo "  the maintenance preview is still cwd-relative: $line"; return 1 ;;
+    esac
+    case "$line" in
+        *"$SCRIPT_DIR/update.sh"*) ;;
+        *) echo "  the maintenance preview does not name this checkout: $line"; return 1 ;;
+    esac
+    return 0
+}
+
+unit_d_normalize_profile() { # raw -> normalized on stdout, non-zero if refused
+    KURAMA_TUI_PROBE=profile bash "$TUI_SCRIPT" "$1" 2>/dev/null
+}
+
+# A stray space or a capital used to be forwarded verbatim and kill the install
+# in setup.sh's argument parser. Repairable input is repaired; the rest is
+# refused here, where refusing costs one re-prompt instead of the whole run.
+test_tui_profile_name_is_repaired_or_refused() {
+    local got
+    got="$(unit_d_normalize_profile 'Fast')" || { echo "  'Fast' was refused"; return 1; }
+    assert_eq "fast" "$got" "a capital should be lowercased" || return 1
+
+    got="$(unit_d_normalize_profile '  fast  ')" || { echo "  padded input was refused"; return 1; }
+    assert_eq "fast" "$got" "surrounding whitespace should be stripped" || return 1
+
+    got="$(unit_d_normalize_profile 'Fast:Anthropic/Claude-X')" \
+        || { echo "  NAME:provider/model was refused"; return 1; }
+    assert_eq "fast:Anthropic/Claude-X" "$got" "only NAME may be lowercased" || return 1
+
+    got="$(unit_d_normalize_profile ':provider/model')" \
+        || { echo "  an empty NAME was refused, but setup.sh defaults it"; return 1; }
+    assert_eq "kurama:provider/model" "$got" "an empty NAME should default to kurama" || return 1
+
+    if got="$(unit_d_normalize_profile 'bad_name')"; then
+        echo "  'bad_name' was accepted as [$got] — setup.sh would exit 1 on it"
+        return 1
+    fi
+    if got="$(unit_d_normalize_profile '-lead')"; then
+        echo "  '-lead' was accepted as [$got] — setup.sh requires a leading alnum"
+        return 1
+    fi
+    return 0
+}
+
+# The contract, end to end and without restating the regex: what the wizard
+# forwards must survive setup.sh's own parser, and the raw form must not have.
+test_tui_repaired_profile_name_is_one_setup_accepts() {
+    local raw='My Profile' fixed status=0
+    if bash "$SETUP_SCRIPT" --opencode-profile "$raw" --help > /dev/null 2>&1; then
+        echo "  setup.sh accepted '$raw' — this case no longer proves anything"
+        return 1
+    fi
+    fixed="$(unit_d_normalize_profile "$raw")" || { echo "  '$raw' was refused instead of repaired"; return 1; }
+    bash "$SETUP_SCRIPT" --opencode-profile "$fixed" --help > /dev/null 2>&1 || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "  setup.sh rejected the repaired name '$fixed' (exit $status)"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}#36 — banner ladder, MCP count, TUI preview${NC}"
+run_test "the render fits every terminal on the ladder" test_banner_never_overflows_the_terminal
+run_test "a wide terminal gets fox + wordmark" test_banner_draws_the_full_art_when_it_fits
+run_test "80x24 keeps the fox and still fits" test_banner_keeps_the_fox_on_an_80x24_terminal
+run_test "narrower than the fox degrades to one line" test_banner_degrades_to_the_one_line_mark
+run_test "too small to draw draws nothing, exit 0" test_banner_draws_nothing_when_even_the_mark_does_not_fit
+run_test "the size probe honors explicit overrides" test_banner_size_probe_prefers_explicit_overrides
+run_test "junk overrides fall through to the real probe" test_banner_size_probe_ignores_junk_overrides
+run_test "the size probe asks the tty, not terminfo" test_banner_size_probe_reads_the_tty_not_terminfo
+run_test "MCP servers are counted without jq" test_banner_counts_mcp_servers_without_jq
+run_test "a legitimate 0 does not shadow the next config" test_banner_mcp_count_does_not_stop_at_a_legitimate_zero
+run_test "an unreadable config reports n/a, never 0" test_banner_mcp_says_n_a_when_the_config_cannot_be_read
+run_test "the TUI preview is the argv it runs" test_tui_preview_is_the_argv_it_runs
+run_test "the preview re-splits, spaces and all" test_tui_preview_quotes_a_path_with_spaces
+run_test "the maintenance preview is absolute too" test_tui_maintenance_preview_is_absolute
+run_test "a profile name is repaired or refused" test_tui_profile_name_is_repaired_or_refused
+run_test "the repaired name is one setup.sh accepts" test_tui_repaired_profile_name_is_one_setup_accepts
+echo ""
+
 # ============================================================================
 # Summary
 # ============================================================================

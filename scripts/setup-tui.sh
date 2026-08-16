@@ -23,12 +23,21 @@ set -uo pipefail
 #   ./scripts/setup-tui.sh
 #
 # Environment:
-#   KURAMA_TUI_PROBE=1  Print the installs this front-end would offer to update
-#                       — one tab-separated line per target (scope, path,
-#                       comma-joined tools, version) — and exit 0. It runs
-#                       before the gum precondition and before the banner, so
-#                       it is the seam install_test.sh drives on a machine with
-#                       no gum. No output means nothing detected.
+#   KURAMA_TUI_PROBE    Run one read-only seam and exit 0, drawing no banner and
+#                       needing no gum — that is what makes these the hooks
+#                       install_test.sh drives. Values:
+#                         1 | targets  one tab-separated line per install this
+#                                      front-end would offer to update (scope,
+#                                      path, comma-joined tools, version); no
+#                                      output means nothing detected
+#                         preview      the command line(s) this wizard would
+#                                      show AND run, taking the answers from
+#                                      KURAMA_TUI_CHOSEN / _SCOPE / _PATH /
+#                                      _OPENCODE_MODE / _OPENCODE_PROFILE /
+#                                      _PI_PACKAGES / _ENGRAM / _LOGO, or the
+#                                      maintenance line for KURAMA_TUI_MAINT
+#                         profile      normalize_profile "$1": prints the
+#                                      repaired profile name, or exits 1
 #   KURAMA_NO_BANNER=1  Exported (not read) below: the fox is drawn once here,
 #                       so the scripts this front-end runs skip theirs.
 # ============================================================================
@@ -182,10 +191,134 @@ detect_targets() {
     return 0
 }
 
-if [ "${KURAMA_TUI_PROBE:-}" = "1" ]; then
-    detect_targets
-    exit 0
-fi
+# --- the command this front-end builds --------------------------------------
+# ONE builder, used twice: the preview the user is invited to copy and the argv
+# the run actually executes are the same list of words. They used to be written
+# out separately, and drifted — the preview printed a cwd-relative
+# `./scripts/setup.sh` (wrong under the invocation this file documents, `bash
+# /path/to/kurama/scripts/setup-tui.sh` from inside your own repo) and left out
+# the `--non-interactive` the run appends, so the line offered "for CI" blocked
+# on prompts the wizard had already answered.
+#
+# Placed above the gum precondition for the same reason detect_targets is: the
+# KURAMA_TUI_PROBE seam that pins preview-vs-run parity has to work on a machine
+# with no gum, which is every CI runner this repo has.
+
+# Quote one word so the preview can be pasted into a shell and split back into
+# exactly these arguments — a repo path with spaces is the case that matters.
+shq() {
+    case "$1" in
+        '')                       printf "''" ;;
+        *[!A-Za-z0-9_/.:=@%+-]*)  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+        *)                        printf '%s' "$1" ;;
+    esac
+}
+
+# The current ARGV, rendered as one copy-pasteable command line.
+fmt_argv() {
+    local out="" a
+    for a in ${ARGV[@]+"${ARGV[@]}"}; do
+        [ -n "$out" ] && out="$out "
+        out="$out$(shq "$a")"
+    done
+    printf '%s\n' "$out"
+}
+
+# setup.sh takes ONE --agent per run, so a multi-select becomes one invocation
+# per harness. Flags a given harness ignores are simply not added to its line.
+build_setup_argv() { # agent
+    ARGV=(bash "$SETUP_SCRIPT" --agent "$1")
+
+    [ "$scope" = "project" ] && ARGV=("${ARGV[@]}" --scope project --path "$target_path")
+
+    if [ "$1" = "opencode" ]; then
+        [ -n "$opencode_mode" ] && ARGV=("${ARGV[@]}" --opencode-mode "$opencode_mode")
+        [ -n "$opencode_profile" ] && ARGV=("${ARGV[@]}" --opencode-profile "$opencode_profile")
+    fi
+
+    if [ "$1" = "pi" ] && [ -n "$pi_packages" ]; then
+        if [ "$pi_packages" = "yes" ]; then ARGV=("${ARGV[@]}" --with-pi-packages)
+        else ARGV=("${ARGV[@]}" --without-pi-packages); fi
+    fi
+
+    if [ "$engram" = "yes" ]; then ARGV=("${ARGV[@]}" --with-engram)
+    else ARGV=("${ARGV[@]}" --without-engram); fi
+    [ "$logo" = "yes" ] && ARGV=("${ARGV[@]}" --with-logo)
+
+    # Every question setup.sh would ask has already been answered above; without
+    # this it re-asks and the wizard was pointless. It belongs to the preview as
+    # much as to the run — that is the whole point of one builder.
+    ARGV=("${ARGV[@]}" --non-interactive)
+    return 0
+}
+
+# update.sh / doctor.sh, for an install that already exists.
+build_maint_argv() { # script scope path
+    ARGV=(bash "$SCRIPT_DIR/$1")
+    [ "$2" = "project" ] && ARGV=("${ARGV[@]}" --scope project --path "$3")
+    return 0
+}
+
+# NAME[:provider/model] as setup.sh will accept it, or non-zero when it cannot
+# be repaired. setup.sh validates NAME against ^[a-z0-9][a-z0-9-]*$ while
+# PARSING ARGUMENTS (scripts/setup.sh:2286) and exits 1 — so a stray space or a
+# capital typed at the gum prompt used to abort the whole install before a
+# single file was written. Whitespace and case are repairable (the interactive
+# prompt in setup.sh:1258 strips whitespace the same way); anything else is the
+# caller's cue to re-ask. An empty NAME defaults to "kurama", mirroring
+# setup.sh:2284, so the wizard never rejects what the installer would accept.
+normalize_profile() { # raw -> normalized, or status 1
+    local val name rest
+    val="$(printf '%s' "$1" | tr -d '[:space:]')"
+    [ -n "$val" ] || return 1
+    name="${val%%:*}"
+    rest="${val#*:}"
+    [ "$val" != "$rest" ] || rest=""
+    name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+    [ -n "$name" ] || name="kurama"
+    printf '%s' "$name" | grep -Eq '^[a-z0-9][a-z0-9-]*$' || return 1
+    if [ -n "$rest" ]; then printf '%s' "$name:$rest"; else printf '%s' "$name"; fi
+}
+
+# --- probe seams -------------------------------------------------------------
+# All of them run BEFORE the gum precondition and before the banner, so
+# install_test.sh can drive them on a machine with neither.
+#
+#   1|targets  one tab-separated line per detected install (see above)
+#   preview    the command line(s) this wizard would show AND run, built from
+#              KURAMA_TUI_* instead of from gum answers
+#   profile    normalize_profile "$1" — prints the repaired name or exits 1
+case "${KURAMA_TUI_PROBE:-}" in
+    1|targets)
+        detect_targets
+        exit 0
+        ;;
+    preview)
+        scope="${KURAMA_TUI_SCOPE:-global}"
+        target_path="${KURAMA_TUI_PATH:-}"
+        opencode_mode="${KURAMA_TUI_OPENCODE_MODE:-}"
+        opencode_profile="${KURAMA_TUI_OPENCODE_PROFILE:-}"
+        pi_packages="${KURAMA_TUI_PI_PACKAGES:-}"
+        engram="${KURAMA_TUI_ENGRAM:-no}"
+        logo="${KURAMA_TUI_LOGO:-no}"
+        ARGV=()
+        if [ -n "${KURAMA_TUI_MAINT:-}" ]; then
+            build_maint_argv "$KURAMA_TUI_MAINT" "$scope" "$target_path"
+            fmt_argv
+        else
+            for probe_agent in ${KURAMA_TUI_CHOSEN:-}; do
+                build_setup_argv "$probe_agent"
+                fmt_argv
+            done
+        fi
+        exit 0
+        ;;
+    profile)
+        normalize_profile "${1:-}" || exit 1
+        printf '\n'
+        exit 0
+        ;;
+esac
 
 # --- preconditions ----------------------------------------------------------
 
@@ -317,11 +450,12 @@ EOF
     esac
 
     if [ -n "$maint_script" ]; then
-        cmd="./scripts/$maint_script"
-        [ "$maint_scope" = "project" ] && cmd="$cmd --scope project --path \"$project_path\""
+        # Built once, shown and then run: the box below is the exact argv, with
+        # this checkout's absolute path, so it still works from any directory.
+        build_maint_argv "$maint_script" "$maint_scope" "$project_path"
 
         heading "Command"
-        gum style --border rounded --border-foreground "$ACCENT" --padding "0 1" "$cmd"
+        gum style --border rounded --border-foreground "$ACCENT" --padding "0 1" "$(fmt_argv)"
         if [ "$maint_scope" = "global" ]; then
             hint "No --agent: both scripts already cover every global receipt on this machine."
         else
@@ -334,10 +468,7 @@ EOF
         # re-split. Same reason phase 6 does it this way.
         heading "$maint_verb the $maint_scope install"
 
-        set --
-        [ "$maint_scope" = "project" ] && set -- --scope project --path "$project_path"
-
-        if bash "$SCRIPT_DIR/$maint_script" "$@"; then
+        if "${ARGV[@]}"; then
             gum style --foreground 42 "  ✓ $maint_script done"
             exit 0
         else
@@ -420,9 +551,26 @@ case " $chosen " in
         esac
 
         if gum confirm "Install a named model profile?" --default=false; then
-            opencode_profile="$(gum input \
-                --header "Profile name (optionally NAME:provider/model)" \
-                --placeholder "fast:anthropic/claude-haiku-4-5" --width 80)"
+            # Validated HERE, where a typo costs one prompt. Forwarded raw, an
+            # invalid name kills the install in setup.sh's argument parser —
+            # after the wizard has collected every other answer.
+            profile_tries=0
+            while [ "$profile_tries" -lt 3 ]; do
+                profile_tries=$(( profile_tries + 1 ))
+                profile_raw="$(gum input \
+                    --header "Profile name (optionally NAME:provider/model)" \
+                    --placeholder "fast:anthropic/claude-haiku-4-5" --width 80)"
+                # Empty, or escaped out of: the same as declining the profile.
+                [ -n "$profile_raw" ] || break
+                if opencode_profile="$(normalize_profile "$profile_raw")"; then
+                    [ "$opencode_profile" = "$profile_raw" ] || \
+                        hint "Using '$opencode_profile' — setup.sh takes lowercase letters, digits and dashes."
+                    break
+                fi
+                opencode_profile=""
+                hint "'$profile_raw' is not a usable profile name (lowercase letters, digits, dashes)."
+            done
+            [ -n "$opencode_profile" ] || hint "No profile — continuing without one."
         fi
         ;;
 esac
@@ -452,35 +600,16 @@ else
     logo="no"
 fi
 
-# --- 5. build the command(s) -------------------------------------------------
-# setup.sh takes ONE --agent per run, so a multi-select becomes one invocation
-# per harness. Flags a given harness ignores are simply not added to its line.
-
-build_cmd() {
-    agent="$1"
-    cmd="./scripts/setup.sh --agent $agent"
-
-    [ "$scope" = "project" ] && cmd="$cmd --scope project --path \"$target_path\""
-
-    if [ "$agent" = "opencode" ]; then
-        [ -n "$opencode_mode" ] && cmd="$cmd --opencode-mode $opencode_mode"
-        [ -n "$opencode_profile" ] && cmd="$cmd --opencode-profile \"$opencode_profile\""
-    fi
-
-    if [ "$agent" = "pi" ] && [ -n "$pi_packages" ]; then
-        [ "$pi_packages" = "yes" ] && cmd="$cmd --with-pi-packages" || cmd="$cmd --without-pi-packages"
-    fi
-
-    [ "$engram" = "yes" ] && cmd="$cmd --with-engram" || cmd="$cmd --without-engram"
-    [ "$logo" = "yes" ] && cmd="$cmd --with-logo"
-
-    printf '%s' "$cmd"
-}
+# --- 5. show the command(s) --------------------------------------------------
+# build_setup_argv is defined once, at the top, and is the only thing that knows
+# what a run looks like. The box below is that argv quoted for a shell — copy it
+# and you get this run, from any directory, prompts already answered.
 
 heading "Command"
 preview=""
 for a in $chosen; do
-    preview="$preview$(build_cmd "$a")
+    build_setup_argv "$a"
+    preview="$preview$(fmt_argv)
 "
 done
 gum style --border rounded --border-foreground "$ACCENT" --padding "0 1" "${preview%
@@ -491,34 +620,16 @@ gum confirm "Run it now?" || { echo "Not run. The command above is yours to keep
 
 # --- 6. run ------------------------------------------------------------------
 # Executed with the real argv rather than eval'ing the preview string, so a path
-# with spaces cannot re-split. The preview is for humans; this is the truth.
+# with spaces cannot re-split. Same builder as the preview: the box above is not
+# a description of this, it IS this.
 
 status=0
 for a in $chosen; do
     heading "Installing $a"
 
-    set -- --agent "$a"
-    [ "$scope" = "project" ] && set -- "$@" --scope project --path "$target_path"
+    build_setup_argv "$a"
 
-    if [ "$a" = "opencode" ]; then
-        [ -n "$opencode_mode" ] && set -- "$@" --opencode-mode "$opencode_mode"
-        [ -n "$opencode_profile" ] && set -- "$@" --opencode-profile "$opencode_profile"
-    fi
-
-    if [ "$a" = "pi" ] && [ -n "$pi_packages" ]; then
-        if [ "$pi_packages" = "yes" ]; then set -- "$@" --with-pi-packages
-        else set -- "$@" --without-pi-packages; fi
-    fi
-
-    if [ "$engram" = "yes" ]; then set -- "$@" --with-engram
-    else set -- "$@" --without-engram; fi
-    [ "$logo" = "yes" ] && set -- "$@" --with-logo
-
-    # --non-interactive because every question setup.sh would ask has already
-    # been answered above; without it setup re-asks and the TUI was pointless.
-    set -- "$@" --non-interactive
-
-    if bash "$SETUP_SCRIPT" "$@"; then
+    if "${ARGV[@]}"; then
         gum style --foreground 42 "  ✓ $a done"
     else
         gum style --foreground 196 "  ✗ $a failed"
