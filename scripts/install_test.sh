@@ -5677,9 +5677,95 @@ test_update_unrecognized_tool_does_not_abort_the_other_targets() {
     return 0
 }
 
+# A drift preview that compared NOTHING must not report "no drift". Every
+# recorded file whose path has no repo mapping is skipped, and a receipt where
+# every file is skipped used to still print "No drift — all N recorded file(s)
+# match": a green light over zero comparisons, on the script users reach for when
+# they already suspect the install is broken. The headline counts only what was
+# actually compared, and says so when that is nothing.
+test_update_dry_run_says_when_nothing_was_comparable() {
+    bash "$SETUP_SCRIPT" --agent omp --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup omp failed"; return 1; }
+    local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+    # omp's RULES.md is the one recorded path with no repo source mapping. A
+    # receipt holding only it is a target where nothing is comparable.
+    assert_file_exists "$HOME/.omp/agent/RULES.md" || return 1
+    printf '%s\n' \
+        '{' \
+        '  "name": "kurama",' \
+        '  "version": "6.0.0",' \
+        '  "tool": "omp",' \
+        '  "tools": [' \
+        '    "omp"' \
+        '  ],' \
+        '  "scope": "global",' \
+        '  "engram": "no",' \
+        '  "files": [' \
+        '    "../RULES.md"' \
+        '  ],' \
+        '  "settings": [],' \
+        '  "pi_packages": [],' \
+        '  "engram_mcp": [],' \
+        '  "prompts": [],' \
+        '  "tui_plugins": [],' \
+        '  "opencode_configs": []' \
+        '}' > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent omp --dry-run 2>&1) || status=$?
+    assert_eq "0" "$status" "a dry run must exit 0" || return 1
+
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview claimed 'no drift' having compared nothing:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qi 'nothing comparable' || {
+        echo "the preview never says it could compare nothing:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    return 0
+}
+
+# The preview must not describe a target the real run would refuse. The tool
+# validation used to sit BELOW the dry-run return, so a receipt with an
+# unrecognized tool got a plausible drift report and no hint that `update.sh`
+# without --dry-run would refuse it outright.
+test_update_dry_run_refuses_what_the_real_run_would_refuse() {
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local rewritten
+    rewritten=$(awk '{ gsub(/"claude-code"/, "\"gemini-cli\""); print }' "$manifest")
+    printf '%s\n' "$rewritten" > "$manifest"
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --agent claude-code --dry-run 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "the preview exited 0 for a target the real run refuses:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -q 'Unrecognized tool' || {
+        echo "the preview never names the unusable tool:"
+        printf '%s\n' "$output"
+        return 1
+    }
+    if printf '%s\n' "$output" | grep -qi 'no drift'; then
+        echo "the preview reported a drift verdict for a refused target:"
+        printf '%s\n' "$output"
+        return 1
+    fi
+    return 0
+}
+
 echo -e "${BOLD}#32 — update.sh hardening${NC}"
 run_test "--dry-run names the recorded files that drifted" test_update_dry_run_reports_drifted_files
 run_test "--dry-run on a pristine install reports no drift" test_update_dry_run_clean_install_reports_no_drift
+run_test "--dry-run says when nothing was comparable" test_update_dry_run_says_when_nothing_was_comparable
+run_test "--dry-run refuses what the real run would refuse" test_update_dry_run_refuses_what_the_real_run_would_refuse
 run_test "the backup prune spares user-owned agent backups" test_update_prune_spares_user_owned_agent_backups
 run_test "a failed re-sync shows the delegated setup.sh output" test_update_failure_shows_delegated_setup_output
 run_test "--with-engram survives a re-sync" test_update_carries_engram_across_resync

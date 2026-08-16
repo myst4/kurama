@@ -352,54 +352,18 @@ resync_target() {
 $files
 EOF
 
-    # --dry-run is documented as "report drift, change nothing", and the snapshot
-    # above is exactly the data that answers it. It used to be thrown away
-    # unread, leaving a constant "would re-sync N recorded file(s)" — the same N
-    # for a pristine install and for one whose skills had been hand-edited. The
-    # preview a user runs BEFORE the real update has to name what the real update
-    # would overwrite, or it is worse than no preview at all.
-    if $DRY_RUN; then
-        local checked=0 drifted=0 missing=0 unresolved=0 src
-        while IFS=$'\t' read -r rel pre; do
-            [ -n "$rel" ] || continue
-            checked=$((checked + 1))
-            if [ ! -e "$receipt_dir/$rel" ]; then
-                warn "missing: $rel"
-                missing=$((missing + 1))
-                continue
-            fi
-            # No repo source to compare against (generated or merged content):
-            # counted, never reported as drift — that would be a false red.
-            src="$(resolve_source_any "$rel" "$tools" "$receipt_dir/$rel")"
-            if [ -z "$src" ] || [ ! -f "$src" ]; then
-                unresolved=$((unresolved + 1))
-                continue
-            fi
-            if [ "$pre" != "$(hash_file "$src")" ]; then
-                warn "drift: $rel"
-                drifted=$((drifted + 1))
-            fi
-        done < "$hashfile"
-        rm -f "$hashfile"
-
-        local would=$((drifted + missing))
-        if [ "$would" -gt 0 ]; then
-            echo -e "  ${YELLOW}${BOLD}$would of $checked recorded file(s) would be re-synced from $REPO_DIR${NC}"
-        else
-            info "No drift — all $checked recorded file(s) match $REPO_DIR"
-        fi
-        if [ "$unresolved" -gt 0 ]; then
-            info "$unresolved recorded file(s) have no repo source to compare against"
-        fi
-        return 0
-    fi
-
     # Normalize each recorded tool to the canonical slug setup.sh accepts.
     # install.sh stores a display name ("Claude Code") whose space would corrupt
     # the delegated command; setup.sh stores the slug already. An unrecognized
     # value is a hard stop — mis-invoking setup.sh would be worse than aborting.
     # Resolve every slug BEFORE installing anything, so a bad entry aborts the
     # target instead of leaving it half re-synced.
+    #
+    # This runs BEFORE the --dry-run report on purpose. A preview whose whole job
+    # is to say what the real run would do must not print a drift report for a
+    # target the real run would refuse outright — and an unusable "tools" value is
+    # also what makes resolve_source_any resolve nothing, so the same gap produced
+    # a confident "no drift" over zero comparisons.
     # The OpenCode install-time choices, recorded by setup.sh since #22. The
     # re-sync below runs setup.sh --non-interactive, where an unset mode falls
     # back to "single" and an unset profile to "no" — and the agent merge then
@@ -443,6 +407,58 @@ EOF
         fail "Receipt records no tool — cannot re-sync $receipt_dir"
         rm -f "$hashfile"
         return 1
+    fi
+
+    # --dry-run is documented as "report drift, change nothing", and the snapshot
+    # above is exactly the data that answers it. It used to be thrown away
+    # unread, leaving a constant "would re-sync N recorded file(s)" — the same N
+    # for a pristine install and for one whose skills had been hand-edited. The
+    # preview a user runs BEFORE the real update has to name what the real update
+    # would overwrite, or it is worse than no preview at all.
+    if $DRY_RUN; then
+        local checked=0 drifted=0 missing=0 unresolved=0 src
+        while IFS=$'\t' read -r rel pre; do
+            [ -n "$rel" ] || continue
+            checked=$((checked + 1))
+            if [ ! -e "$receipt_dir/$rel" ]; then
+                warn "missing: $rel"
+                missing=$((missing + 1))
+                continue
+            fi
+            # No repo source to compare against (generated or merged content):
+            # counted, never reported as drift — that would be a false red.
+            src="$(resolve_source_any "$rel" "$tools" "$receipt_dir/$rel")"
+            if [ -z "$src" ] || [ ! -f "$src" ]; then
+                unresolved=$((unresolved + 1))
+                continue
+            fi
+            if [ "$pre" != "$(hash_file "$src")" ]; then
+                warn "drift: $rel"
+                drifted=$((drifted + 1))
+            fi
+        done < "$hashfile"
+        rm -f "$hashfile"
+
+        # The headline counts only what was actually compared. Reporting it over
+        # $checked would let a target where NOTHING resolved to a repo source —
+        # every file skipped, zero hashes compared — print "no drift, all N files
+        # match": a green light the code never earned, on the script users reach
+        # for when they suspect their install is broken. When nothing was
+        # comparable, say that instead of a verdict.
+        local comparable=$((checked - unresolved))
+        local would=$((drifted + missing))
+        if [ "$comparable" -eq 0 ]; then
+            warn "Nothing comparable — none of the $checked recorded file(s) resolve to a repo source"
+            info "This preview cannot tell you whether $receipt_dir drifted."
+        elif [ "$would" -gt 0 ]; then
+            echo -e "  ${YELLOW}${BOLD}$would of $comparable checked file(s) would be re-synced from $REPO_DIR${NC}"
+        else
+            info "No drift — all $comparable checked file(s) match $REPO_DIR"
+        fi
+        if [ "$unresolved" -gt 0 ] && [ "$comparable" -gt 0 ]; then
+            info "$unresolved recorded file(s) skipped — no repo source to compare against"
+        fi
+        return 0
     fi
 
     # Delegate the actual re-sync to the idempotent installer, matching the
