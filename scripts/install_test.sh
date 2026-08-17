@@ -7532,6 +7532,206 @@ run_test "doctor.sh flags a registered-but-missing logo plugin" test_h_doctor_fl
 echo ""
 
 # ============================================================================
+# ===== UNIT-I (issue #63) =====
+# Batch integration follow-ups: two #41-class fail-loud gaps the collapse/jq work
+# left behind, plus two regression pins the per-task reviewers punted to the final
+# review. Two are code fixes (setup.sh _shared guard, uninstall.sh jq-present
+# unparseable-config refusal); two pin behaviour that is already correct so a
+# revert cannot slip back in green.
+# ============================================================================
+
+test_i_setup_missing_shared_fails_loud_before_write() {
+    # #63: install.sh's pre-#38 validate_source checked `[ ! -d "$SKILLS_SRC/_shared" ]`;
+    # the #38 collapse ported the examples/ and manifest checks into setup.sh but dropped
+    # _shared. skills/_shared is load-bearing — every target installs it and all 20 default
+    # SKILL.md files reference _shared/* — yet install_skills copies it only behind
+    # `if [ -d "$shared_src" ]`, so a clone with skills/ but no _shared/ silently skipped it,
+    # still printed "Done!" and wrote a receipt for a PARTIAL install: exit 0 where it must
+    # be exit 1. Same #41 fail-loud class as the examples/ gap pinned in UNIT-G, and _shared
+    # is more load-bearing (all targets, not just OpenCode).
+    local clone="$TEST_TMPDIR/staged-clone-no-shared"
+    stage_kurama_clone "$clone" || { echo "could not stage the throwaway clone"; return 1; }
+    rm -rf "$clone/skills/_shared" || { echo "could not remove skills/_shared from the staged clone"; return 1; }
+
+    local output status=0
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "setup.sh installed from a clone missing skills/_shared instead of aborting"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'Missing: skills/_shared' || {
+        echo "the abort never names the missing skills/_shared path:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    local receipt="$HOME/.claude/skills/.kurama-install-manifest.json"
+    if [ -e "$receipt" ]; then
+        echo "setup.sh wrote a receipt for a partial install: $receipt"
+        return 1
+    fi
+    return 0
+}
+
+test_i_uninstall_refuses_corrupt_settings_with_jq_present() {
+    # #63: both jq-less pre-flight honesty guards were gated on `! command -v jq` only, so
+    # with jq PRESENT and an unparseable settings.json the rm loop deleted the hook scripts,
+    # remove_hooks_from_settings then hit its warn-and-return, and the run exited 0 "Done."
+    # leaving settings.json invoking deleted executables — a broken PreToolUse hook on every
+    # Edit/Write. The fix adds a `jq -e .` validity probe inside the pre-flight guard: an
+    # unparseable config is refused BEFORE any file is removed, exactly as the jq-absent path
+    # does. This test runs with jq present (the default PATH).
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for this test"; return 1; }
+
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
+    local settings="$HOME/.claude/settings.json"
+    local guard="$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh"
+    local gate="$HOME/.claude/hooks/kurama/archive-gate.sh"
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$settings" || return 1
+    assert_file_exists "$guard" || return 1
+    assert_file_exists "$gate" || return 1
+    grep -q 'hooks/kurama/' "$settings" || { echo "setup wrote no hooks block"; return 1; }
+
+    # Corrupt settings.json into invalid JSON while KEEPING the hooks/kurama/ text, so the
+    # pre-flight textual probe still recognises it as ours to strip AND jq can no longer
+    # parse it. Trailing garbage after a valid object is a jq parse error (exit non-zero).
+    printf '\n]]]NOT JSON\n' >> "$settings"
+    if jq -e . "$settings" >/dev/null 2>&1; then
+        echo "settings.json is still valid JSON — the corruption did not take"; return 1
+    fi
+    grep -q 'hooks/kurama/' "$settings" || { echo "corruption dropped the hooks block text"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "uninstall exited 0 over an unparseable settings.json (jq present); it said:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    # The preferred fix refuses BEFORE the rm loop, so the hook scripts survive and
+    # settings.json is never left pointing at deleted executables.
+    assert_file_exists "$guard" || {
+        echo "the write-guard hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$gate" || {
+        echo "the archive-gate hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$manifest" || { echo "the refused run deleted the receipt"; return 1; }
+    return 0
+}
+
+test_i_install_custom_without_path_refuses() {
+    # #63 pins #38's C1: `install.sh --agent custom` with NO --path and stdin not a
+    # TTY must REFUSE — exit non-zero, install NOTHING — never silently full-install
+    # into $PWD. The pre-#38 code was `target="${CUSTOM_PATH:-$PWD}"`, so a revert of
+    # the require-`--path` guard (install.sh:150-159) would run a whole project
+    # install (CLAUDE.md orchestrator merge, .claude/settings.json hooks, native
+    # agents) into whatever repo the user happens to be sitting in. Only positive
+    # `--agent custom --path DIR` cases exist, so that revert stays green without this.
+    # The cwd is a real git repo on purpose: a reintroduced $PWD fallback WOULD pass
+    # setup.sh's project preconditions and install here, so the refusal is the only
+    # thing keeping the tree clean. stdin is /dev/null so the interactive prompt path
+    # (`[ -t 0 ]`) is not taken and the non-interactive refusal is what we exercise.
+    local sandbox="$TEST_TMPDIR/custom-no-path-cwd"
+    make_git_repo "$sandbox"
+
+    local output status=0
+    output=$(cd "$sandbox" && bash "$INSTALL_SCRIPT" --agent custom </dev/null 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "install.sh --agent custom with no --path (non-TTY) exited 0 instead of refusing"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    # Nothing may have landed in the cwd: no hooks receipt, no orchestrator merge, no tree.
+    if [ -e "$sandbox/.claude/settings.json" ]; then
+        echo "the refused run still wrote .claude/settings.json into the cwd"
+        return 1
+    fi
+    if [ -e "$sandbox/CLAUDE.md" ]; then
+        echo "the refused run still merged a CLAUDE.md orchestrator block into the cwd"
+        return 1
+    fi
+    if [ -e "$sandbox/.claude" ]; then
+        echo "the refused run still created a .claude/ tree in the cwd"
+        return 1
+    fi
+    if [ -e "$sandbox/.kurama-install-manifest.json" ]; then
+        echo "the refused run still wrote an install receipt into the cwd"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'requires --path' || {
+        echo "the refusal never tells the user --path is required:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    return 0
+}
+
+test_i_uninstall_directory_entry_aborts_loud() {
+    # #63 pins #33's I1: remove_target drives `rm -f` straight from the receipt's
+    # files[] with errexit armed, and the four call sites are BARE on purpose so a
+    # failed rm aborts the run instead of being swallowed. A files[] entry that names
+    # a DIRECTORY makes `rm -f` fail with EISDIR (rm refuses a directory without -r);
+    # the fixed code lets that abort loudly — no false "removed:" line for the entry,
+    # never reaching "Done." Reintroducing `|| UNINSTALL_FAILED=1` (or `|| true`) at
+    # the rm would swallow the EISDIR, print a false "removed:", and still report
+    # success — and the suite would stay green because no other test drives a
+    # directory entry through the rm loop. uninstall.sh runs here as a SUBPROCESS, so
+    # its errexit abort cannot abort this suite.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required to inject the receipt entry"; return 1; }
+    local repo="$TEST_TMPDIR/proj-dir-entry"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the project install setup exited non-zero"; return 1; }
+
+    local receipt="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$receipt" || return 1
+
+    # A real, existing DIRECTORY inside the containment root (the repo). rm -f refuses
+    # it (EISDIR); a plain file entry here would delete cleanly and prove nothing.
+    mkdir -p "$repo/kurama-dir-entry" || { echo "could not stage the directory entry"; return 1; }
+    local tmp="$receipt.tmp"
+    if ! jq '.files += ["kurama-dir-entry"]' "$receipt" > "$tmp"; then
+        echo "could not inject the directory entry into files[]"; return 1
+    fi
+    mv "$tmp" "$receipt"
+    if ! jq -e '.files | index("kurama-dir-entry")' "$receipt" >/dev/null; then
+        echo "the directory entry did not land in files[]"; return 1
+    fi
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "uninstall exited 0 over a files[] entry that is a directory (EISDIR swallowed):"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    if printf '%s\n' "$output" | grep -qF 'removed: kurama-dir-entry'; then
+        echo "uninstall printed a false 'removed:' line for the directory it could not rm"
+        return 1
+    fi
+    if printf '%s\n' "$output" | grep -qF 'Done.'; then
+        echo "uninstall reached 'Done.' after failing to remove a directory entry"
+        return 1
+    fi
+    # rm -f left the directory in place — the run really did fail to remove it.
+    assert_dir_exists "$repo/kurama-dir-entry" || return 1
+    return 0
+}
+
+echo -e "${BOLD}UNIT-I (issue #63): batch integration follow-ups${NC}"
+run_test "setup.sh fails loud on a clone missing skills/_shared (no partial receipt)" test_i_setup_missing_shared_fails_loud_before_write
+run_test "uninstall refuses a corrupt settings.json with jq present (hooks survive)" test_i_uninstall_refuses_corrupt_settings_with_jq_present
+run_test "install.sh --agent custom with no --path (non-TTY) refuses, installs nothing" test_i_install_custom_without_path_refuses
+run_test "uninstall aborts loud on a receipt files[] entry that is a directory (EISDIR)" test_i_uninstall_directory_entry_aborts_loud
+
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 

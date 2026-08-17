@@ -2476,6 +2476,19 @@ elif [ ! -d "$EXAMPLES_DIR/opencode/commands" ]; then
     fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
     exit 1
 fi
+# skills/_shared is not optional either and must FAIL LOUD before any write (#41):
+# every target installs the shared conventions and all 20 default SKILL.md files
+# reference _shared/*. install_skills only copies it behind `if [ -d "$shared_src" ]`,
+# so a clone with skills/ but no _shared/ silently skips it, still prints "Done!" and
+# writes a receipt for a PARTIAL install pointing at conventions that are not there —
+# exit 0 where it must be exit 1. This is install.sh's pre-#38 validate_source check
+# (`[ ! -d "$SKILLS_SRC/_shared" ]`), dropped when the two installers collapsed (#38)
+# alongside the examples/ check above.
+if [ ! -d "$SKILLS_SRC/_shared" ]; then
+    fail "Missing: skills/_shared (the shared conventions every skill references)"
+    fail "Is this a complete clone? git clone https://github.com/myst4/kurama.git"
+    exit 1
+fi
 
 if [[ -n "$AGENT" ]]; then
     # Single agent mode
