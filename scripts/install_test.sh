@@ -7621,9 +7621,58 @@ test_i_uninstall_refuses_corrupt_settings_with_jq_present() {
     return 0
 }
 
+test_i_install_custom_without_path_refuses() {
+    # #63 pins #38's C1: `install.sh --agent custom` with NO --path and stdin not a
+    # TTY must REFUSE — exit non-zero, install NOTHING — never silently full-install
+    # into $PWD. The pre-#38 code was `target="${CUSTOM_PATH:-$PWD}"`, so a revert of
+    # the require-`--path` guard (install.sh:150-159) would run a whole project
+    # install (CLAUDE.md orchestrator merge, .claude/settings.json hooks, native
+    # agents) into whatever repo the user happens to be sitting in. Only positive
+    # `--agent custom --path DIR` cases exist, so that revert stays green without this.
+    # The cwd is a real git repo on purpose: a reintroduced $PWD fallback WOULD pass
+    # setup.sh's project preconditions and install here, so the refusal is the only
+    # thing keeping the tree clean. stdin is /dev/null so the interactive prompt path
+    # (`[ -t 0 ]`) is not taken and the non-interactive refusal is what we exercise.
+    local sandbox="$TEST_TMPDIR/custom-no-path-cwd"
+    make_git_repo "$sandbox"
+
+    local output status=0
+    output=$(cd "$sandbox" && bash "$INSTALL_SCRIPT" --agent custom </dev/null 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "install.sh --agent custom with no --path (non-TTY) exited 0 instead of refusing"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    # Nothing may have landed in the cwd: no hooks receipt, no orchestrator merge, no tree.
+    if [ -e "$sandbox/.claude/settings.json" ]; then
+        echo "the refused run still wrote .claude/settings.json into the cwd"
+        return 1
+    fi
+    if [ -e "$sandbox/CLAUDE.md" ]; then
+        echo "the refused run still merged a CLAUDE.md orchestrator block into the cwd"
+        return 1
+    fi
+    if [ -e "$sandbox/.claude" ]; then
+        echo "the refused run still created a .claude/ tree in the cwd"
+        return 1
+    fi
+    if [ -e "$sandbox/.kurama-install-manifest.json" ]; then
+        echo "the refused run still wrote an install receipt into the cwd"
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'requires --path' || {
+        echo "the refusal never tells the user --path is required:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+    return 0
+}
+
 echo -e "${BOLD}UNIT-I (issue #63): batch integration follow-ups${NC}"
 run_test "setup.sh fails loud on a clone missing skills/_shared (no partial receipt)" test_i_setup_missing_shared_fails_loud_before_write
 run_test "uninstall refuses a corrupt settings.json with jq present (hooks survive)" test_i_uninstall_refuses_corrupt_settings_with_jq_present
+run_test "install.sh --agent custom with no --path (non-TTY) refuses, installs nothing" test_i_install_custom_without_path_refuses
 
 echo ""
 
