@@ -7669,10 +7669,65 @@ test_i_install_custom_without_path_refuses() {
     return 0
 }
 
+test_i_uninstall_directory_entry_aborts_loud() {
+    # #63 pins #33's I1: remove_target drives `rm -f` straight from the receipt's
+    # files[] with errexit armed, and the four call sites are BARE on purpose so a
+    # failed rm aborts the run instead of being swallowed. A files[] entry that names
+    # a DIRECTORY makes `rm -f` fail with EISDIR (rm refuses a directory without -r);
+    # the fixed code lets that abort loudly — no false "removed:" line for the entry,
+    # never reaching "Done." Reintroducing `|| UNINSTALL_FAILED=1` (or `|| true`) at
+    # the rm would swallow the EISDIR, print a false "removed:", and still report
+    # success — and the suite would stay green because no other test drives a
+    # directory entry through the rm loop. uninstall.sh runs here as a SUBPROCESS, so
+    # its errexit abort cannot abort this suite.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required to inject the receipt entry"; return 1; }
+    local repo="$TEST_TMPDIR/proj-dir-entry"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the project install setup exited non-zero"; return 1; }
+
+    local receipt="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$receipt" || return 1
+
+    # A real, existing DIRECTORY inside the containment root (the repo). rm -f refuses
+    # it (EISDIR); a plain file entry here would delete cleanly and prove nothing.
+    mkdir -p "$repo/kurama-dir-entry" || { echo "could not stage the directory entry"; return 1; }
+    local tmp="$receipt.tmp"
+    if ! jq '.files += ["kurama-dir-entry"]' "$receipt" > "$tmp"; then
+        echo "could not inject the directory entry into files[]"; return 1
+    fi
+    mv "$tmp" "$receipt"
+    if ! jq -e '.files | index("kurama-dir-entry")' "$receipt" >/dev/null; then
+        echo "the directory entry did not land in files[]"; return 1
+    fi
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages 2>&1) || status=$?
+
+    if [ "$status" -eq 0 ]; then
+        echo "uninstall exited 0 over a files[] entry that is a directory (EISDIR swallowed):"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    if printf '%s\n' "$output" | grep -qF 'removed: kurama-dir-entry'; then
+        echo "uninstall printed a false 'removed:' line for the directory it could not rm"
+        return 1
+    fi
+    if printf '%s\n' "$output" | grep -qF 'Done.'; then
+        echo "uninstall reached 'Done.' after failing to remove a directory entry"
+        return 1
+    fi
+    # rm -f left the directory in place — the run really did fail to remove it.
+    assert_dir_exists "$repo/kurama-dir-entry" || return 1
+    return 0
+}
+
 echo -e "${BOLD}UNIT-I (issue #63): batch integration follow-ups${NC}"
 run_test "setup.sh fails loud on a clone missing skills/_shared (no partial receipt)" test_i_setup_missing_shared_fails_loud_before_write
 run_test "uninstall refuses a corrupt settings.json with jq present (hooks survive)" test_i_uninstall_refuses_corrupt_settings_with_jq_present
 run_test "install.sh --agent custom with no --path (non-TTY) refuses, installs nothing" test_i_install_custom_without_path_refuses
+run_test "uninstall aborts loud on a receipt files[] entry that is a directory (EISDIR)" test_i_uninstall_directory_entry_aborts_loud
 
 echo ""
 
