@@ -122,7 +122,7 @@ remove_hooks_from_settings() {
             then del(.hooks.PreToolUse) else . end
         | if (.hooks | type) == "object" and (.hooks | length) == 0
             then del(.hooks) else . end
-    ' "$settings_file") || { print_warn "failed to clean $settings_file"; return 0; }
+    ' "$settings_file") || { print_warn "failed to clean $settings_file"; UNINSTALL_FAILED=1; return 0; }
 
     local tmp
     tmp="$(mktemp "${settings_file}.XXXXXX")"
@@ -229,7 +229,7 @@ remove_tui_plugin_from_config() {
         .plugin = ((.plugin // []) | map(select(
             (if type == "string"
              then endswith("tui-plugins/kurama-logo.tsx") else false end) | not)))
-    ' "$file") || { print_warn "failed to clean $file"; return 0; }
+    ' "$file") || { print_warn "failed to clean $file"; UNINSTALL_FAILED=1; return 0; }
     tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
     cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
     printf '%s\n' "$cleaned" > "$tmp"
@@ -546,41 +546,53 @@ remove_target() {
 $raw_files
 EOF
 
-    # jq-optional invariant: without jq the kurama hooks block cannot be stripped
-    # from settings.json. The files[] sweep used to run FIRST, so the hook SCRIPTS
-    # were deleted, remove_hooks_from_settings then warned and returned, and the
-    # run exited 0 — leaving settings.json invoking executables that no longer
-    # exist, i.e. a broken PreToolUse hook on every Edit/Write. Detect it here,
-    # before a single file is removed, and refuse the whole target.
-    local settings sfile spath blocked_settings=""
+    # jq-optional + integrity invariant: the kurama hooks block can only be
+    # stripped from settings.json when jq is present AND the file parses. Without
+    # jq — or WITH jq but an unparseable settings.json (jq errors, the strip
+    # below fails) — remove_hooks_from_settings can only warn AFTER the files[]
+    # sweep has already deleted the hook SCRIPTS, leaving settings.json invoking
+    # executables that no longer exist and the run exiting 0. A jq -e . probe
+    # inside this pre-flight guard catches the unparseable-JSON case too. Detect
+    # either here, before a single file is removed, and refuse the whole target.
+    local settings sfile spath blocked_settings="" have_jq=0
+    command -v jq >/dev/null 2>&1 && have_jq=1
     settings="$(manifest_json_array "$manifest" "settings")"
-    if ! command -v jq >/dev/null 2>&1; then
-        while IFS= read -r sfile; do
-            [ -n "$sfile" ] || continue
-            spath="$dir/$sfile"
-            [ -f "$spath" ] || continue
-            # Textual probe, not a JSON parse: setup.sh embeds "hooks/kurama/" in
-            # every command it writes. No match means nothing of ours is in there
-            # and there is nothing for jq to strip, so the run may proceed.
-            grep -qF 'hooks/kurama/' "$spath" 2>/dev/null || continue
-            # Normalized for display: the recorded form is ../settings.json, and
-            # telling a user to hand-edit ".../skills/../settings.json" when they
-            # have to find the file themselves is worse than not telling them.
-            blocked_settings="${blocked_settings}$(normalize_abs_path "$dir_abs/$sfile")
+    while IFS= read -r sfile; do
+        [ -n "$sfile" ] || continue
+        spath="$dir/$sfile"
+        [ -f "$spath" ] || continue
+        # Textual probe, not a JSON parse: setup.sh embeds "hooks/kurama/" in
+        # every command it writes. No match means nothing of ours is in there
+        # and there is nothing for jq to strip, so the run may proceed.
+        grep -qF 'hooks/kurama/' "$spath" 2>/dev/null || continue
+        # With jq AND a file that parses, the strip below will succeed — nothing
+        # to block. Only jq-absent, or jq-present-but-unparseable, reach here.
+        if [ "$have_jq" -eq 1 ] && jq -e . "$spath" >/dev/null 2>&1; then
+            continue
+        fi
+        # Normalized for display: the recorded form is ../settings.json, and
+        # telling a user to hand-edit ".../skills/../settings.json" when they
+        # have to find the file themselves is worse than not telling them.
+        blocked_settings="${blocked_settings}$(normalize_abs_path "$dir_abs/$sfile")
 "
-        done <<EOF
+    done <<EOF
 $settings
 EOF
-    fi
     if [ -n "$blocked_settings" ]; then
-        if $DRY_RUN; then
-            print_warn "$label: jq not found — a real run would REFUSE this target"
-            print_info "the kurama hooks block cannot be stripped from settings.json without jq"
+        local settings_why
+        if [ "$have_jq" -eq 1 ]; then
+            settings_why="settings.json is not valid JSON"
         else
-            print_error "$label: jq not found — cannot strip the kurama hooks block"
+            settings_why="jq not found"
+        fi
+        if $DRY_RUN; then
+            print_warn "$label: $settings_why — a real run would REFUSE this target"
+            print_info "the kurama hooks block cannot be stripped from settings.json"
+        else
+            print_error "$label: $settings_why — cannot strip the kurama hooks block"
             print_info "Nothing was removed. Deleting the hook scripts while settings.json"
             print_info "still invokes them breaks every Edit/Write in the harness."
-            print_info "Install jq and re-run, or remove these by hand first:"
+            print_info "Install jq / repair the JSON and re-run, or remove these by hand first:"
             while IFS= read -r spath; do
                 if [ -n "$spath" ]; then
                     print_info "  every PreToolUse entry whose command contains 'hooks/kurama/' in:"
@@ -610,42 +622,53 @@ EOF
         fi
     fi
 
-    # jq-optional invariant (issue #40): without jq the Kurama logo entry cannot be
-    # stripped from tui.json, yet the files[] sweep below deletes the plugin .tsx it
-    # points at. A jq-less run would leave tui.json's plugin[] referencing a file
-    # that is gone — a dangling TUI plugin that breaks OpenCode's TUI on next start.
-    # Detect it here, before a single file is removed, and refuse the whole target —
-    # exactly as the settings.json guard above does for the hooks block.
+    # jq-optional + integrity invariant (issue #40): the Kurama logo entry can only
+    # be stripped from tui.json when jq is present AND the file parses. Without jq —
+    # or WITH jq but an unparseable tui.json — the strip cannot run, yet the files[]
+    # sweep below deletes the plugin .tsx it points at, leaving tui.json's plugin[]
+    # referencing a file that is gone: a dangling TUI plugin that breaks OpenCode's
+    # TUI on next start. A jq -e . probe inside this pre-flight guard catches the
+    # unparseable-JSON case too. Detect either here, before a single file is
+    # removed, and refuse the whole target — as the settings.json guard above does.
     local tfile tpath blocked_tui="" tui_plugins_pf
     tui_plugins_pf="$(manifest_json_array "$manifest" "tui_plugins")"
-    if ! command -v jq >/dev/null 2>&1; then
-        while IFS= read -r tfile; do
-            [ -n "$tfile" ] || continue
-            case "$tfile" in
-                /*) tpath="$(normalize_abs_path "$tfile")" ;;
-                *)  tpath="$(normalize_abs_path "$dir_abs/$tfile")" ;;
-            esac
-            [ -f "$tpath" ] || continue
-            # Textual probe, not a JSON parse: setup.sh registers the logo as a
-            # plugin[] string ending in tui-plugins/kurama-logo.tsx. No match means
-            # nothing of ours is registered and there is nothing for jq to strip.
-            grep -qF 'tui-plugins/kurama-logo.tsx' "$tpath" 2>/dev/null || continue
-            blocked_tui="${blocked_tui}$tpath
+    while IFS= read -r tfile; do
+        [ -n "$tfile" ] || continue
+        case "$tfile" in
+            /*) tpath="$(normalize_abs_path "$tfile")" ;;
+            *)  tpath="$(normalize_abs_path "$dir_abs/$tfile")" ;;
+        esac
+        [ -f "$tpath" ] || continue
+        # Textual probe, not a JSON parse: setup.sh registers the logo as a
+        # plugin[] string ending in tui-plugins/kurama-logo.tsx. No match means
+        # nothing of ours is registered and there is nothing for jq to strip.
+        grep -qF 'tui-plugins/kurama-logo.tsx' "$tpath" 2>/dev/null || continue
+        # With jq AND a file that parses, the strip will succeed — nothing to
+        # block. Only jq-absent, or jq-present-but-unparseable, reach here.
+        if [ "$have_jq" -eq 1 ] && jq -e . "$tpath" >/dev/null 2>&1; then
+            continue
+        fi
+        blocked_tui="${blocked_tui}$tpath
 "
-        done <<EOF
+    done <<EOF
 $tui_plugins_pf
 EOF
-    fi
     if [ -n "$blocked_tui" ]; then
-        if $DRY_RUN; then
-            print_warn "$label: jq not found — a real run would REFUSE this target"
-            print_info "the Kurama logo entry cannot be stripped from tui.json without jq"
+        local tui_why
+        if [ "$have_jq" -eq 1 ]; then
+            tui_why="tui.json is not valid JSON"
         else
-            print_error "$label: jq not found — cannot strip the Kurama logo from tui.json"
+            tui_why="jq not found"
+        fi
+        if $DRY_RUN; then
+            print_warn "$label: $tui_why — a real run would REFUSE this target"
+            print_info "the Kurama logo entry cannot be stripped from tui.json"
+        else
+            print_error "$label: $tui_why — cannot strip the Kurama logo from tui.json"
             print_info "Nothing was removed. Deleting the logo plugin while tui.json still"
             print_info "references it leaves OpenCode's TUI loading a plugin that is gone."
-            print_info "Install jq and re-run, or de-register it by hand first — remove the"
-            print_info "plugin[] array entry ending in \"tui-plugins/kurama-logo.tsx\" from:"
+            print_info "Install jq / repair the JSON and re-run, or de-register by hand — remove"
+            print_info "the plugin[] array entry ending in \"tui-plugins/kurama-logo.tsx\" from:"
             while IFS= read -r tpath; do
                 [ -n "$tpath" ] && print_info "    $tpath"
             done <<EOF

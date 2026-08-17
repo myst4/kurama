@@ -7574,8 +7574,56 @@ test_i_setup_missing_shared_fails_loud_before_write() {
     return 0
 }
 
+test_i_uninstall_refuses_corrupt_settings_with_jq_present() {
+    # #63: both jq-less pre-flight honesty guards were gated on `! command -v jq` only, so
+    # with jq PRESENT and an unparseable settings.json the rm loop deleted the hook scripts,
+    # remove_hooks_from_settings then hit its warn-and-return, and the run exited 0 "Done."
+    # leaving settings.json invoking deleted executables — a broken PreToolUse hook on every
+    # Edit/Write. The fix adds a `jq -e .` validity probe inside the pre-flight guard: an
+    # unparseable config is refused BEFORE any file is removed, exactly as the jq-absent path
+    # does. This test runs with jq present (the default PATH).
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for this test"; return 1; }
+
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
+    local settings="$HOME/.claude/settings.json"
+    local guard="$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh"
+    local gate="$HOME/.claude/hooks/kurama/archive-gate.sh"
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    assert_file_exists "$settings" || return 1
+    assert_file_exists "$guard" || return 1
+    assert_file_exists "$gate" || return 1
+    grep -q 'hooks/kurama/' "$settings" || { echo "setup wrote no hooks block"; return 1; }
+
+    # Corrupt settings.json into invalid JSON while KEEPING the hooks/kurama/ text, so the
+    # pre-flight textual probe still recognises it as ours to strip AND jq can no longer
+    # parse it. Trailing garbage after a valid object is a jq parse error (exit non-zero).
+    printf '\n]]]NOT JSON\n' >> "$settings"
+    if jq -e . "$settings" >/dev/null 2>&1; then
+        echo "settings.json is still valid JSON — the corruption did not take"; return 1
+    fi
+    grep -q 'hooks/kurama/' "$settings" || { echo "corruption dropped the hooks block text"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "uninstall exited 0 over an unparseable settings.json (jq present); it said:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    # The preferred fix refuses BEFORE the rm loop, so the hook scripts survive and
+    # settings.json is never left pointing at deleted executables.
+    assert_file_exists "$guard" || {
+        echo "the write-guard hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$gate" || {
+        echo "the archive-gate hook was deleted while settings.json still invokes it"; return 1; }
+    assert_file_exists "$manifest" || { echo "the refused run deleted the receipt"; return 1; }
+    return 0
+}
+
 echo -e "${BOLD}UNIT-I (issue #63): batch integration follow-ups${NC}"
 run_test "setup.sh fails loud on a clone missing skills/_shared (no partial receipt)" test_i_setup_missing_shared_fails_loud_before_write
+run_test "uninstall refuses a corrupt settings.json with jq present (hooks survive)" test_i_uninstall_refuses_corrupt_settings_with_jq_present
 
 echo ""
 
