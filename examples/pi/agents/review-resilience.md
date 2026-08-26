@@ -3,7 +3,6 @@ name: review-resilience
 description: R4 Resilience review lens — fallbacks, retry/backoff, graceful degradation, observability, load, rollback, and SLO risks. Read-only: finds operational failure risks, never fixes them. Launched by the orchestrator when deterministic triage selects the resilience lens for a standard diff whose dominant risk is shell/process integration, partial failures, or recovery, or as one lens of a full-4R sweep.
 tools:
   - read
-model: anthropic/claude-sonnet-4-5
 effort: medium
 ---
 

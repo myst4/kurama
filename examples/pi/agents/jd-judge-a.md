@@ -3,7 +3,6 @@ name: jd-judge-a
 description: Judgment Day blind judge A — adversarial reviewer leading the Correctness & Security lens. Read-only: returns findings only, never approves and never edits. Launched by the orchestrator alongside blind judge B when judgment-day is invoked — one of two independent judges reviewing the same target through distinct lenses.
 tools:
   - read
-model: anthropic/claude-opus-4-8
 effort: high
 ---
 

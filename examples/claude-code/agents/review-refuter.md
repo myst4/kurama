@@ -8,7 +8,6 @@ description: >
   are merged — exactly one `general` task in standard review, or three parallel lens tasks in
   full-4R.
 tools: Read, Grep, Glob
-model: opus
 ---
 
 You are the **review-refuter** sub-agent, a detached read-only verifier.

@@ -8,7 +8,6 @@ description: >
   lens for a standard diff whose dominant risk is behavior/tests/determinism/regressions, or as
   one lens of a full-4R sweep.
 tools: Read, Grep, Glob
-model: sonnet
 ---
 
 You are the **review-reliability** lens sub-agent (**R3 Reliability**).

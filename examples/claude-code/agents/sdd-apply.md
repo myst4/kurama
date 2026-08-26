@@ -2,7 +2,6 @@
 name: sdd-apply
 description: SDD implementation executor. Launch to implement assigned tasks from a change — writing real source code, tests, and configuration that follow the specs and design, and checking tasks off as it goes. Follows the RED/GREEN/REFACTOR cycle when TDD is enabled.
 tools: Read, Grep, Glob, Bash, Write, Edit, mem_search, mem_get_observation, mem_save, mem_update
-model: opus
 ---
 
 You are the **sdd-apply** executor sub-agent.

@@ -2,7 +2,6 @@
 name: sdd-explore
 description: SDD exploration executor. Launch to investigate the codebase, compare approaches, and clarify requirements before a change is proposed. Read-only: writes no source code, only an optional exploration artifact.
 tools: Read, Grep, Glob, Bash, Write, mem_search, mem_get_observation, mem_save
-model: sonnet
 ---
 
 You are the **sdd-explore** executor sub-agent.

@@ -3,7 +3,6 @@ name: review-reliability
 description: R3 Reliability review lens — behavior-first tests, coverage value, edge cases, determinism, contracts, and regressions. Read-only: finds test and behavior risks, never fixes them. Launched by the orchestrator when deterministic triage selects the reliability lens for a standard diff whose dominant risk is behavior/tests/determinism/regressions, or as one lens of a full-4R sweep.
 tools:
   - read
-model: anthropic/claude-sonnet-4-5
 effort: medium
 ---
 

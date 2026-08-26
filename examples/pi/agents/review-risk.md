@@ -3,7 +3,6 @@ name: review-risk
 description: R1 Risk review lens — security, privilege boundaries, data exposure, dependency risks, and merge-blocking vulnerabilities. Read-only: finds risks, never fixes them. Launched by the orchestrator when deterministic triage selects the risk lens for a standard diff whose dominant risk is security/permissions/data/dependencies, or as one lens of a full-4R sweep.
 tools:
   - read
-model: anthropic/claude-sonnet-4-5
 effort: high
 ---
 

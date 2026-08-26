@@ -4,7 +4,6 @@ description: Judgment Day surgical fix agent — applies ONLY the confirmed bloc
 tools:
   - read
   - bash
-model: anthropic/claude-opus-4-8
 effort: high
 ---
 

@@ -12,7 +12,6 @@ tools:
   - memory_get
   - memory_add
   - memory_update
-model: anthropic/claude-sonnet-4-5
 effort: low
 ---
 

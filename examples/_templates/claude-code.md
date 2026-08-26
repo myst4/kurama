@@ -16,7 +16,7 @@ Delegate through the per-phase native subagents (`examples/claude-code/agents/`)
 <!-- @@NATIVE_NOTES@@ -->
 ### Native subagents & hooks
 
-Claude Code can run each SDD phase as a native declarative subagent instead of a generic `Task` call. See `examples/claude-code/agents/` for one subagent per phase (frontmatter `name`, `description`, `tools`, `model`) and `examples/claude-code/hooks/` for deterministic gates (a PreToolUse guard that blocks orchestrator edits while a cycle is active, and an archive gate that requires a verify PASS). When those agents are installed, model routing comes from each agent's `model` frontmatter and the Model Assignments table below is the fallback reference.
+Claude Code can run each SDD phase as a native declarative subagent instead of a generic `Task` call. See `examples/claude-code/agents/` for one subagent per phase (frontmatter `name`, `description`, `tools`) and `examples/claude-code/hooks/` for deterministic gates (a PreToolUse guard that blocks orchestrator edits while a cycle is active, and an archive gate that requires a verify PASS). The agents ship with no model pin: each one inherits the session's default model. The Model Assignments table below is guidance for anyone who wants tiered routing — apply it by adding `model` to an agent's frontmatter locally.
 
 Session hygiene on Claude Code: named agents/teammates spawned for a phase are stopped with the native stop primitive (`TaskStop` with the agent's name, or requesting the teammate's shutdown) as soon as their envelope is read and validated — finished phase agents must not linger in the teammate list/status bar.
 

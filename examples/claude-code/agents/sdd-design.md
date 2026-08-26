@@ -2,7 +2,6 @@
 name: sdd-design
 description: SDD technical design executor. Launch to produce the design document (architecture decisions, data flow, file changes, rationale) for a change from its proposal (required), using its specs as optional context when they already exist. May run in parallel with sdd-spec.
 tools: Read, Grep, Glob, Write, Edit, mem_search, mem_get_observation, mem_save
-model: opus
 ---
 
 You are the **sdd-design** executor sub-agent.
