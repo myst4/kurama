@@ -175,7 +175,7 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 <!-- gentle-ai:sdd-model-assignments -->
 ## Model Assignments
 
-Read this table at session start (or before first delegation), cache it for the session, and pass the mapped alias in every Agent tool call via the `model` parameter. If a phase is missing, use the `default` row. If you lack access to the assigned model, substitute `sonnet` and continue.
+By default, pass NO `model` parameter when delegating: every sub-agent inherits the model this session is configured to run, whatever the provider. This table is opt-in guidance for tiered routing — apply it only when the user has opted in through their own configuration (agent entries in `opencode.json`, or a named profile as below), and never let it override a model the user configured.
 
 When running under a named profile (the `kurama-orchestrator` primary), the per-phase models come from the `sdd-<phase>-NAME` agent entries in `opencode.json` rather than from these aliases; delegate to those suffixed subagents and let each carry its own configured model. This table remains the default guidance for the base `sdd-orchestrator`.
 
