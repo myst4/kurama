@@ -162,7 +162,7 @@ Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommende
 <!-- gentle-ai:sdd-model-assignments -->
 ## Model Assignments
 
-Read this table at session start (or before first delegation), cache it for the session, and pass the mapped alias in every Agent tool call via the `model` parameter. If a phase is missing, use the `default` row. If you lack access to the assigned model, substitute `sonnet` and continue.
+By default, pass NO `model` parameter when delegating: every sub-agent inherits the model this session is configured to run, whatever the provider. This table is opt-in guidance for tiered routing — apply it only when the user has opted in by adding `model` to an agent's frontmatter locally, and never let it override a model the user configured.
 
 | Phase | Default Model | Reason |
 |-------|---------------|--------|
