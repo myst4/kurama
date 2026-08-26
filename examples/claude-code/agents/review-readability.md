@@ -7,7 +7,6 @@ description: >
   lens for a standard diff whose dominant risk is naming/structure/maintainability, or as one
   lens of a full-4R sweep.
 tools: Read, Grep, Glob
-model: sonnet
 ---
 
 You are the **review-readability** lens sub-agent (**R2 Readability**).

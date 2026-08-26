@@ -4,7 +4,6 @@ description: R4 Resilience review lens — fallbacks, retry/backoff, graceful de
 tools:
   - read
 spawns: ""
-model: anthropic/claude-sonnet-4-5
 thinkingLevel: medium
 read-summarize: false
 ---

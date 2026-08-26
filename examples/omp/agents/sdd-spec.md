@@ -8,7 +8,6 @@ tools:
   - write
   - edit
 spawns: ""
-model: anthropic/claude-sonnet-4-5
 thinkingLevel: medium
 ---
 

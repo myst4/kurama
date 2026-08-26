@@ -195,7 +195,7 @@ The 17 split into the **9 SDD phase** agents and the **8 review-layer** agents:
 | Judgment Day judges | `jd-judge-a` (Correctness & Security), `jd-judge-b` (Regressions & Resilience) | 2 |
 | Judgment Day fix agent | `jd-fix-agent` | 1 |
 
-Each file's frontmatter declares `name`, `description`, `tools`, and `model`;
+Each file's frontmatter declares `name`, `description`, and `tools`;
 the body is **thin** — it instructs the subagent to load and follow its
 corresponding Kurama skill (the phase `SKILL.md` for SDD agents; the
 `review-*/SKILL.md` + [`skills/_shared/review-ledger-contract.md`](../skills/_shared/review-ledger-contract.md)
@@ -206,28 +206,31 @@ skill remains the single source of truth.
 
 ### Model & tools routing
 
-Routing is **declarative** (in each agent's frontmatter) instead of a table the
-orchestrator has to read and cache every session. The 9 SDD agents are unchanged
-from before; the 8 review-layer agents follow the routing below:
+**Tool** routing is **declarative** (in each agent's frontmatter). **Model**
+routing is deliberately not: the agents ship with **no `model` pin**, so every
+one of them inherits the session's default model. Models rotate; pins rot — an
+agent without a `model` key keeps working when the user's provider or model
+lineup changes. To give specific agents a tiered model, add `model` to their
+frontmatter locally; the Model Assignments table in
+[`examples/claude-code/CLAUDE.md`](../examples/claude-code/CLAUDE.md) is the
+recommended split for anyone who wants that routing. The 9 SDD agents are
+unchanged from before; the 8 review-layer agents follow the tool routing below:
 
-| Agent(s) | `tools` | `model` |
-|----------|---------|---------|
-| `sdd-design`, `sdd-apply` | (phase tools) | `opus` |
-| Other 7 SDD phases | (phase tools) | `sonnet` |
-| `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `Read, Grep, Glob` | `sonnet` |
-| `review-refuter` | `Read, Grep, Glob` | `opus` |
-| `jd-judge-a`, `jd-judge-b` | `Read, Grep, Glob` | `opus` |
-| `jd-fix-agent` | `Read, Edit, Write, Glob, Grep, Bash` | `opus` |
+| Agent(s) | `tools` |
+|----------|---------|
+| SDD phases | (phase tools) |
+| `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `Read, Grep, Glob` |
+| `review-refuter` | `Read, Grep, Glob` |
+| `jd-judge-a`, `jd-judge-b` | `Read, Grep, Glob` |
+| `jd-fix-agent` | `Read, Edit, Write, Glob, Grep, Bash` |
 
 **The 4R lenses, the refuter, and the two judges run read-only — and that is
 enforced declaratively by their `tools:` list**, not just by convention. Each
 declares only `Read, Grep, Glob`: omitting `Edit`/`Write` makes it structurally
 unable to modify the code it judges, and omitting `Task` prevents it from
-delegating to further sub-agents. The lenses `sonnet` / refuter+judges `opus`
-split reflects cost vs. the criticality of adversarial verification. The only
-review-layer agent that can write is `jd-fix-agent` (`opus`) — the surgical fix
-step — which is why it alone carries `Edit`/`Write`/`Bash`, and even it omits
-`Task`.
+delegating to further sub-agents. The only review-layer agent that can write is
+`jd-fix-agent` — the surgical fix step — which is why it alone carries
+`Edit`/`Write`/`Bash`, and even it omits `Task`.
 
 Removing `examples/claude-code/agents/` is safe: a project without the agent
 files keeps working exactly as before, with the orchestrator resolving skills
@@ -262,31 +265,35 @@ Pi's format differs from Claude's in three ways:
   also blocks every `subagent_*` tool, so no agent can delegate — the read-only
   boundary is enforced structurally, exactly as the Claude lenses' omitted
   `Edit`/`Write`/`Task` enforce theirs.
-- **`model` is `provider/model-id`.** The 4R lenses (and the lighter SDD phases)
-  route to `anthropic/claude-sonnet-4-5`; the refuter, both judges, the fix
-  agent, and `sdd-design`/`sdd-apply` route to `anthropic/claude-opus-4-8` —
-  the same sonnet-lens / opus-adversarial-and-fix split as the Claude agents,
-  with an `effort` hint where applicable.
+- **No `model` key — the reasoning hint is `effort`.** The agents ship with no
+  `model` in their frontmatter and inherit the session's default model. A Pi
+  pin would have to be `provider/model-id` — versioned **and**
+  provider-qualified — so it would age out of the provider's lineup and break
+  outright on a non-Anthropic Pi session. What ships instead is an `effort`
+  hint where applicable, which is not provider-bound.
 - **The body is the whole system prompt** (lean subagent mode auto-loads no
   skill). Each agent instructs itself to `read` its Kurama skill, resolving the
   path relative to the project in order — `skills/…` → `.pi/skills/…` →
   `~/.pi/agent/skills/…` → `.claude/skills/…` — then follow it and return that
   skill's envelope. The skill stays the single source of truth.
 
-| Agent(s) | `tools` (Pi) | `model` |
-|----------|--------------|---------|
-| `sdd-apply` | phase set incl. `write`, `edit`, `bash`, `memory_*` | `anthropic/claude-opus-4-8` |
-| `sdd-design` | phase set incl. `write`, `edit`, `memory_*` (no `bash`) | `anthropic/claude-opus-4-8` |
-| Other 7 SDD phases | phase set (read/inspect + phase-specific); `bash` only on `sdd-init`/`sdd-explore`/`sdd-verify`/`sdd-archive`, not on `sdd-propose`/`sdd-spec`/`sdd-tasks` | `anthropic/claude-sonnet-4-5` |
-| `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `[read]` | `anthropic/claude-sonnet-4-5` |
-| `review-refuter`, `jd-judge-a`, `jd-judge-b` | `[read]` | `anthropic/claude-opus-4-8` |
-| `jd-fix-agent` | `[read, bash]` | `anthropic/claude-opus-4-8` |
+| Agent(s) | `tools` (Pi) |
+|----------|--------------|
+| `sdd-apply` | phase set incl. `write`, `edit`, `bash`, `memory_*` |
+| `sdd-design` | phase set incl. `write`, `edit`, `memory_*` (no `bash`) |
+| Other 7 SDD phases | phase set (read/inspect + phase-specific); `bash` only on `sdd-init`/`sdd-explore`/`sdd-verify`/`sdd-archive`, not on `sdd-propose`/`sdd-spec`/`sdd-tasks` |
+| `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `[read]` |
+| `review-refuter`, `jd-judge-a`, `jd-judge-b` | `[read]` |
+| `jd-fix-agent` | `[read, bash]` |
 
-Per-agent `model`/`effort` in each file are **defaults**; override them without
-editing the files via `model_profiles` in `.pi/subagents.json` (project) or
-`~/.pi/agent/subagents.json` (global), per the `subagents-configuration` skill
-shipped with the `pi-subagents` extension. Kurama never writes `subagents.json`
-— it is the recommended, documented override surface only.
+Every agent inherits the session's default model; per-agent `effort` in each
+file is a **default**. To route specific agents to specific models — or change
+an `effort` — without editing the files, use `model_profiles` in
+`.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global), per
+the `subagents-configuration` skill shipped with the `pi-subagents` extension;
+adding `model` (`provider/model-id`) to an agent's frontmatter locally works
+too. Kurama never writes `subagents.json` — it is the recommended, documented
+override surface only.
 
 ---
 
@@ -321,18 +328,20 @@ The read-only lenses and `jd-fix-agent` also carry `read-summarize: false`: they
 adjudicate exact lines, and omp's default structural summaries would hide the very code
 they must judge.
 
-| Agent(s) | `tools` (omp) | `model` | `thinkingLevel` |
-|----------|---------------|---------|-----------------|
-| `sdd-apply` | `read`, `grep`, `glob`, `bash`, `write`, `edit` | `anthropic/claude-opus-4-8` | `high` |
-| `sdd-design` | `read`, `grep`, `glob`, `write`, `edit` (no `bash`) | `anthropic/claude-opus-4-8` | `high` |
-| Other 7 SDD phases | phase set; `bash` only on `sdd-init`/`sdd-explore`/`sdd-verify`/`sdd-archive` | `anthropic/claude-sonnet-4-5` | `low`–`medium` |
-| `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `read` | `anthropic/claude-sonnet-4-5` | `medium`–`high` |
-| `review-refuter`, `jd-judge-a`, `jd-judge-b` | `read` | `anthropic/claude-opus-4-8` | `high` |
-| `jd-fix-agent` | `read`, `bash` | `anthropic/claude-opus-4-8` | `high` |
+| Agent(s) | `tools` (omp) | `thinkingLevel` |
+|----------|---------------|-----------------|
+| `sdd-apply` | `read`, `grep`, `glob`, `bash`, `write`, `edit` | `high` |
+| `sdd-design` | `read`, `grep`, `glob`, `write`, `edit` (no `bash`) | `high` |
+| Other 7 SDD phases | phase set; `bash` only on `sdd-init`/`sdd-explore`/`sdd-verify`/`sdd-archive` | `low`–`medium` |
+| `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `read` | `medium`–`high` |
+| `review-refuter`, `jd-judge-a`, `jd-judge-b` | `read` | `high` |
+| `jd-fix-agent` | `read`, `bash` | `high` |
 
-Model routing is per agent and overridable without editing these files, via
-`task.agentModelOverrides` in `~/.omp/agent/config.yml` (or a project `.omp/config.yml`),
-or interactively from `/agents`.
+The agents ship with no `model` in their frontmatter and inherit the session's
+default model. To route specific agents to specific models, set
+`task.agentModelOverrides` in `~/.omp/agent/config.yml` (or a project
+`.omp/config.yml`), use `/agents` interactively, or add `model`
+(`provider/model-id`) to an agent's frontmatter locally.
 
 **Skill loading uses `skill://`.** omp resolves skills by name, so each agent reads its
 phase contract as `skill://sdd-apply` rather than guessing a filesystem path. The

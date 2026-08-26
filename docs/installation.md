@@ -255,9 +255,11 @@ with the same name is **backed up first** (timestamped, via the shared
 `make_backup`), and every installed agent is recorded in the target's
 `.kurama-install-manifest.json` receipt so `scripts/uninstall.sh` can later
 remove exactly what setup added. Each agent's frontmatter (`name`,
-`description`, `tools`, `model`) drives model routing and the read-only tool
-boundary; see [docs/sub-agents.md](sub-agents.md#native-claude-code-subagents-installed-automatically)
-for the full roster and the model/tools table.
+`description`, `tools`) drives the read-only tool boundary; the agents carry
+**no `model` pin**, so every one inherits the session's default model (add
+`model` to an agent's frontmatter locally if you want tiered routing); see
+[docs/sub-agents.md](sub-agents.md#native-claude-code-subagents-installed-automatically)
+for the full roster and the tools table.
 
 Installing the agents changes nothing about how skills or the orchestrator
 behave — a project that removes them keeps working exactly as before, with the
@@ -498,9 +500,10 @@ and re-runnable.
 
 **Verify:** Start Pi in your project (`pi`) and type `/sdd-init`.
 
-> **Note:** Pi routes models per-agent, so no orchestrator-level model table is
-> injected. Like Codex, Pi reads the skills as inline instructions
-> rather than spawning true fresh-context sub-agents.
+> **Note:** Pi has no orchestrator-passed model parameter, so no
+> orchestrator-level model table is injected; the installed agents inherit the
+> session's default model. Like Codex, Pi reads the skills as inline
+> instructions rather than spawning true fresh-context sub-agents.
 
 <a id="native-pi-subagents-installed-automatically"></a>
 ### Native Pi subagents (installed automatically)
@@ -519,10 +522,10 @@ They are written in **Pi's** agent format, which differs from Claude's:
   `jd-fix-agent` declares `[read, bash]`; the SDD phase executors carry the
   fuller phase toolset. Pi additionally blocks every `subagent_*` tool, so these
   agents structurally cannot delegate.
-- `model` is `provider/model-id` — `anthropic/claude-sonnet-4-5` for the 4R
-  lenses (and the lighter SDD phases), `anthropic/claude-opus-4-8` for the
-  refuter, both judges, the fix agent, and the `sdd-design`/`sdd-apply` phases —
-  with an `effort` hint where applicable.
+- There is **no `model` key** — each agent inherits the session's default
+  model, so the roster works unchanged on any provider Pi runs against (a Pi
+  pin would be `provider/model-id`, which ages out and breaks non-Anthropic
+  sessions). An `effort` hint ships where applicable; it is not provider-bound.
 - The body **is** the complete system prompt (Pi's lean subagent mode
   auto-loads no skill or context file). Each agent instructs itself to `read`
   its Kurama skill, resolving the path relative to the project in order —
@@ -530,11 +533,13 @@ They are written in **Pi's** agent format, which differs from Claude's:
   then follow it and return that skill's envelope. The agent never duplicates
   the skill body; the skill remains the single source of truth.
 
-Per-agent model/effort in each file are **defaults**. Override them without
-editing the files via `model_profiles` in `.pi/subagents.json` (project) or
-`~/.pi/agent/subagents.json` (global) — see the `subagents-configuration` skill
-shipped with the `pi-subagents` extension. Kurama does **not** write
-`subagents.json`; it is documented here as the recommended override surface.
+Every agent inherits the session's default model; per-agent `effort` in each
+file is a **default**. To route specific agents to specific models — or change
+an `effort` — without editing the files, use `model_profiles` in
+`.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global) — see
+the `subagents-configuration` skill shipped with the `pi-subagents` extension.
+Kurama does **not** write `subagents.json`; it is documented here as the
+recommended override surface.
 
 ### Kurama startup logo (opt-in)
 

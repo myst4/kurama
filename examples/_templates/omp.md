@@ -75,7 +75,7 @@ If `PI_CODING_AGENT_DIR` is set, it relocates the user base and every path above
 
 **Skills reach the model as metadata plus on-demand content.** omp puts each skill's name and description in the system prompt and loads the body only when read through `skill://<name>`. So the `_shared` convention files a phase needs are pulled at the moment they apply — `skill://sdd-apply` for a phase, and any `skill://<name>/<relative-path>` asset inside a skill directory.
 
-Model routing lives in each agent's frontmatter, overridable per agent via `task.agentModelOverrides` — there is no orchestrator-passed `model` parameter, which is why there is no Model Assignments block below.
+The shipped agents carry no `model` in their frontmatter: each one inherits the session's default model, so the setup works unchanged on any provider omp runs against. To route specific phases to specific models, add `model` to an agent's frontmatter locally or set `task.agentModelOverrides` — there is no orchestrator-passed `model` parameter, which is why there is no Model Assignments block below.
 
 **`/skill:<name>` commands** are available when `skills.enableSkillCommands` is on, which gives the user a direct way to invoke a phase skill's text. That is a user entry point, not a delegation mechanism: it injects skill text into THIS thread rather than opening a fresh context, so it never substitutes for a `task` delegation.
 

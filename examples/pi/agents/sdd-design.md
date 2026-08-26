@@ -10,7 +10,6 @@ tools:
   - memory_search
   - memory_get
   - memory_add
-model: anthropic/claude-opus-4-8
 effort: high
 ---
 

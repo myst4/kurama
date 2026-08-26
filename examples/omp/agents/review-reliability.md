@@ -4,7 +4,6 @@ description: R3 Reliability review lens — behavior-first tests, coverage value
 tools:
   - read
 spawns: ""
-model: anthropic/claude-sonnet-4-5
 thinkingLevel: medium
 read-summarize: false
 ---

@@ -5,7 +5,6 @@ tools:
   - read
   - bash
 spawns: ""
-model: anthropic/claude-opus-4-8
 thinkingLevel: high
 read-summarize: false
 ---

@@ -4,7 +4,6 @@ description: Detached read-only refuter for one transaction-wide batch of infere
 tools:
   - read
 spawns: ""
-model: anthropic/claude-opus-4-8
 thinkingLevel: high
 read-summarize: false
 ---

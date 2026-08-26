@@ -4,7 +4,6 @@ description: Judgment Day blind judge A — adversarial reviewer leading the Cor
 tools:
   - read
 spawns: ""
-model: anthropic/claude-opus-4-8
 thinkingLevel: high
 read-summarize: false
 ---

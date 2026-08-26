@@ -2,7 +2,6 @@
 name: sdd-archive
 description: SDD archival executor. Launch after a change passes verification to merge its delta specs into the main specs (the source of truth) and move the change folder to the archive, completing the SDD cycle. Refuses to run without a passing verify report.
 tools: Read, Grep, Glob, Bash, Write, Edit, mem_search, mem_get_observation, mem_save, mem_update
-model: sonnet
 ---
 
 You are the **sdd-archive** executor sub-agent.

@@ -2,7 +2,6 @@
 name: sdd-propose
 description: SDD proposal executor. Launch to turn an exploration (or direct user input) into a change proposal with intent, scope, approach, and rollback plan. Produces the proposal artifact that spec and design depend on.
 tools: Read, Grep, Glob, Write, Edit, mem_search, mem_get_observation, mem_save
-model: sonnet
 ---
 
 You are the **sdd-propose** executor sub-agent.

@@ -3,7 +3,6 @@ name: review-refuter
 description: Detached read-only refuter for one transaction-wide batch of inferential BLOCKER/CRITICAL findings. Read-only: adjudicates candidates, never edits, fixes, or adds findings. Launched by the orchestrator during adversarial verification after the lens ledgers are merged — exactly one general batch in standard review, or three parallel lens batches in full-4R.
 tools:
   - read
-model: anthropic/claude-opus-4-8
 effort: high
 ---
 

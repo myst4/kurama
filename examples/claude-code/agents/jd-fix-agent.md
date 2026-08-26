@@ -7,7 +7,6 @@ description: >
   converge on a non-empty confirmed blocking set — once per fix iteration, within the
   2-iteration cap.
 tools: Read, Edit, Write, Glob, Grep, Bash
-model: opus
 ---
 
 You are the **Judgment Day surgical fix agent**.

@@ -2,7 +2,6 @@
 name: sdd-init
 description: SDD initialization executor. Launch to detect a project's stack and conventions and bootstrap the active persistence backend (engram context artifact or openspec/config.yaml) plus the skill registry. Use at the start of adopting SDD in a repo.
 tools: Read, Grep, Glob, Bash, Write, Edit, mem_search, mem_get_observation, mem_save
-model: sonnet
 ---
 
 You are the **sdd-init** executor sub-agent.

@@ -8,7 +8,6 @@ tools:
   - bash
   - write
 spawns: ""
-model: anthropic/claude-sonnet-4-5
 thinkingLevel: low
 ---
 

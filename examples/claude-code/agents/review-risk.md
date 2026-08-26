@@ -7,7 +7,6 @@ description: >
   a standard diff whose dominant risk is security/permissions/data/dependencies, or as one lens
   of a full-4R sweep.
 tools: Read, Grep, Glob
-model: sonnet
 ---
 
 You are the **review-risk** lens sub-agent (**R1 Risk**).

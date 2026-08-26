@@ -4,7 +4,6 @@ description: R2 Readability review lens — naming, complexity, intention, maint
 tools:
   - read
 spawns: ""
-model: anthropic/claude-sonnet-4-5
 thinkingLevel: medium
 read-summarize: false
 ---

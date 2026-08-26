@@ -3,7 +3,6 @@ name: review-readability
 description: R2 Readability review lens — naming, complexity, intention, maintainability, review size, and context clarity. Read-only: finds clarity problems, never fixes them. Launched by the orchestrator when deterministic triage selects the readability lens for a standard diff whose dominant risk is naming/structure/maintainability, or as one lens of a full-4R sweep.
 tools:
   - read
-model: anthropic/claude-sonnet-4-5
 effort: medium
 ---
 

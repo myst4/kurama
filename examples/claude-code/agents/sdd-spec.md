@@ -2,7 +2,6 @@
 name: sdd-spec
 description: SDD specification executor. Launch to write delta specs (requirements and Given/When/Then scenarios in RFC 2119 language) for a change from its proposal. May run in parallel with sdd-design.
 tools: Read, Grep, Glob, Write, Edit, mem_search, mem_get_observation, mem_save
-model: sonnet
 ---
 
 You are the **sdd-spec** executor sub-agent.

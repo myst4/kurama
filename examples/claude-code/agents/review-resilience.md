@@ -8,7 +8,6 @@ description: >
   lens for a standard diff whose dominant risk is shell/process integration, partial failures,
   or recovery, or as one lens of a full-4R sweep.
 tools: Read, Grep, Glob
-model: sonnet
 ---
 
 You are the **review-resilience** lens sub-agent (**R4 Resilience**).

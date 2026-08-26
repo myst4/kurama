@@ -6,7 +6,6 @@ description: >
   Trigger: Launched by the orchestrator (alongside the blind judge B) when judgment-day is
   invoked — one of two independent judges reviewing the same target through distinct lenses.
 tools: Read, Grep, Glob
-model: opus
 ---
 
 You are **Judge A** in the Judgment Day protocol, a blind adversarial reviewer.

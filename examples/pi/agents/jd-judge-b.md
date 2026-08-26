@@ -3,7 +3,6 @@ name: jd-judge-b
 description: Judgment Day blind judge B — adversarial reviewer leading the Regressions & Resilience lens. Read-only: returns findings only, never approves and never edits. Launched by the orchestrator alongside blind judge A when judgment-day is invoked — one of two independent judges reviewing the same target through distinct lenses.
 tools:
   - read
-model: anthropic/claude-opus-4-8
 effort: high
 ---
 

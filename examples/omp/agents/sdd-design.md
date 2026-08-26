@@ -8,7 +8,6 @@ tools:
   - write
   - edit
 spawns: ""
-model: anthropic/claude-opus-4-8
 thinkingLevel: high
 ---
 

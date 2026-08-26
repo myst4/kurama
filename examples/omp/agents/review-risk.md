@@ -4,7 +4,6 @@ description: R1 Risk review lens — security, privilege boundaries, data exposu
 tools:
   - read
 spawns: ""
-model: anthropic/claude-sonnet-4-5
 thinkingLevel: high
 read-summarize: false
 ---
