@@ -102,6 +102,19 @@ Read the project to understand:
   auto-run in either mode). Record the answer as `execution_mode` (default `supervised` when the
   user does not choose). Note for the user: `/sdd-ff` always fast-forwards its phases in `auto`
   regardless of this setting.
+- **Persona (explicit question — default `neutral`)**: Ask the user directly:
+  **"Conversation persona: `neutral` or `rioplatense`?"** The persona shapes the
+  orchestrator's CONVERSATION ONLY — specs, proposals, designs, task lists, commit
+  messages, and code comments keep the project's own language regardless of it.
+  - `neutral` (the default) is today's exact behavior: a project that does not opt in
+    changes in no way.
+  - `rioplatense` is a shipped preset — voseo, Latin American technical vocabulary, warm
+    and close in tone while staying technically precise.
+  `skills/_shared/personas.md` is the preset REGISTRY: offer what it lists (the two above
+  ship today) and record the preset name the user picked, so adding a persona stays a
+  file, never a code change. Record the answer as `persona` (default `neutral` when the
+  user does not choose). An explicit user instruction about language always wins over
+  this setting — the persona is a default, never an override.
 - **Kanban board (explicit question — same manner as TDD; default disabled)**: The optional
   Kanban module syncs a GitHub Projects (v2) board to the SDD cycle. Like TDD, install ≠
   activate and there are ZERO heuristics — an existing project or a configured `gh` NEVER
@@ -159,6 +172,8 @@ Based on what you detected, create the config when in `openspec` mode:
 schema: spec-driven
 
 execution_mode: supervised  # supervised | auto; supervised stops at human gates, auto continues unless blocked/verify FAIL
+
+persona: neutral  # neutral | rioplatense; conversation tone ONLY — artifacts keep the project's language. Preset registry: skills/_shared/personas.md
 
 context: |
   Tech stack: {detected stack}
@@ -227,7 +242,7 @@ kanban:
     xl: ""
 ```
 
-The `execution_mode`, `verify`, `tdd`, and `kanban` blocks above are the canonical schema from
+The `execution_mode`, `persona`, `verify`, `tdd`, and `kanban` blocks above are the canonical schema from
 `skills/_shared/openspec-convention.md`. Fill `test_command`/`build_command` with the
 commands the USER GAVE in Step 1 — record an empty string when the user said the project
 has none, and never substitute a guess for a missing answer; leave `coverage_threshold`
@@ -236,7 +251,9 @@ Step 1: `behavioral` when a test command was given, `static` when it was not, un
 user overrode it. Set `tdd.enabled` from the explicit question in Step 1 (default
 `false`); when the user opts in, fill `tdd.single_test_command` with the invocation they
 gave. Existing test files never flip `tdd.enabled` on their own. Set
-`execution_mode` from the explicit question in Step 1 (default `supervised`).
+`execution_mode` from the explicit question in Step 1 (default `supervised`), and `persona`
+from its explicit question (default `neutral`) — re-running init upserts these keys in
+place, it never appends a second copy.
 Set `kanban.enabled` from the explicit question in Step 1 (default `false`) — record
 `true` ONLY when the user opted in AND all three `gh` prerequisite checks passed; when
 enabled, fill `owner`, `repo`, `project_number`, `project_id`, `status_field_id`,
@@ -267,6 +284,7 @@ for the settings that steer the whole cycle:
 
 - `artifact_store.mode`: `engram | openspec | hybrid`
 - `execution_mode`: `supervised | auto` (chosen in Step 1)
+- `persona`: `neutral | rioplatense` (chosen in Step 1; conversation tone only — never reaches an artifact)
 - `compliance_mode`: `behavioral | static` (chosen in Step 1)
 - `test_command`, `build_command`, `coverage_threshold` (detected in Step 1)
 - `tdd.enabled`: `true | false` (from the explicit TDD question in Step 1 — the single switch for the optional TDD module)
@@ -317,6 +335,7 @@ Phase-specific fields to surface in `detailed_report` (adapt wording to the mode
 - **Stack**: {detected stack}
 - **Persistence**: {engram | openspec | hybrid}
 - **Execution mode**: {supervised | auto} — {user's answer to the explicit question}
+- **Persona**: {neutral | rioplatense} — {user's answer to the explicit question}
 - **Compliance mode**: {behavioral | static} — {test infra detected? one-line rationale}
 - **TDD**: {enabled | disabled} — {user's answer to the explicit question; single_test_command if enabled}
 - **Kanban**: {enabled | disabled} — {user's answer; when enabled: project_number + stage mapping + merge_method; when a `gh` prerequisite failed: which check and the fix command}

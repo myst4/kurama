@@ -212,7 +212,7 @@ one of them inherits the session's default model. Models rotate; pins rot — an
 agent without a `model` key keeps working when the user's provider or model
 lineup changes. To give specific agents a tiered model, add `model` to their
 frontmatter locally; the Model Assignments table in
-[`examples/claude-code/CLAUDE.md`](../examples/claude-code/CLAUDE.md) is the
+[`skills/_shared/model-assignments.md`](../skills/_shared/model-assignments.md) is the
 recommended split for anyone who wants that routing. The 9 SDD agents are
 unchanged from before; the 8 review-layer agents follow the tool routing below:
 
@@ -235,7 +235,7 @@ delegating to further sub-agents. The only review-layer agent that can write is
 Removing `examples/claude-code/agents/` is safe: a project without the agent
 files keeps working exactly as before, with the orchestrator resolving skills
 and models itself per the Model Assignments table in
-[`examples/claude-code/CLAUDE.md`](../examples/claude-code/CLAUDE.md). **The
+[`skills/_shared/model-assignments.md`](../skills/_shared/model-assignments.md). **The
 deterministic hooks are now installed automatically** by
 `setup.sh --agent claude-code` (both scopes, no prompt — this changed in Phase
 10b; see [docs/installation.md](installation.md#hooks-installed-automatically)

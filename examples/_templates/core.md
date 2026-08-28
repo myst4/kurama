@@ -74,7 +74,7 @@ A resolved mode of `none` is UNSUPPORTED — the mode was removed because a work
 
 ### Commands
 
-Phase skills (appear in autocomplete). All 9 install; the 4 planning phases are normally reached through `/sdd-new` or `/sdd-ff` rather than invoked directly, but they exist as skills and you MAY delegate any of them individually when resuming or re-running one phase:
+Phase skills (appear in autocomplete). The 9 core phases always install; `/sdd-learn` ships in the `optional` group, installed by default and dropped only by `install.sh --without optional`; the 4 planning phases are normally reached through `/sdd-new` or `/sdd-ff` rather than invoked directly, but they exist as skills and you MAY delegate any of them individually when resuming or re-running one phase:
 - `/sdd-init` → initialize SDD context; detects stack, bootstraps persistence. **Runs ONCE per project.** If the project is already initialized (settings bundle / `openspec/config.yaml` exists), NEVER launch it implicitly — not from `/sdd-new`, not to "refresh" anything. Re-run it ONLY on an explicit user request to change configuration ("re-corré el init", "activá TDD", "cambiá el kanban"); it upserts existing settings, never duplicates. If the project is NOT initialized, propose `/sdd-init` and wait for the user.
 - `/sdd-explore <topic>` → investigate an idea; reads codebase, compares approaches; no files created
 - `/sdd-propose` → write the change proposal, and classify the change `small` or `standard`
@@ -84,6 +84,9 @@ Phase skills (appear in autocomplete). All 9 install; the 4 planning phases are 
 - `/sdd-apply [change]` → implement tasks in batches; checks off items as it goes
 - `/sdd-verify [change]` → validate implementation against specs; reports CRITICAL / WARNING / SUGGESTION
 - `/sdd-archive [change]` → close a change and persist final state in the active artifact store
+- `/sdd-learn` → capture the cycle's learnings into the committed `MEMORY.md`; YOU invoke it right after `sdd-archive` returns, and on request. Optional module — if it does not resolve, skip the handoff silently.
+
+`MEMORY.md` (repo root) is the team's committed knowledge about THIS project: READ it at session start when it exists; `/sdd-learn` is its only writer.
 
 Meta-commands (type directly — YOU handle them; autocomplete visibility is harness-dependent):
 - `/sdd-new <change>` → start a new change by delegating exploration + proposal to sub-agents
@@ -94,14 +97,13 @@ Meta-commands (type directly — YOU handle them; autocomplete visibility is har
 
 ### SDD Session Protocol
 
-Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, an executor skill, or a natural-language equivalent ("use SDD to add X") — read `skills/_shared/orchestrator-sdd-protocol.md` and follow it. It is the canonical home for the three session-level procedures: the **Preflight** (resolving pace, artifact store, delivery, review budget), **Entry Routing** (a natural-language request enters at `/sdd-new`, never at a loose `sdd-apply`), and the **Automatic Mode Gatekeeper** (the per-phase validation that only applies when `execution_mode` is `auto`).
+Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, an executor skill, or a natural-language equivalent ("use SDD to add X") — read `skills/_shared/orchestrator-sdd-protocol.md` and follow it. It is the canonical home for the three session-level procedures: the **Preflight** (resolving pace, artifact store, delivery, review budget, and the session identity — persona and the user's name; resolving is NOT asking, and persisted settings satisfy it on their own), **Entry Routing** (a natural-language request enters at `/sdd-new`, never at a loose `sdd-apply`), and the **Automatic Mode Gatekeeper** (the per-phase validation that only applies when `execution_mode` is `auto`).
 
 Load it when a cycle starts. A session that never invokes SDD never needs it. To find it: the `_shared/` contracts live in this harness's shared-skills directory (see *State and Conventions*), normally inside a hidden config dir that `fd`/`rg` skip unless told to include hidden files (`fd -H`, `rg --hidden`). Check existence with Read or `test -f`, never a stderr-suppressed probe — a failed read is a broken check, not a missing file.
 
-Three rules that must hold even before you load it, because they decide whether you ask anything at all — and which pipeline runs:
-
-- **Persisted settings SATISFY the preflight.** If all four values resolve from `openspec/config.yaml` or the `sdd-init/{project}` bundle, do NOT ask — print a one-line status in the user's language and start. `sdd-init` already asked; re-asking answered questions is friction, not safety. Ask ONLY for values with no persisted answer, in one grouped prompt.
+Three rules that must hold even before you load it, because they decide how a request is routed — and which pipeline runs:
 - **Never enter at `sdd-apply`** because the user said "implement X". Planning artifacts must exist first; if they do not, propose `/sdd-new` or `/sdd-ff` and stop.
+- **Session identity is conversation, NEVER artifacts.** `persona` (`neutral` when absent — today's exact behavior, and it never forces a question) sets the register of YOUR replies only: specs, proposals, designs, tasks, commit messages and code comments keep the project's language, always. An explicit user instruction beats it — a default, never an override. The user's name resolves per-machine from git, is never written to a committed file, and is used sparingly: greeting, gates, cycle summary. Full rules: *Session identity* in the protocol.
 - **SDD owns the work lifecycle.** When this orchestrator is installed, every feature, bug, or refactor request — natural language included ("let's build X", "hagamos este issue") — enters the SDD pipeline, no matter what other process skills are present in the session. External process skills (superpowers' `brainstorming`, `writing-plans`, or any skill that advertises itself as mandatory for "any creative work") are **companions inside SDD phases**, never replacement pipelines: brainstorming-shaped work belongs inside `sdd-explore`/`sdd-propose`, plan-shaped work inside `sdd-tasks`, and their artifacts are SDD artifacts, not a parallel spec tree. Such skills defer to CLAUDE.md/AGENTS.md by their own stated rules — this file is that instruction. If one demands to run first, run the SDD phase and apply the skill's discipline within it.
 
 ### TDD Module (optional)
@@ -163,30 +165,15 @@ Delegated agents are phase workers, not permanent residents. When a delegated ag
 
 ### Sub-Agent Launch Pattern
 
-ALL sub-agent launch prompts that involve reading, writing, or reviewing code MUST include pre-resolved **compact rules** from the skill registry. Follow the **Skill Resolver Protocol** (see `_shared/skill-resolver.md` in the skills directory).
+Before the FIRST delegation of a session, read `_shared/skill-resolver.md` (see *State and Conventions*) and follow it. It is the canonical home for the whole protocol: obtaining the skill registry, matching skills by code context AND task context, the `## Project Standards` block, and the token budget. Resolve ONCE per session and cache the result.
 
-The orchestrator resolves skills from the registry ONCE (at session start or first delegation), caches the compact rules, and injects matching rules into each sub-agent's prompt.
+Three rules that constrain YOU, so they hold before you load it:
 
-Orchestrator skill resolution (do once per session):
-1. `mem_search(query: "skill-registry", project: "{project}")` → `mem_get_observation(id)` for full registry content
-2. Fallback: read `.kurama/skill-registry.md` if engram not available (verify with `test -f` or Read — a failed read is not a missing registry, and never use a finder: `.kurama/` is gitignored, so `fd`/`rg` skip it even with hidden flags)
-3. Cache the **Compact Rules** section and the **User Skills** trigger table
-4. If no registry exists, warn user and proceed without project-specific standards
+- **Every launch that reads, writes, or reviews code carries resolved skills.** Purely mechanical delegations ("run this test command") are the only exemption.
+- **Pass PATHS, not pasted rule text.** Sub-agents read the full SKILL.md themselves; the registry's pre-digested compact rules are a lossy opt-in for when the context budget is tight, never the default.
+- **A `skill_resolution` other than `injected` means YOU dropped context** (usually compaction). On `fallback-registry`, `fallback-path`, or `none`: re-read the registry immediately, inject in every subsequent delegation, and say so. Never ignore it.
 
-For each sub-agent launch:
-1. Match relevant skills by **code context** (file extensions/paths the sub-agent will touch) AND **task context** (what actions it will perform — review, PR creation, testing, etc.)
-2. Copy matching compact rule blocks into the sub-agent prompt as `## Project Standards (auto-resolved)`
-3. Inject BEFORE the sub-agent's task-specific instructions
-
-**Key rule**: inject compact rules TEXT, not paths. Sub-agents do NOT read SKILL.md files or the registry — rules arrive pre-digested. This is compaction-safe because each delegation re-reads the registry if the cache is lost.
-
-### Skill Resolution Feedback
-
-After every delegation that returns a result, check the `skill_resolution` field:
-- `injected` → all good, skills were passed correctly
-- `fallback-registry`, `fallback-path`, or `none` → skill cache was lost (likely compaction). Re-read the registry immediately and inject compact rules in all subsequent delegations.
-
-This is a self-correction mechanism. Do NOT ignore fallback reports — they indicate the orchestrator dropped context.
+The registry is `mem_search(query: "skill-registry", project: "{project}")` → `mem_get_observation(id)`, falling back to `.kurama/skill-registry.md`. Check that file with `test -f` or Read, never a finder — `.kurama/` is gitignored, so `fd`/`rg` skip it even with hidden flags. No registry: warn and proceed without project standards.
 
 ### Sub-Agent Context Protocol
 
@@ -196,7 +183,7 @@ Sub-agents get a fresh context with NO memory. YOU control what reaches them.
 
 - **Read context**: you search engram (`mem_search`) for relevant prior context and pass it in the prompt. The sub-agent does NOT search engram itself.
 - **Write context**: the sub-agent MUST save significant discoveries, decisions, or bug fixes via `mem_save` BEFORE returning — it has the full detail, you do not. Always add to the prompt: `"If you make important discoveries, decisions, or fix bugs, save them to engram via mem_save with project: '{project}'."`
-- **Skills**: you resolve compact rules from the registry and inject them as `## Project Standards (auto-resolved)`. Sub-agents never read SKILL.md files or the registry — rules arrive pre-digested.
+- **Skills**: resolved and injected per *Sub-Agent Launch Pattern* above — paths by default, never a second scheme.
 
 #### SDD Phases
 

@@ -48,14 +48,69 @@ The four values (when something does need asking):
 groups in ONE call so they render as a single interactive prompt — never four separate
 calls, never the menu pasted as chat text. On harnesses without that primitive, ask ONE
 grouped text question covering the same four groups. Match the user's conversation
-language and active persona for the labels: this UI is orchestrator conversation, not a
-technical artifact. Never show internal codes or canonical values in the UI; map the
+language and the resolved persona (*Session identity* below) for the labels: this UI is
+orchestrator conversation, not a technical artifact. Never show internal codes or canonical values in the UI; map the
 chosen labels to canonical values internally after the prompt returns.
 
 **Precedence.** A value the user chose THIS session (grouped prompt or explicit
 override) wins over the persisted one, for this session only. Persisted settings SATISFY
 the preflight on their own — that is the point of `sdd-init`. Cache the resolved block
 for the session and forward the four values in every phase prompt.
+
+### Session identity (resolved, never asked)
+
+Alongside the four values, the Preflight resolves two identity values. Neither is a fifth
+question: they NEVER enter the grouped prompt, never block, and never gate a phase. An
+unresolved one degrades silently — `neutral`, or no name at all. The rule above stands
+unchanged: when the four values resolve from the persisted settings, the session starts
+without asking anything, whatever these two resolve to.
+
+**`persona`** — read the `persona` key from the SAME settings home the four values came from
+(`openspec/config.yaml`, or the `sdd-init/{project}` settings bundle in engram mode).
+
+- **Absent → `neutral`, and `neutral` means DO NOTHING.** Do not read
+  `skills/_shared/personas.md`, do not mention personas, do not add a persona line to the
+  status print, do not adopt any voice. A session whose settings carry no `persona` key
+  behaves EXACTLY as it did before the key existed — that equivalence is the contract.
+- **`persona: neutral` written explicitly** → identical to absent. Same no-op path, same
+  output; the explicit value buys nothing but documentation.
+- **A known preset** → read `skills/_shared/personas.md` and follow that preset's section,
+  including its two boundaries. Read the file ONLY in this case.
+- **An unknown value** → fall back to `neutral` and say so once, in one line ("`persona: X`
+  is not in `_shared/personas.md` — continuing on neutral"). Never fail the preflight, never
+  ask the user to fix it, never guess the nearest preset. The config is committed: a typo in
+  it must not break the session for the whole team.
+- **It is a default, not an override.** A voice the user's own environment already imposes —
+  a Claude Code output style, `gentle-pi`, a project `AGENTS.md` — outranks this setting, and
+  an explicit instruction in the conversation outranks both. Full ladder: `personas.md` →
+  *Never an override*.
+- The settings home is the only source: no per-harness default persona, no inference from
+  the language the user happens to write in, no persona in `.kurama/`.
+- A persona never selects the LANGUAGE of a reply — the orchestrator's Language Domain
+  Contract does, and the user's latest message decides. The persona shapes register and
+  vocabulary inside that language, on the user-facing half only.
+
+**The user's name** — resolve ONCE at session start, stopping at the first non-empty answer:
+
+1. `git config user.name`
+2. `gh api user --jq '.name // .login'` — ONLY when step 1 came back empty. It is a network
+   call: never run it first, never run it when step 1 answered, never let it block the
+   session if it hangs or `gh` is unauthenticated (treat that as empty).
+3. Nothing. No name is a NORMAL outcome, not a failure: address the user without one, and
+   never ask them for it.
+
+**Why it is not a config key.** `openspec/config.yaml` is committed and shared. A name
+written there greets all three teammates as whoever ran `sdd-init`. `git config user.name` is
+already per-machine, per-user, costs no network call, and every contributor has it set.
+Never write the resolved name into a committed file — not `openspec/`, not an artifact, not a
+commit message.
+
+**Use it sparingly**: the greeting, a human gate, the summary at the end of a cycle. Not in
+every message, not inside an artifact. A name in every turn reads as a tic, not as attention.
+
+**Neither value is forwarded into phase prompts.** They are cached for the session like the
+four values, but phases exist to produce artifacts, and artifacts are outside a persona's
+scope (`personas.md` → *Conversation only*).
 
 ### Artifact existence checks (fail-loud)
 
