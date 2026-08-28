@@ -157,7 +157,7 @@ remove_engram_from_config() {
                 skip && /^\[/ { skip=0 }
                 !skip { print }
             ' "$file")"
-            tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
+            tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; UNINSTALL_FAILED=1; return 0; }
             cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
             printf '%s\n' "$stripped" > "$tmp"
             mv "$tmp" "$file"
@@ -177,8 +177,8 @@ remove_engram_from_config() {
                 | (if (.mcpServers | type) == "object" and (.mcpServers | length) == 0 then del(.mcpServers) else . end)
                 | (if (.mcp | type) == "object" and (.mcp | length) == 0 then del(.mcp) else . end)
                 | (if (.servers | type) == "object" and (.servers | length) == 0 then del(.servers) else . end)
-            ' "$file") || { print_warn "failed to clean $file"; return 0; }
-            tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
+            ' "$file") || { print_warn "failed to clean $file"; UNINSTALL_FAILED=1; return 0; }
+            tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; UNINSTALL_FAILED=1; return 0; }
             cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
             printf '%s\n' "$cleaned" > "$tmp"
             mv "$tmp" "$file"
@@ -230,7 +230,7 @@ remove_tui_plugin_from_config() {
             (if type == "string"
              then endswith("tui-plugins/kurama-logo.tsx") else false end) | not)))
     ' "$file") || { print_warn "failed to clean $file"; UNINSTALL_FAILED=1; return 0; }
-    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
+    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; UNINSTALL_FAILED=1; return 0; }
     cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
     printf '%s\n' "$cleaned" > "$tmp"
     mv "$tmp" "$file"
@@ -261,7 +261,7 @@ strip_markers_from_prompt() {
         $0 == e { skip=0; next }
         !skip   { print }
     ' "$file")"
-    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
+    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; UNINSTALL_FAILED=1; return 0; }
     cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
     printf '%s\n' "$stripped" > "$tmp"
     mv "$tmp" "$file"
@@ -304,8 +304,8 @@ remove_kurama_agents_from_opencode_config() {
         | .agent = ($a | with_entries(select(
             ((.key | startswith("sdd-")) or (.key == "kurama-orchestrator")) | not)))
         | if (.agent | length) == 0 then del(.agent) else . end
-    ' "$file") || { print_warn "failed to clean $file"; return 0; }
-    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; return 0; }
+    ' "$file") || { print_warn "failed to clean $file"; UNINSTALL_FAILED=1; return 0; }
+    tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; UNINSTALL_FAILED=1; return 0; }
     cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
     printf '%s\n' "$cleaned" > "$tmp"
     mv "$tmp" "$file"
@@ -679,6 +679,102 @@ EOF
         fi
     fi
 
+    # jq-optional + integrity invariant (issue #71): the same honesty guard, one
+    # config over. Kurama MERGES into two more files it does not own — the
+    # opencode.json carrying its sdd-* agent block, and the JSON Engram client
+    # configs carrying the "engram" MCP entry — and neither strip can run without
+    # jq, or over a config that no longer parses. Both used to answer that by
+    # warning and returning 0, so the files[] sweep below still deleted the sdd
+    # prompt files those agents point at, the config kept every dead Kurama entry,
+    # and the run exited 0 "Done." Probe both here, before a single file is
+    # removed, and refuse the whole target exactly as the two guards above do.
+    # The Codex config.toml is not probed: its Engram block is stripped with the
+    # same awk setup wrote it with, which needs neither jq nor valid JSON.
+    local ofile opath blocked_agents="" oc_configs_pf
+    oc_configs_pf="$(manifest_json_array "$manifest" "opencode_configs")"
+    while IFS= read -r ofile; do
+        [ -n "$ofile" ] || continue
+        case "$ofile" in
+            /*) opath="$(normalize_abs_path "$ofile")" ;;
+            *)  opath="$(normalize_abs_path "$dir_abs/$ofile")" ;;
+        esac
+        [ -f "$opath" ] || continue
+        # Textual probe, not a JSON parse: setup.sh merges its agents under keys
+        # that are either "sdd-"-prefixed or exactly "kurama-orchestrator". No
+        # match means nothing of ours is registered and there is nothing to strip.
+        grep -q '"sdd-' "$opath" 2>/dev/null \
+            || grep -qF '"kurama-orchestrator"' "$opath" 2>/dev/null \
+            || continue
+        # With jq AND a file that parses, the strip will succeed — nothing to
+        # block. Only jq-absent, or jq-present-but-unparseable, reach here.
+        if [ "$have_jq" -eq 1 ] && jq -e . "$opath" >/dev/null 2>&1; then
+            continue
+        fi
+        blocked_agents="${blocked_agents}$opath
+"
+    done <<EOF
+$oc_configs_pf
+EOF
+
+    local efile epath blocked_engram="" engram_pf
+    engram_pf="$(manifest_json_array "$manifest" "engram_mcp")"
+    while IFS= read -r efile; do
+        [ -n "$efile" ] || continue
+        case "$efile" in
+            *.toml) continue ;;
+            /*)     epath="$(normalize_abs_path "$efile")" ;;
+            *)      epath="$(normalize_abs_path "$dir_abs/$efile")" ;;
+        esac
+        [ -f "$epath" ] || continue
+        # Textual probe: the registration is written as an "engram" key under
+        # mcpServers / mcp / servers. No match, nothing of ours to strip.
+        grep -qF '"engram"' "$epath" 2>/dev/null || continue
+        if [ "$have_jq" -eq 1 ] && jq -e . "$epath" >/dev/null 2>&1; then
+            continue
+        fi
+        blocked_engram="${blocked_engram}$epath
+"
+    done <<EOF
+$engram_pf
+EOF
+
+    if [ -n "$blocked_agents" ] || [ -n "$blocked_engram" ]; then
+        local merged_why
+        if [ "$have_jq" -eq 1 ]; then
+            merged_why="a merged config is not valid JSON"
+        else
+            merged_why="jq not found"
+        fi
+        if $DRY_RUN; then
+            print_warn "$label: $merged_why — a real run would REFUSE this target"
+            print_info "Kurama's entries cannot be stripped from a config it merged into"
+        else
+            print_error "$label: $merged_why — cannot strip Kurama's entries from a merged config"
+            print_info "Nothing was removed. Deleting the installed files while the config"
+            print_info "still carries Kurama's entries leaves it pointing at things that are"
+            print_info "gone, under a summary that claimed a clean uninstall."
+            print_info "Install jq / repair the JSON and re-run, or edit these by hand first:"
+            while IFS= read -r opath; do
+                if [ -n "$opath" ]; then
+                    print_info "  the \"sdd-*\" agents (and \"kurama-orchestrator\") under .agent in:"
+                    print_info "    $opath"
+                fi
+            done <<EOF
+$blocked_agents
+EOF
+            while IFS= read -r epath; do
+                if [ -n "$epath" ]; then
+                    print_info "  the \"engram\" entry under mcpServers / mcp / servers in:"
+                    print_info "    $epath"
+                fi
+            done <<EOF
+$blocked_engram
+EOF
+            UNINSTALL_FAILED=1
+            return 0
+        fi
+    fi
+
     # The lexical filter above cannot see a symlinked INTERMEDIATE DIRECTORY:
     # normalize_abs_path is textual, but rm resolves that component. In project
     # scope both halves come from the target repo — git versions symlinks, so
@@ -694,10 +790,35 @@ EOF
         tbase="${rel##*/}"
         tdir="${rel%/*}"
         if [ "$tdir" = "$rel" ]; then tdir="."; fi
+        # A recorded entry has to name a FILE. "dir/" leaves an empty basename and
+        # "a/.." a dot one, and both then aimed `rm -f` at a DIRECTORY: rm refuses,
+        # and with errexit armed for this loop that aborted the whole run partway
+        # through — one crafted receipt line buying a half-done uninstall. Refuse
+        # the entry the way the containment filter does, and carry on.
+        case "$tbase" in
+            ''|.|..)
+                print_warn "$label: refusing receipt entry that names no file: $rel"
+                unsafe=$((unsafe + 1))
+                continue
+                ;;
+        esac
         tparent="$(cd -P "$dir/$tdir" 2>/dev/null && pwd -P)" || tparent=""
-        # No parent directory on disk means nothing recorded there is left to
-        # remove — not a rejection, just an entry that is already gone.
-        [ -n "$tparent" ] || continue
+        if [ -z "$tparent" ]; then
+            # A parent that is not THERE means nothing recorded under it is left
+            # to remove — not a rejection, just an entry that is already gone.
+            # A parent that IS there but cannot be entered is the opposite: the
+            # file is still on disk, `cd -P` merely cannot reach it, and the old
+            # blanket `continue` skipped it in silence — files left behind under
+            # a "N file(s) removed" that had counted none of them, and a "Done."
+            # (The -d test answers "no" when the unenterable component is an
+            # INTERMEDIATE one, since stat cannot traverse it either; that case
+            # stays as quiet as it was.)
+            if [ -d "$dir/$tdir" ]; then
+                print_error "$label: cannot enter $(normalize_abs_path "$dir_abs/$tdir") — $rel cannot be removed"
+                UNINSTALL_FAILED=1
+            fi
+            continue
+        fi
         target="$tparent/$tbase"
         if ! path_within_root "$root_phys" "$target"; then
             print_warn "$label: refusing receipt entry that resolves outside $root_phys: $rel"
@@ -726,7 +847,7 @@ EOF
     # recorded has still been removed, but the run must not look identical to an
     # untampered one from the outside.
     if [ "$unsafe" -gt 0 ]; then
-        print_warn "$label: $unsafe receipt entry/entries refused — a receipt may only name paths under $root_phys"
+        print_warn "$label: $unsafe receipt entry/entries refused — a receipt may only name files under $root_phys"
         UNINSTALL_FAILED=1
     fi
 

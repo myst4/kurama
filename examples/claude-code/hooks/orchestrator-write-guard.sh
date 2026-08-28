@@ -42,9 +42,13 @@ if [ ! -t 0 ]; then
   payload="$(cat)"
 fi
 
-# --- portable JSON string field extractor -----------------------------------
-# json_str <field> : prints the first matching string value found in $payload.
-# Prefers jq; falls back to a grep/sed scan when jq is unavailable.
+# --- portable JSON string field extractors ----------------------------------
+# json_str <field>      : first string value for <field> found ANYWHERE in the
+#                         payload — the right tool for a field that lives inside
+#                         tool_input (file_path).
+# json_root_str <field> : the string value of a ROOT-level <field> and nothing
+#                         else — see the subagent pass-through below for why.
+# Both prefer jq and fall back to a POSIX scan when jq is unavailable.
 json_str() {
   field="$1"
   [ -n "$payload" ] || return 0
@@ -61,6 +65,58 @@ json_str() {
     | sed -e "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
 }
 
+json_root_str() {
+  field="$1"
+  [ -n "$payload" ] || return 0
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$payload" \
+      | jq -r --arg f "$field" '.[$f]? | strings' 2>/dev/null \
+      | head -n 1
+    return 0
+  fi
+  # No jq: split the payload on the quote character and walk the pieces — the scan
+  # a character loop would do, at C speed (this hook runs on EVERY tool call and a
+  # Write payload can be megabytes). Pieces OUTSIDE strings carry the brace/bracket
+  # depth; pieces inside them carry none, so nothing within a string — a nested key,
+  # or file CONTENT that spells one out — can move it. "<field>" is accepted only as
+  # a key of the ROOT object (depth 1), wherever it sits in the KEY ORDER, and only
+  # a string value is returned: null, a number or an object reads as absent, exactly
+  # as the jq branch above returns it. A quote preceded by an odd number of
+  # backslashes is escaped and does not end its string. Escape sequences inside the
+  # value are NOT expanded — the fields read this way are a token and a path. awk
+  # seeds every variable to 0/"" on first use, so no BEGIN block is needed.
+  printf '%s' "$payload" | awk -v field="$field" '
+    {
+      n = split($0, seg, "\"")
+      for (k = 1; k <= n; k++) {
+        s = seg[k]
+        if (instr) {
+          if (depth == 1) { str = str s }        # only a root string can ever matter
+        } else {
+          if (pend == 2) {                       # key matched: a colon must follow
+            if (s ~ /^[ \t\r\n]*:[ \t\r\n]*$/) { pend = 1 }
+            else if (s !~ /^[ \t\r\n]*$/)      { pend = 0 }
+          } else if (pend == 1 && s !~ /^[ \t\r\n]*$/) { pend = 0 }
+          t = s; depth += gsub(/[[{]/, "", t)
+          t = s; depth -= gsub(/[]}]/, "", t)
+        }
+        if (k == n) { break }                    # no quote closes the last piece
+        if (instr && match(s, /\\+$/) && RLENGTH % 2 == 1) {
+          if (depth == 1) { str = str "\"" }     # escaped quote: the string goes on
+          continue
+        }
+        if (instr) {
+          instr = 0
+          if (pend == 1) { printf "%s", str; exit 0 }
+          pend = (depth == 1 && str == field) ? 2 : 0
+        } else {
+          instr = 1; str = ""
+        }
+      }
+    }
+  '
+}
+
 # --- subagent pass-through ---------------------------------------------------
 # PreToolUse hooks fire for EVERY tool call in the session, including tool
 # calls made inside subagents. The hook stdin carries `agent_id`/`agent_type`
@@ -70,34 +126,32 @@ json_str() {
 # stop the MAIN-thread orchestrator from writing code inline.
 #
 # HARDENED extraction: agent_id is read at the JSON ROOT only — never from
-# anywhere in the payload — so file CONTENT containing "agent_id" (e.g. a Write
-# of this very script) can never spoof the check. jq anchors to the root key;
-# the no-jq fallback searches only the payload prefix BEFORE "tool_input"
-# (agent metadata lives at the root; user-controlled content lives inside
-# tool_input).
+# anywhere else in the payload — so an "agent_id" carried inside tool_input (the
+# user-controlled half: a nested key, or file CONTENT that spells one out) can
+# never spoof the check. json_root_str enforces that on BOTH halves: jq indexes
+# the root object directly, and the no-jq fallback walks the payload tracking
+# brace depth and accepts the key only at depth 1.
+#
+# Neither half depends on KEY ORDER. JSON does not guarantee one, and the
+# previous fallback got its root-anchoring by scanning only the prefix before
+# "tool_input" — so a payload that serialized tool_input FIRST read as an empty
+# agent_id and the guard blocked every delegated writer on a jq-less host.
 #
 # ASSUMPTION (fail-open by design): if a future Claude Code build adds
 # agent_id to MAIN-thread payloads, this guard neutralizes silently.
 # Re-verify the hooks contract on Claude Code upgrades.
-agent_id=""
-if [ -n "$payload" ]; then
-  if command -v jq >/dev/null 2>&1; then
-    agent_id="$(printf '%s' "$payload" | jq -r '.agent_id // empty' 2>/dev/null)"
-  else
-    agent_id="$(printf '%s' "$payload" \
-      | tr -d '\n' \
-      | sed 's/"tool_input".*//' \
-      | grep -o '"agent_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
-      | head -n 1)"
-  fi
-fi
+agent_id="$(json_root_str agent_id)"
 if [ -n "$agent_id" ]; then
   exit 0
 fi
 
 # --- resolve project root ---------------------------------------------------
+# cwd is a ROOT field of the hooks contract, so it is read as one: a tool_input
+# that carries its own "cwd" (several tools take one) must not redirect the root
+# the exemptions below are computed against — an unanchored read there resolves
+# a root the target file is not under, and the guard allows the write.
 project_root="${CLAUDE_PROJECT_DIR:-}"
-[ -n "$project_root" ] || project_root="$(json_str cwd)"
+[ -n "$project_root" ] || project_root="$(json_root_str cwd)"
 [ -n "$project_root" ] || project_root="$PWD"
 root="${project_root%/}"
 
