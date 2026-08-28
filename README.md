@@ -4,7 +4,7 @@
 
 **A lightweight, multi-harness Spec-Driven Development framework for AI coding agents.**
 
-24 pure-Markdown skills · 5 supported harnesses · zero runtime, zero dependencies
+24 pure-Markdown skills · 5 supported harnesses · no build step, no runtime
 
 </div>
 
@@ -334,15 +334,17 @@ automated PR checks.
 ## Relationship with gentle-ai
 
 Kurama is **actively maintained** as the standalone, lightweight
-multi-harness SDD framework — the pure-Markdown, zero-dependency way to install
-these skills into any of the five supported agents.
+multi-harness SDD framework — the pure-Markdown way to install these skills into
+any of the five supported agents: no build step and no runtime to install, with
+`jq` optional and needed only for the JSON-merging extras (the Claude Code hooks
+block, the Engram MCP registration, OpenCode's `tui.json`).
 
 [`gentle-ai`](https://github.com/Gentleman-Programming/gentle-ai) is a separate,
 higher-level distribution: a managed installer (Go binary) that bundles these
 skills together with MCP configuration, persona injection, automatic updates, and
 other conveniences. The two are complementary. Use this repository when you want
-the skills directly, full control over what lands where, and a dependency-free
-setup you can vendor into your own tooling; reach for `gentle-ai` when you want a
+the skills directly, full control over what lands where, and a bash-only setup
+you can vendor into your own tooling; reach for `gentle-ai` when you want a
 batteries-included, self-updating installer.
 
 ## License

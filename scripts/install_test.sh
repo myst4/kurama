@@ -3462,10 +3462,11 @@ test_archive_gate_override_env_var_opens_the_gate() {
 }
 
 test_nojq_hooks_decide_the_same_way_without_jq() {
-    # Both hooks carry their own json_str fallback for a jq-less host, and the
-    # write guard's agent_id extraction takes a DIFFERENT code path there (a
-    # prefix scan instead of a jq root anchor). A hook that fails open without jq
-    # would guard nothing on exactly the machines this project promises to work on.
+    # Both hooks carry their own awk fallback for a jq-less host, and the write
+    # guard's agent_id extraction takes a DIFFERENT code path there — a depth-aware
+    # scan that accepts the key only at brace depth 1, where the jq half indexes the
+    # root object directly. A hook that fails open without jq would guard nothing on
+    # exactly the machines this project promises to work on.
     local bindir="$TEST_TMPDIR/nojq-bin"
     make_nojq_farm "$bindir"
     assert_farm_has_no_jq "$bindir" || return 1
@@ -3482,7 +3483,7 @@ test_nojq_hooks_decide_the_same_way_without_jq() {
         | PATH="$bindir" bash "$WRITE_GUARD_HOOK" > /dev/null 2>&1 || status=$?
     assert_eq "0" "$status" "without jq a subagent write must still pass" || return 1
 
-    # The prefix scan is the no-jq half of the root-anchoring: an agent_id inside
+    # Root-anchoring has to hold on the no-jq half too: an agent_id inside
     # tool_input is user-controlled and must not read as subagent context.
     local spoof
     spoof=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/widget.ts","meta":{"agent_id":"forged"}}}' "$repo")
@@ -3646,9 +3647,11 @@ MD
 # ============================================================================
 # Tests — jq-less host (the awk fallbacks actually work)
 #
-# Kurama advertises itself as zero-dependency, but every restricted-PATH farm in
-# this file linked jq in, so the awk fallbacks were never executed here. They are
-# also never executed on a developer's Mac (macOS ships jq in /usr/bin since 15),
+# Kurama needs no build step and no runtime, and jq is optional — it is needed only
+# for the JSON-merging extras (the settings.json hooks block, the Engram MCP
+# registration, opencode's tui.json). But every restricted-PATH farm in this file
+# linked jq in, so the awk fallbacks were never executed here. They are also never
+# executed on a developer's Mac (macOS ships jq in /usr/bin since 15),
 # which is exactly how two defects shipped: manifest_skill_lines resolved 0 skills
 # from the pretty-printed manifest, and the receipt array parser walked past a
 # single-line "key": [] into the NEXT key. The farm below is the same idiom as the
@@ -7728,6 +7731,572 @@ run_test "setup.sh fails loud on a clone missing skills/_shared (no partial rece
 run_test "uninstall refuses a corrupt settings.json with jq present (hooks survive)" test_i_uninstall_refuses_corrupt_settings_with_jq_present
 run_test "install.sh --agent custom with no --path (non-TTY) refuses, installs nothing" test_i_install_custom_without_path_refuses
 run_test "uninstall aborts loud on a receipt files[] entry that is a directory (EISDIR)" test_i_uninstall_directory_entry_aborts_loud
+
+echo ""
+
+# ============================================================================
+# ===== UNIT-J (issue #70) =====
+# The three jq asterisks the audit left standing. Two are the write guard's
+# agent_id extraction — the no-jq path root-anchored itself by assuming a key
+# ORDER that JSON does not guarantee, and the rewrite that drops that assumption
+# must not trade away the anti-spoofing property it was there for. The third is
+# setup.sh's closing summary claiming an Engram MCP registration that a jq-less
+# run never made.
+# ============================================================================
+
+# An Edit payload for file $2 in project $1, with the ROOT-level agent_id $3
+# serialized AFTER tool_input. Same object as edit_payload's three-argument form
+# — JSON object keys are unordered, so both spellings are the same payload and
+# the guard has to decide the same way about them (#70).
+edit_payload_agent_last() {
+    local root="$1" file="$2" agent="$3"
+    printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s","old_string":"a","new_string":"b"},"agent_id":"%s"}' \
+        "$root" "$file" "$agent"
+}
+
+# Echo the write guard's exit status over payload $2. With $1 empty the ambient
+# PATH is used (jq present); with $1 naming a jq-less farm, PATH is REPLACED by
+# it so the hook takes its awk/grep fallback. Echoes rather than returns because
+# a blocking hook exits 2, which a bare call would turn into an aborted body now
+# that errexit really reaches it.
+write_guard_status() {
+    local bindir="$1" payload="$2" status=0
+    if [ -n "$bindir" ]; then
+        printf '%s' "$payload" | PATH="$bindir" bash "$WRITE_GUARD_HOOK" > /dev/null 2>&1 || status=$?
+    else
+        printf '%s' "$payload" | bash "$WRITE_GUARD_HOOK" > /dev/null 2>&1 || status=$?
+    fi
+    printf '%s' "$status"
+}
+
+# Fail unless the write guard BLOCKS payload $2 under BOTH parsers — ambient jq
+# and the jq-less farm at $1. $3 labels the payload shape in the message. The
+# payload is validated as JSON first: an unparseable one makes jq's extractor
+# return empty, which blocks for the wrong reason and would pass vacuously.
+assert_write_guard_blocks_both_parsers() {
+    local bindir="$1" payload="$2" label="$3"
+    if ! printf '%s' "$payload" | jq -e . > /dev/null 2>&1; then
+        echo "the $label spoof payload is not valid JSON — it would block for the wrong reason"
+        return 1
+    fi
+    assert_eq "2" "$(write_guard_status "" "$payload")" \
+        "with jq the $label agent_id spoof must not bypass the guard" || return 1
+    assert_eq "2" "$(write_guard_status "$bindir" "$payload")" \
+        "without jq the $label agent_id spoof must not bypass the guard" || return 1
+    return 0
+}
+
+test_j_write_guard_decides_the_same_way_whatever_the_key_order() {
+    # #70.1: the no-jq extraction root-anchored agent_id with
+    # `sed 's/"tool_input".*//'` and a grep over what was left — which is only the
+    # root when agent_id happens to be serialized BEFORE tool_input. JSON object key
+    # order is not guaranteed, so the same subagent payload with the keys the other
+    # way round yielded an EMPTY agent_id: the guard read a delegated writer as the
+    # main thread and blocked it. It fails closed, so it is not a hole — but on a
+    # jq-less box it deadlocks every delegated writer, sdd-apply included, and the
+    # deadlock is invisible to a suite that only ever sends one key order.
+    #
+    # The decision must come from the payload's CONTENT under either parser, so all
+    # four combinations of {key order} x {jq, no jq} are exercised and all four must
+    # ALLOW the subagent write.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/keyorder"
+    make_active_cycle_repo "$repo"
+
+    # Precondition, so "allowed in all four" cannot pass on a guard that allows
+    # everything: the SAME write with no agent_id at all must be blocked by both
+    # parsers. Without this, deleting the subagent check entirely stays green.
+    local main_payload
+    main_payload="$(edit_payload "$repo" "src/widget.ts")"
+    assert_eq "2" "$(write_guard_status "" "$main_payload")" \
+        "precondition: with jq a main-thread write must still be blocked" || return 1
+    assert_eq "2" "$(write_guard_status "$bindir" "$main_payload")" \
+        "precondition: without jq a main-thread write must still be blocked" || return 1
+
+    local agent_first agent_last
+    agent_first="$(edit_payload "$repo" "src/widget.ts" "agent_7")"
+    agent_last="$(edit_payload_agent_last "$repo" "src/widget.ts" "agent_7")"
+
+    assert_eq "0" "$(write_guard_status "" "$agent_first")" \
+        "jq, agent_id BEFORE tool_input: a subagent write must be allowed" || return 1
+    assert_eq "0" "$(write_guard_status "" "$agent_last")" \
+        "jq, agent_id AFTER tool_input: a subagent write must be allowed" || return 1
+    assert_eq "0" "$(write_guard_status "$bindir" "$agent_first")" \
+        "no jq, agent_id BEFORE tool_input: a subagent write must be allowed" || return 1
+    assert_eq "0" "$(write_guard_status "$bindir" "$agent_last")" \
+        "no jq, agent_id AFTER tool_input: a subagent write must be allowed" || return 1
+    return 0
+}
+
+test_j_write_guard_still_refuses_a_spoofed_agent_id_inside_tool_input() {
+    # #70.1's other half: the property the key-order fix must NOT trade away.
+    # agent_id is read at the JSON ROOT only, because everything under tool_input is
+    # the model's own content — a Write whose text happens to contain "agent_id"
+    # (this very hook, a fixture, a doc) must never read as subagent context and
+    # unlock the guard. The old prefix scan got that right by accident of cutting at
+    # "tool_input"; a rewrite that walks the payload has to get it right on purpose.
+    #
+    # The three shapes below are the ones a brace-depth walk gets wrong when it
+    # ignores STRING context: a plainly nested object, an agent_id inside a quoted
+    # string value, and a string carrying unbalanced closing braces that fake an
+    # early return to depth 1. All three must BLOCK, under jq and under the fallback.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/spoof"
+    make_active_cycle_repo "$repo"
+
+    # Precondition: an honest ROOT agent_id in the same repo IS allowed, so these
+    # three blocks are the guard rejecting the spoof and not the guard being deaf.
+    assert_eq "0" "$(write_guard_status "" "$(edit_payload "$repo" "src/widget.ts" "agent_7")")" \
+        "precondition: a real root agent_id must be honoured with jq" || return 1
+    assert_eq "0" "$(write_guard_status "$bindir" "$(edit_payload "$repo" "src/widget.ts" "agent_7")")" \
+        "precondition: a real root agent_id must be honoured without jq" || return 1
+
+    local nested in_string brace_bait
+    nested='{"session_id":"s1","cwd":"'"$repo"'","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/widget.ts","meta":{"agent_id":"forged"}}}'
+    in_string='{"session_id":"s1","cwd":"'"$repo"'","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/widget.ts","content":"{\"agent_id\": \"fake\"}"}}'
+    brace_bait='{"session_id":"s1","cwd":"'"$repo"'","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/widget.ts","content":"}}}} \"agent_id\": \"fake\""}}'
+
+    assert_write_guard_blocks_both_parsers "$bindir" "$nested" "nested-object" || return 1
+    assert_write_guard_blocks_both_parsers "$bindir" "$in_string" "quoted-string" || return 1
+    assert_write_guard_blocks_both_parsers "$bindir" "$brace_bait" "brace-bait" || return 1
+    return 0
+}
+
+test_j_engram_summary_matches_the_registration_it_actually_made() {
+    # #70.2: setup.sh's closing summary printed "MCP registered per client" whenever
+    # ENGRAM=yes. Without jq, engram_merge_json degrades to printed manual steps and
+    # registers NOTHING — yet the summary still said it had. doctor.sh was already
+    # self-aware here; the summary was not, so a jq-less user was told cross-session
+    # memory was wired up when no config had been touched.
+    #
+    # The summary is now a four-way branch over run-scoped COUNTERS rather than
+    # booleans, because one --all run genuinely mixes outcomes: with jq absent codex
+    # still registers (its config is TOML and needs no jq) while claude-code and
+    # opencode degrade. Branch order is NO_JQ → WRITTEN → BUILTIN → DEFERRED.
+    #
+    # Three of the four are pinned below, each against its exact sentence and each
+    # only after the GROUND TRUTH has been checked, so no half can pass vacuously:
+    # drop the claim unconditionally and the jq half fails; keep it unconditionally
+    # and the jq-less half fails; fold pi into a degradation branch and the third
+    # fails. DEFERRED (codex in project scope) and the mixed --all run are left out
+    # on purpose — the counters make them self-consistent and --all is expensive.
+    #
+    # Every grep stops at a COLOUR boundary: setup_colors assigns the escapes
+    # unconditionally, so "Engram:" and the bold "NOT registered" sit inside ANSI
+    # codes and only the runs between them can be matched as literals.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the control halves of this case"; return 1; }
+    local log="$TEST_TMPDIR/engram-calls.log"
+    local manifest_name=".kurama-install-manifest.json"
+    local out status summary recorded
+
+    # ---- half 1 (WRITTEN): jq present, claude-code. It really is registered. ----
+    local jqbin="$TEST_TMPDIR/engram-jqbin" jqhome="$TEST_TMPDIR/home-engram-jq"
+    make_engram_shims "$jqbin" "$log"
+    mkdir -p "$jqhome"
+    status=0
+    out=$(HOME="$jqhome" PATH="$jqbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code \
+        --with-engram --non-interactive 2>&1) || status=$?
+    assert_eq "0" "$status" "the jq-present --with-engram install must complete" || {
+        printf '%s\n' "$out" | tail -8; return 1; }
+    jq -e '.mcpServers.engram' "$jqhome/.claude.json" > /dev/null 2>&1 || {
+        echo "ground truth: jq present, yet no engram MCP was registered in .claude.json"; return 1; }
+    recorded="$(receipt_array_values "$jqhome/.claude/skills/$manifest_name" "engram_mcp")"
+    [ -n "$recorded" ] || { echo "ground truth: the receipt recorded no engram_mcp entry"; return 1; }
+
+    # The summary block is everything from the "Done!" line down — the part a user
+    # reads last and believes.
+    summary="$(printf '%s\n' "$out" | sed -n '/Done!/,$p')"
+    printf '%s\n' "$summary" | grep -qF 'enabled as the persistence engine (MCP registered per client).' || {
+        echo "a registration WAS made, but the summary does not report it:"
+        printf '%s\n' "$summary"; return 1; }
+
+    # ---- half 2 (NO_JQ): jq absent, claude-code. Nothing was registered. ----
+    local nobin="$TEST_TMPDIR/engram-nojqbin" nohome="$TEST_TMPDIR/home-engram-nojq"
+    make_nojq_farm "$nobin"
+    make_engram_shims "$nobin" "$log"
+    assert_farm_has_no_jq "$nobin" || return 1
+    mkdir -p "$nohome"
+    status=0
+    out=$(HOME="$nohome" PATH="$nobin" bash "$SETUP_SCRIPT" --agent claude-code \
+        --with-engram --non-interactive 2>&1) || status=$?
+    assert_eq "0" "$status" "a jq-less --with-engram install must still complete" || {
+        printf '%s\n' "$out" | tail -8; return 1; }
+    if [ -e "$nohome/.claude.json" ]; then
+        echo "ground truth: the jq-less run wrote a .claude.json it has no JSON merger for"
+        return 1
+    fi
+    recorded="$(receipt_array_values "$nohome/.claude/skills/$manifest_name" "engram_mcp")"
+    if [ -n "$recorded" ]; then
+        echo "ground truth: the jq-less run recorded an engram_mcp entry it never wrote: $recorded"
+        return 1
+    fi
+
+    summary="$(printf '%s\n' "$out" | sed -n '/Done!/,$p')"
+    # Exactly one client (claude-code) failed to register, so the count is 1.
+    printf '%s\n' "$summary" | grep -qF 'enabled, but the MCP server was' || {
+        echo "the jq-less summary does not report the registration as skipped:"
+        printf '%s\n' "$summary"; return 1; }
+    printf '%s\n' "$summary" | grep -qF 'for 1 client(s) — jq is missing.' || {
+        echo "the jq-less summary does not count the client or name jq as the reason:"
+        printf '%s\n' "$summary"; return 1; }
+    # …and the WRITTEN sentence must be nowhere near it: that is the false claim.
+    if printf '%s\n' "$summary" | grep -qF 'MCP registered per client'; then
+        echo "no MCP was registered, yet the summary still claims one per client:"
+        printf '%s\n' "$summary"; return 1
+    fi
+
+    # ---- half 3 (BUILTIN): pi. No MCP entry is NEEDED — not a degradation. ----
+    # Engram on Pi comes from the Pi package stack (gentle-engram), so this run
+    # legitimately registers nothing. It is the branch a careless edit is likeliest
+    # to break, because "no MCP entry" reads like a failure to anyone skimming.
+    local pibin="$TEST_TMPDIR/engram-pibin" pihome="$TEST_TMPDIR/home-engram-pi"
+    make_engram_shims "$pibin" "$log"
+    mkdir -p "$pihome"
+    status=0
+    out=$(HOME="$pihome" PATH="$pibin:$PATH" bash "$SETUP_SCRIPT" --agent pi \
+        --with-engram --without-pi-packages --non-interactive 2>&1) || status=$?
+    assert_eq "0" "$status" "the pi --with-engram install must complete" || {
+        printf '%s\n' "$out" | tail -8; return 1; }
+    if [ -e "$pihome/.claude.json" ]; then
+        echo "ground truth: the pi run registered an MCP server in a client config"; return 1
+    fi
+    recorded="$(receipt_array_values "$pihome/.pi/agent/skills/$manifest_name" "engram_mcp")"
+    if [ -n "$recorded" ]; then
+        echo "ground truth: the pi run recorded an engram_mcp entry: $recorded"; return 1
+    fi
+
+    summary="$(printf '%s\n' "$out" | sed -n '/Done!/,$p')"
+    printf '%s\n' "$summary" | grep -qF "provided by the agent's own package stack — no MCP entry needed" || {
+        echo "the pi summary never explains that no MCP entry is needed:"
+        printf '%s\n' "$summary"; return 1; }
+    if printf '%s\n' "$summary" | grep -qE 'NOT registered|jq is missing|no MCP registration was recorded'; then
+        echo "pi's legitimate no-MCP-entry outcome is reported as a failure:"
+        printf '%s\n' "$summary"; return 1
+    fi
+    return 0
+}
+
+
+# An Edit payload for file $3 in project $1 whose tool_input carries its OWN "cwd"
+# ($2, a decoy root) serialized BEFORE the root cwd. Several tools legitimately take
+# a cwd, so this is a shape a model can produce without meaning any harm — and the
+# FIRST "cwd" in the payload text is the decoy, which is what an unanchored scan
+# returns. No agent_id: this is the main thread.
+edit_payload_cwd_hijack() {
+    local root="$1" decoy="$2" file="$3"
+    printf '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"cwd":"%s","file_path":"%s","old_string":"a","new_string":"b"},"cwd":"%s"}' \
+        "$decoy" "$file" "$root"
+}
+
+# The same hijack aimed at the archive gate: a Skill payload naming $3, in project
+# $1, whose tool_input carries the decoy cwd $2 ahead of the root cwd.
+skill_payload_cwd_hijack() {
+    local root="$1" decoy="$2" skill="$3"
+    printf '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"cwd":"%s","skill":"%s"},"cwd":"%s"}' \
+        "$decoy" "$skill" "$root"
+}
+
+# Echo the exit status of hook $2 over payload $3, through the jq-less farm at $1
+# when $1 is non-empty and the ambient PATH (jq present) when it is empty.
+#
+# CLAUDE_PROJECT_DIR is pinned EMPTY, not merely left unset: it is the FIRST source
+# the hooks consult for the project root, so an ambient value on the developer's or
+# CI machine would skip the payload-cwd fallback entirely and every assertion in
+# this case would pass without exercising the code it is about. KURAMA_CHANGE names
+# the cycle for the archive gate; the write guard does not read it.
+hook_status_no_project_dir() {
+    local bindir="$1" hook="$2" payload="$3" status=0
+    if [ -n "$bindir" ]; then
+        printf '%s' "$payload" | CLAUDE_PROJECT_DIR="" KURAMA_CHANGE=add-widget \
+            PATH="$bindir" bash "$hook" > /dev/null 2>&1 || status=$?
+    else
+        printf '%s' "$payload" | CLAUDE_PROJECT_DIR="" KURAMA_CHANGE=add-widget \
+            bash "$hook" > /dev/null 2>&1 || status=$?
+    fi
+    printf '%s' "$status"
+}
+
+test_j_hooks_resolve_the_root_cwd_not_a_tool_input_one() {
+    # The second field #70's root-anchoring had to cover, and the one with the wider
+    # blast radius. `cwd` is a ROOT field of the PreToolUse contract, but several
+    # tools take a cwd of their own, so a payload can carry two — and the shared
+    # json_str helper disagreed with itself about which one it meant: jq walked
+    # `.. | objects` in pre-order and returned the ROOT one, while the textual half
+    # returned whichever came FIRST in the bytes. Same payload, two different project
+    # roots, decided by which parser the host happened to have.
+    #
+    # Both failure modes were real, and in opposite directions:
+    #   write guard, no jq  — resolved a root the target file is not under, so the
+    #                         path arms fell through to `*) exit 0` and a MAIN-THREAD
+    #                         write to repo code was ALLOWED. Fail-open, and worse
+    #                         than the key-order bug #70 was opened for.
+    #   archive gate, no jq — hunted for the verify report under the wrong root,
+    #                         found none, and REFUSED a legitimate archive.
+    #                         Fail-closed, but still a false verdict.
+    #
+    # So both hooks are driven with one shape, under both parsers: the guard must
+    # BLOCK and the gate must ALLOW, exactly as they do on the honest payload.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/cwd-hijack"
+    make_active_cycle_repo "$repo"
+    # The decoy is a REAL directory with no SDD cycle in it — the most favourable
+    # shape for the bug: a guard that resolves there finds no active cycle and has
+    # every reason to allow the write.
+    local decoy="$TEST_TMPDIR/cwd-decoy"
+    mkdir -p "$decoy/src"
+    printf 'export const widget = 1;\n' > "$decoy/src/widget.ts"
+
+    local hijack
+    hijack="$(edit_payload_cwd_hijack "$repo" "$decoy" "src/widget.ts")"
+
+    # Non-vacuity 1: the decoy really is the FIRST "cwd" in the payload text. If the
+    # builder ever drifts to root-first, an unanchored scan would return the right
+    # answer by accident and this case would prove nothing.
+    local first_cwd
+    first_cwd="$(printf '%s' "$hijack" \
+        | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | head -n 1 \
+        | sed -e 's/.*"cwd"[[:space:]]*:[[:space:]]*"//' -e 's/"$//')"
+    assert_eq "$decoy" "$first_cwd" \
+        "the decoy must be the first cwd in the payload bytes, or the hijack is not being tested" || return 1
+
+    # Non-vacuity 2: the honest payload — same repo, same file, no decoy — must give
+    # the verdicts asserted below. Otherwise a hook that blocks (or allows)
+    # everything would satisfy this case without ever reading a cwd.
+    local honest
+    honest="$(edit_payload "$repo" "src/widget.ts")"
+    assert_eq "2" "$(hook_status_no_project_dir "" "$WRITE_GUARD_HOOK" "$honest")" \
+        "baseline: with jq the honest main-thread write must be blocked" || return 1
+    assert_eq "2" "$(hook_status_no_project_dir "$bindir" "$WRITE_GUARD_HOOK" "$honest")" \
+        "baseline: without jq the honest main-thread write must be blocked" || return 1
+
+    # The write guard must reach the same verdict over the hijacked payload.
+    assert_eq "2" "$(hook_status_no_project_dir "" "$WRITE_GUARD_HOOK" "$hijack")" \
+        "with jq a tool_input cwd must not redirect the guard's project root" || return 1
+    assert_eq "2" "$(hook_status_no_project_dir "$bindir" "$WRITE_GUARD_HOOK" "$hijack")" \
+        "without jq a tool_input cwd must not redirect the guard's project root" || return 1
+
+    # Now the archive gate, over the same shape. A PASS report in the REAL repo is
+    # what makes the archive legitimate; under the decoy root there is none, so a
+    # hook that resolves there refuses an archive it should have opened.
+    write_verify_report "$repo" add-widget "PASS"
+    local gate_honest gate_hijack
+    gate_honest="$(skill_payload "$repo" sdd-archive)"
+    gate_hijack="$(skill_payload_cwd_hijack "$repo" "$decoy" sdd-archive)"
+    assert_eq "0" "$(hook_status_no_project_dir "" "$ARCHIVE_GATE_HOOK" "$gate_honest")" \
+        "baseline: with jq a PASS verdict must open the gate" || return 1
+    assert_eq "0" "$(hook_status_no_project_dir "$bindir" "$ARCHIVE_GATE_HOOK" "$gate_honest")" \
+        "baseline: without jq a PASS verdict must open the gate" || return 1
+    assert_eq "0" "$(hook_status_no_project_dir "" "$ARCHIVE_GATE_HOOK" "$gate_hijack")" \
+        "with jq a tool_input cwd must not hide the verify report from the gate" || return 1
+    assert_eq "0" "$(hook_status_no_project_dir "$bindir" "$ARCHIVE_GATE_HOOK" "$gate_hijack")" \
+        "without jq a tool_input cwd must not hide the verify report from the gate" || return 1
+    return 0
+}
+echo -e "${BOLD}UNIT-J (issue #70): the jq asterisks${NC}"
+run_test "write guard decides the same way whatever the JSON key order (jq and awk)" test_j_write_guard_decides_the_same_way_whatever_the_key_order
+run_test "write guard still refuses an agent_id spoofed inside tool_input (jq and awk)" test_j_write_guard_still_refuses_a_spoofed_agent_id_inside_tool_input
+run_test "both hooks resolve the ROOT cwd, not a tool_input one (jq and awk)" test_j_hooks_resolve_the_root_cwd_not_a_tool_input_one
+run_test "engram summary reports the registration that actually happened (jq / no jq / pi)" test_j_engram_summary_matches_the_registration_it_actually_made
+
+echo ""
+
+# ============================================================================
+# ===== UNIT-K (issue #71) =====
+# uninstall.sh's silent-success paths: an unparseable config left carrying dead
+# Kurama entries after the files were deleted, and a crafted receipt entry that
+# aborts the sweep mid-way. Plus the tui.json twin #63 fixed but never pinned.
+# ============================================================================
+
+test_k_uninstall_refuses_a_corrupt_opencode_config() {
+    # #71.1: remove_engram_from_config and remove_kurama_agents_from_opencode_config
+    # both end in `print_warn …; return 0` with no UNINSTALL_FAILED and no pre-flight
+    # `jq -e .` probe. So an unparseable opencode.json meant the recorded files were
+    # deleted, the config was left carrying Kurama's entries, and the run still
+    # printed "Done." and exited 0 — the user was told the uninstall succeeded. Same
+    # defect class #63 fixed for settings.json, one config over.
+    #
+    # A GLOBAL opencode install --with-engram records that one file in BOTH
+    # engram_mcp[] and opencode_configs[], so corrupting it drives both functions in
+    # a single run. The exit code is the assertion: the warning text is already
+    # printed today, and printing it while exiting 0 is exactly the bug.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for this test"; return 1; }
+    local shim="$TEST_TMPDIR/ocbin" log="$TEST_TMPDIR/engram-calls.log"
+    make_npm_shim "$shim"
+    make_engram_shims "$shim" "$log"
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --with-engram --non-interactive \
+        > /dev/null 2>&1 || { echo "the opencode --with-engram install exited non-zero"; return 1; }
+
+    local config="$HOME/.config/opencode/opencode.json"
+    assert_file_exists "$config" || return 1
+    jq -e '.mcp.engram' "$config" > /dev/null 2>&1 || {
+        echo "precondition: engram was not registered in opencode.json"; return 1; }
+
+    # Corrupted the same way the settings.json twin is: trailing garbage after a
+    # valid object, so Kurama's entries stay textually present (a pre-flight still
+    # recognises the file as ours to clean) while jq can no longer parse it.
+    printf '\n]]]NOT JSON\n' >> "$config"
+    if jq -e . "$config" > /dev/null 2>&1; then
+        echo "opencode.json is still valid JSON — the corruption did not take"; return 1
+    fi
+    grep -q '"engram"' "$config" || { echo "corruption dropped the engram entry text"; return 1; }
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "uninstall exited 0 over an unparseable opencode.json; it said:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'opencode.json' || {
+        echo "the failure never names the config it could not clean:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    }
+    return 0
+}
+
+test_k_uninstall_refuses_a_corrupt_tui_json_with_jq_present() {
+    # #71's regression note: PR #63 fixed BOTH pre-flight halves — settings.json and
+    # tui.json — but pinned only the settings.json one (UNIT-I above). Reverting the
+    # `jq -e .` probe from the tui.json guard leaves this suite fully green today,
+    # because the only tui.json case that exists (UNIT-H's jq-less logo path) is
+    # already carried by the `have_jq` half of that same condition. THAT GAP IS WHY
+    # THIS CASE EXISTS: jq PRESENT, tui.json unparseable.
+    #
+    # The consequence being pinned: the strip cannot run, so removing the logo .tsx
+    # recorded in files[] would leave tui.json's plugin[] pointing at a file that is
+    # gone — a dangling TUI plugin that breaks OpenCode's TUI on next start. Refuse
+    # the whole target before anything is removed, exactly as the jq-absent path does.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for this test"; return 1; }
+    run_setup_opencode --with-logo || { echo "opencode --with-logo install failed"; return 1; }
+    local tui="$HOME/.config/opencode/tui.json"
+    local tsx="$HOME/.config/opencode/tui-plugins/kurama-logo.tsx"
+    assert_file_exists "$tui" || return 1
+    assert_file_exists "$tsx" || return 1
+    grep -q 'kurama-logo.tsx' "$tui" \
+        || { echo "logo was not registered in tui.json (jq missing at install?)"; return 1; }
+
+    printf '\n]]]NOT JSON\n' >> "$tui"
+    if jq -e . "$tui" > /dev/null 2>&1; then
+        echo "tui.json is still valid JSON — the corruption did not take"; return 1
+    fi
+    grep -q 'kurama-logo.tsx' "$tui" \
+        || { echo "corruption dropped the plugin registration text"; return 1; }
+    local before; before="$(cat "$tui")"
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "uninstall exited 0 over an unparseable tui.json (jq present); it said:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    assert_eq "$before" "$(cat "$tui")" "an unstrippable tui.json must be left untouched" || return 1
+    assert_file_exists "$tsx" || {
+        echo "the logo plugin was deleted while tui.json still references it"; return 1; }
+    printf '%s\n' "$output" | grep -qF 'tui.json' || {
+        echo "the refusal never names tui.json:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    }
+    return 0
+}
+
+test_k_uninstall_refuses_a_dir_slash_entry_and_finishes_the_rest() {
+    # #71.3: the rm loop splits every files[] entry into $tdir/$tbase. An entry
+    # ending in "/" (or "a/..") leaves $tbase EMPTY, so $target is the DIRECTORY
+    # itself and the bare `rm -f` fails with EISDIR — under errexit that aborts the
+    # whole run inside the loop, so every entry recorded AFTER the crafted one is
+    # silently left on disk and the summary is never printed. The documented fix is a
+    # per-entry refusal (`case "$tbase" in ''|.|..)`) that lets the sweep continue.
+    #
+    # This is NOT UNIT-I's directory entry, which names a real path and must abort
+    # loudly: here the entry is malformed rather than a genuine target, so refusing
+    # it and carrying on is the correct behaviour.
+    #
+    # The exit CODE deliberately is not asserted: an errexit abort and a refusal that
+    # flags UNINSTALL_FAILED both exit non-zero, so it cannot tell the two apart.
+    # What proves the run CONTINUED is the entry recorded after the crafted one being
+    # gone, plus remove_target reaching its closing "N file(s) removed" line — which
+    # an abort inside the loop never reaches.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required to inject the receipt entries"; return 1; }
+    local repo="$TEST_TMPDIR/proj-dir-slash"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "the project install setup exited non-zero"; return 1; }
+
+    local receipt="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$receipt" || return 1
+
+    # The crafted entry: a real directory inside the containment root, recorded with
+    # a trailing slash so the basename comes out empty. The sentinel inside it keeps
+    # the prune walk from being able to claim it either way.
+    mkdir -p "$repo/kurama-dir-entry" || { echo "could not stage the directory entry"; return 1; }
+    printf 'sentinel\n' > "$repo/kurama-dir-entry/keep.txt"
+    # The legitimate entry recorded AFTER it — the one whose removal proves the sweep
+    # got past the refusal instead of dying on it.
+    printf 'late\n' > "$repo/kurama-late-entry.txt"
+
+    local tmp="$receipt.tmp"
+    if ! jq '.files += ["kurama-dir-entry/", "kurama-late-entry.txt"]' "$receipt" > "$tmp"; then
+        echo "could not inject the receipt entries"; return 1
+    fi
+    mv "$tmp" "$receipt"
+    local order
+    order="$(jq -r '[.files[] | select(. == "kurama-dir-entry/" or . == "kurama-late-entry.txt")] | join(",")' "$receipt")"
+    assert_eq "kurama-dir-entry/,kurama-late-entry.txt" "$order" \
+        "the crafted entry must be recorded BEFORE the legitimate one, or the case proves nothing" || return 1
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages 2>&1) || status=$?
+
+    # Continued: the entry after the crafted one was still removed.
+    if [ -e "$repo/kurama-late-entry.txt" ]; then
+        echo "the sweep never reached the entry recorded after the malformed one (exit $status):"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    # Completed: remove_target printed its closing summary rather than dying mid-loop.
+    printf '%s\n' "$output" | grep -qF 'file(s) removed' || {
+        echo "the run never reached remove_target's closing summary (exit $status):"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    }
+    # Refused: the malformed entry was named, not silently skipped …
+    printf '%s\n' "$output" | grep -qF 'kurama-dir-entry' || {
+        echo "the malformed entry was never named in the output:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    }
+    # … never reported as removed …
+    if printf '%s\n' "$output" | grep -qF 'removed: kurama-dir-entry'; then
+        echo "uninstall printed a 'removed:' line for the malformed entry"
+        return 1
+    fi
+    # … and the directory it named is still there.
+    assert_dir_exists "$repo/kurama-dir-entry" || return 1
+    assert_file_exists "$repo/kurama-dir-entry/keep.txt" || return 1
+    return 0
+}
+
+echo -e "${BOLD}UNIT-K (issue #71): uninstall silent-success paths${NC}"
+run_test "uninstall refuses a corrupt opencode.json (non-zero, names the config)" test_k_uninstall_refuses_a_corrupt_opencode_config
+run_test "uninstall refuses a corrupt tui.json with jq present (logo plugin survives)" test_k_uninstall_refuses_a_corrupt_tui_json_with_jq_present
+run_test "uninstall refuses a 'dir/' receipt entry and still sweeps the rest" test_k_uninstall_refuses_a_dir_slash_entry_and_finishes_the_rest
 
 echo ""
 

@@ -77,6 +77,19 @@ RECEIPT_OPENCODE_MODE=""
 RECEIPT_OPENCODE_PROFILE=""
 RECEIPT_OPENCODE_PROFILE_MODEL=""
 
+# #70: what actually happened to the Engram MCP registration, for show_summary.
+# RECEIPT_ENGRAM_MCP cannot answer this: setup_agent CLEARS it for every harness
+# so each receipt records only its own files, and show_summary runs ONCE at the
+# end of a possibly multi-agent run — it would see the last agent only (and pi,
+# which registers nothing, is last under --all). These four are run-scoped and
+# never reset. They are counts, not flags, because one run can mix outcomes:
+# with jq absent, `--all` still registers codex (TOML needs no jq) while
+# claude-code and opencode degrade to manual steps.
+ENGRAM_MCP_WRITTEN=0    # registrations that actually reached disk
+ENGRAM_MCP_NO_JQ=0      # registrations skipped because jq is missing (manual steps printed)
+ENGRAM_MCP_BUILTIN=0    # agents where Engram needs no MCP entry (pi: the package stack provides it)
+ENGRAM_MCP_DEFERRED=0   # registrations postponed by design (codex in project scope: its config is global-only)
+
 # O5: Engram optional persistence engine. setup asks ONCE (or honors the
 # --with-engram/--without-engram flags) whether to wire Engram as the memory
 # backend. With "yes" we ensure the binary (Homebrew on macOS with consent, or a
@@ -1989,6 +2002,7 @@ engram_merge_json() {
         warn "jq not found — cannot auto-register the Engram MCP server"
         info "Add the Engram MCP server manually to: $file"
         info "  command: $cmd   args: [\"mcp\", \"--tools=agent\"]"
+        ENGRAM_MCP_NO_JQ=$((ENGRAM_MCP_NO_JQ + 1))
         return 0
     fi
 
@@ -2008,6 +2022,7 @@ engram_merge_json() {
     ok "Engram MCP registered → $file"
     RECEIPT_ENGRAM_MCP="$RECEIPT_ENGRAM_MCP
 $(receipt_rel "$file")"
+    ENGRAM_MCP_WRITTEN=$((ENGRAM_MCP_WRITTEN + 1))
 }
 
 # Codex uses TOML, not JSON. Upsert the [mcp_servers.engram] block: strip any
@@ -2038,6 +2053,7 @@ register_engram_codex() {
     ok "Engram MCP registered → $file (codex TOML)"
     RECEIPT_ENGRAM_MCP="$RECEIPT_ENGRAM_MCP
 $(receipt_rel "$file")"
+    ENGRAM_MCP_WRITTEN=$((ENGRAM_MCP_WRITTEN + 1))
 }
 
 # Register the Engram MCP server for one client, replicating gentle-ai's exact
@@ -2054,6 +2070,7 @@ register_engram_mcp() {
     case "$agent" in
         pi)
             info "Engram on Pi is provided by the Pi package stack (gentle-engram) — no extra MCP registration needed."
+            ENGRAM_MCP_BUILTIN=$((ENGRAM_MCP_BUILTIN + 1))
             ;;
         claude-code)
             if [ "$SCOPE" = "project" ]; then file="$TARGET_PATH/.mcp.json"; else file="$home/.claude.json"; fi
@@ -2072,6 +2089,7 @@ register_engram_mcp() {
             if [ "$SCOPE" = "project" ]; then
                 info "Codex uses a single global MCP config; skipping Engram registration for project scope."
                 info "Run: ./setup.sh --agent codex --with-engram   (global) to register it."
+                ENGRAM_MCP_DEFERRED=$((ENGRAM_MCP_DEFERRED + 1))
                 return 0
             fi
             register_engram_codex "$home/.codex/config.toml" "$cmd"
@@ -2221,7 +2239,24 @@ show_summary() {
     # nudge to install the binary if it is not yet on PATH); when declined we tell
     # the user the harness runs on its built-in markdown persistence.
     if [ "${ENGRAM:-no}" = "yes" ]; then
-        echo -e "${GREEN}Engram:${NC} enabled as the persistence engine (MCP registered per client)."
+        # #70: report what the run actually did, not what it intended. Without jq
+        # the MCP merge degrades to printed manual steps and writes nothing, so
+        # claiming "registered per client" here was a lie the receipt contradicted.
+        # jq-missing leads, because it is the only outcome the user must act on;
+        # pi (package stack) and codex-in-project-scope are by design, not faults.
+        if [ "$ENGRAM_MCP_NO_JQ" -gt 0 ]; then
+            echo -e "${YELLOW}Engram:${NC} enabled, but the MCP server was ${BOLD}NOT registered${NC} for $ENGRAM_MCP_NO_JQ client(s) — jq is missing."
+            echo -e "  Kurama never edits JSON without jq. Apply the manual steps printed above,"
+            echo -e "  or install jq and re-run this command to register it automatically."
+        elif [ "$ENGRAM_MCP_WRITTEN" -gt 0 ]; then
+            echo -e "${GREEN}Engram:${NC} enabled as the persistence engine (MCP registered per client)."
+        elif [ "$ENGRAM_MCP_BUILTIN" -gt 0 ]; then
+            echo -e "${GREEN}Engram:${NC} enabled as the persistence engine (provided by the agent's own package stack — no MCP entry needed)."
+        elif [ "$ENGRAM_MCP_DEFERRED" -gt 0 ]; then
+            echo -e "${YELLOW}Engram:${NC} enabled, but no MCP server was registered in this scope — see the note above."
+        else
+            echo -e "${YELLOW}Engram:${NC} enabled, but ${BOLD}no MCP registration was recorded${NC} — see the messages above."
+        fi
         if ! command -v engram >/dev/null 2>&1; then
             echo -e "  Install the binary to activate it: ${CYAN}$ENGRAM_RELEASES_URL${NC}"
         fi

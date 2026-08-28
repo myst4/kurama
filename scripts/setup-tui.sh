@@ -13,9 +13,9 @@ set -uo pipefail
 # Showing the assembled command before running is not decoration: it is how you
 # learn the invocation to paste into CI, a dotfiles bootstrap, or a bug report.
 #
-# gum is an OPTIONAL dependency. Kurama's promise is a zero-dependency install,
-# so ./setup.sh remains the documented entry point and works with nothing
-# installed. This is sugar on top.
+# gum is an OPTIONAL dependency. Kurama installs with no build step and no
+# runtime, so ./setup.sh remains the documented entry point and works with
+# nothing installed beyond bash. This is sugar on top.
 #
 # Supported platforms: macOS and Linux. Bash 3.2 compatible.
 #

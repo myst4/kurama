@@ -61,20 +61,66 @@ if [ "${KURAMA_ARCHIVE_OVERRIDE:-0}" = "1" ]; then
 fi
 
 # --- portable JSON string field extractor -----------------------------------
-json_str() {
+# json_root_str <field> : the string value of a ROOT-level <field> and nothing
+# else. cwd — the only field this gate reads — is a root field of the hooks
+# contract, and the two extraction halves must not disagree about which one they
+# mean: an unanchored jq (`.. | objects`) walks the payload depth-first while a
+# textual scan walks it in serialization order, so a tool_input carrying its own
+# "cwd" (several tools take one) sends them to two different project roots — and
+# the gate then hunts for the verify report under the wrong one. Reading the key
+# at the ROOT only, in either half, removes the disagreement. The function body
+# below is kept byte-identical to orchestrator-write-guard.sh's copy — the two
+# hooks must read the payload the same way.
+json_root_str() {
   field="$1"
   [ -n "$payload" ] || return 0
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$payload" \
-      | jq -r --arg f "$field" '.. | objects | .[$f]? // empty' 2>/dev/null \
+      | jq -r --arg f "$field" '.[$f]? | strings' 2>/dev/null \
       | head -n 1
     return 0
   fi
-  printf '%s' "$payload" \
-    | tr -d '\n' \
-    | grep -o "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
-    | head -n 1 \
-    | sed -e "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
+  # No jq: split the payload on the quote character and walk the pieces — the scan
+  # a character loop would do, at C speed (this hook runs on EVERY tool call and a
+  # Write payload can be megabytes). Pieces OUTSIDE strings carry the brace/bracket
+  # depth; pieces inside them carry none, so nothing within a string — a nested key,
+  # or file CONTENT that spells one out — can move it. "<field>" is accepted only as
+  # a key of the ROOT object (depth 1), wherever it sits in the KEY ORDER, and only
+  # a string value is returned: null, a number or an object reads as absent, exactly
+  # as the jq branch above returns it. A quote preceded by an odd number of
+  # backslashes is escaped and does not end its string. Escape sequences inside the
+  # value are NOT expanded — the fields read this way are a token and a path. awk
+  # seeds every variable to 0/"" on first use, so no BEGIN block is needed.
+  printf '%s' "$payload" | awk -v field="$field" '
+    {
+      n = split($0, seg, "\"")
+      for (k = 1; k <= n; k++) {
+        s = seg[k]
+        if (instr) {
+          if (depth == 1) { str = str s }        # only a root string can ever matter
+        } else {
+          if (pend == 2) {                       # key matched: a colon must follow
+            if (s ~ /^[ \t\r\n]*:[ \t\r\n]*$/) { pend = 1 }
+            else if (s !~ /^[ \t\r\n]*$/)      { pend = 0 }
+          } else if (pend == 1 && s !~ /^[ \t\r\n]*$/) { pend = 0 }
+          t = s; depth += gsub(/[[{]/, "", t)
+          t = s; depth -= gsub(/[]}]/, "", t)
+        }
+        if (k == n) { break }                    # no quote closes the last piece
+        if (instr && match(s, /\\+$/) && RLENGTH % 2 == 1) {
+          if (depth == 1) { str = str "\"" }     # escaped quote: the string goes on
+          continue
+        }
+        if (instr) {
+          instr = 0
+          if (pend == 1) { printf "%s", str; exit 0 }
+          pend = (depth == 1 && str == field) ? 2 : 0
+        } else {
+          instr = 1; str = ""
+        }
+      }
+    }
+  '
 }
 
 # --- portable modification time (epoch seconds; 0 if unknown) ---------------
@@ -124,7 +170,7 @@ compute_tree_hash() {
 
 # --- resolve project root ---------------------------------------------------
 project_root="${CLAUDE_PROJECT_DIR:-}"
-[ -n "$project_root" ] || project_root="$(json_str cwd)"
+[ -n "$project_root" ] || project_root="$(json_root_str cwd)"
 [ -n "$project_root" ] || project_root="$PWD"
 root="${project_root%/}"
 
