@@ -33,25 +33,9 @@ A **profile** is a named parallel agent set that shares the SDD prompts and vari
 
 <!-- @@MODEL_ASSIGNMENTS_SECTION@@ -->
 <!-- gentle-ai:sdd-model-assignments -->
-## Model Assignments
+### Model Routing
 
-By default, pass NO `model` parameter when delegating: every sub-agent inherits the model this session is configured to run, whatever the provider. This table is opt-in guidance for tiered routing — apply it only when the user has opted in through their own configuration (agent entries in `opencode.json`, or a named profile as below), and never let it override a model the user configured.
-
-When running under a named profile (the `kurama-orchestrator` primary), the per-phase models come from the `sdd-<phase>-NAME` agent entries in `opencode.json` rather than from these aliases; delegate to those suffixed subagents and let each carry its own configured model. This table remains the default guidance for the base `sdd-orchestrator`.
-
-| Phase | Default Model | Reason |
-|-------|---------------|--------|
-| orchestrator | opus | Coordinates, makes decisions |
-| sdd-explore | sonnet | Reads code, structural - not architectural |
-| sdd-propose | sonnet | Structured proposal writing (architecture is decided in design) |
-| sdd-spec | sonnet | Structured writing |
-| sdd-design | opus | Architecture decisions |
-| sdd-tasks | sonnet | Mechanical breakdown |
-| sdd-apply | opus | Implementation quality is the product |
-| sdd-verify | sonnet | Validation against spec |
-| sdd-archive | sonnet | Merge fidelity over speed |
-| default | sonnet | Non-SDD general delegation |
-
+By default, pass NO `model` parameter when delegating: every sub-agent inherits the model this session is configured to run, whatever the provider. Tiered per-phase routing is opt-in and lives in `skills/_shared/model-assignments.md` — read it only when the user has opted in through their own configuration (agent entries in `opencode.json`, or a named profile), and never let it override a model the user configured.
 <!-- /gentle-ai:sdd-model-assignments -->
 
 <!-- @@STATE_CONVENTIONS@@ -->

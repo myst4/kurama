@@ -52,7 +52,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All 24 expected default skills (sdd-core + quality + review + optional + tdd).
+# All 25 expected default skills (sdd-core + quality + review + optional + tdd).
 # The `lang` group (per-language pattern skills, e.g. go-testing) is OFF by default:
 # Kurama is stack-agnostic and ships no language knowledge in a default install.
 # The tdd and kanban-github modules ship by default now; installing either does NOT
@@ -64,6 +64,7 @@ EXPECTED_SKILLS=(
     sdd-design
     sdd-explore
     sdd-init
+    sdd-learn
     sdd-propose
     sdd-spec
     sdd-tasks
@@ -331,7 +332,7 @@ test_claude_code_skill_count() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for Claude Code"
+    assert_eq "25" "$count" "Expected exactly 25 skills for Claude Code"
 }
 
 # ============================================================================
@@ -347,7 +348,7 @@ test_opencode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for OpenCode"
+    assert_eq "25" "$count" "Expected exactly 25 skills for OpenCode"
 }
 
 test_opencode_commands() {
@@ -381,7 +382,7 @@ test_codex_skill_count() {
     bash "$INSTALL_SCRIPT" --agent codex > /dev/null 2>&1
     local count
     count=$(find "$HOME/.codex/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for Codex"
+    assert_eq "25" "$count" "Expected exactly 25 skills for Codex"
 }
 
 # ============================================================================
@@ -404,7 +405,7 @@ test_project_local_skill_count() {
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
     local count
     count=$(find "$project/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for project-local"
+    assert_eq "25" "$count" "Expected exactly 25 skills for project-local"
 }
 
 # ============================================================================
@@ -426,7 +427,7 @@ test_custom_path_skill_count() {
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     local count
     count=$(find "$custom/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for custom path"
+    assert_eq "25" "$count" "Expected exactly 25 skills for custom path"
 }
 
 # ============================================================================
@@ -449,7 +450,7 @@ test_all_global() {
 
 test_all_global_total_skill_count() {
     bash "$INSTALL_SCRIPT" --agent all-global > /dev/null 2>&1
-    # 5 targets x 24 skills = 120 SKILL.md files
+    # 5 targets x 25 skills = 125 SKILL.md files
     local total=0
     for dir in \
         "$HOME/.claude/skills" \
@@ -459,10 +460,10 @@ test_all_global_total_skill_count() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "24" "$count" "Expected 24 skills in $dir" || return 1
+        assert_eq "25" "$count" "Expected 25 skills in $dir" || return 1
         total=$((total + count))
     done
-    assert_eq "120" "$total" "Expected 120 total SKILL.md files across all targets"
+    assert_eq "125" "$total" "Expected 125 total SKILL.md files across all targets"
 }
 
 test_all_global_opencode_commands() {
@@ -484,7 +485,7 @@ test_idempotent_claude_code() {
     assert_all_skills_installed "$HOME/.claude/skills"
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills after double install"
+    assert_eq "25" "$count" "Expected exactly 25 skills after double install"
 }
 
 test_idempotent_opencode() {
@@ -493,7 +494,7 @@ test_idempotent_opencode() {
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
     local skill_count
     skill_count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$skill_count" "Expected exactly 24 skills after double install" || return 1
+    assert_eq "25" "$skill_count" "Expected exactly 25 skills after double install" || return 1
     local cmd_count
     cmd_count=$(find "$HOME/.config/opencode/commands" -name "sdd-*.md" | wc -l | tr -d ' ')
     assert_eq "9" "$cmd_count" "Expected exactly 9 commands after double install"
@@ -510,7 +511,7 @@ test_idempotent_all_global() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "24" "$count" "Expected 24 skills in $dir after double install" || return 1
+        assert_eq "25" "$count" "Expected 25 skills in $dir after double install" || return 1
     done
 }
 
@@ -577,8 +578,8 @@ test_output_shows_done_message() {
 test_output_shows_install_count() {
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "24 skills installed" || {
-        echo "Output missing '24 skills installed' message"
+    echo "$output" | grep -q "25 skills installed" || {
+        echo "Output missing '25 skills installed' message"
         return 1
     }
 }
@@ -745,7 +746,7 @@ test_setup_installs_default_skill_set() {
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "setup.sh should install the 24 default skills"
+    assert_eq "25" "$count" "setup.sh should install the 25 default skills"
 }
 
 test_setup_includes_tdd() {
@@ -1091,11 +1092,18 @@ test_without_optional_excludes_go_testing() {
         echo "kanban-github should be excluded by --without optional"
         return 1
     fi
+    # The `optional` group holds TWO skills now (#73 added sdd-learn). Naming both
+    # is what keeps the total below honest: drop only one of them while some other
+    # group silently gains a skill and the count is still 23.
+    if [ -d "$base/sdd-learn" ]; then
+        echo "sdd-learn should be excluded by --without optional"
+        return 1
+    fi
     assert_dir_exists "$base/judgment-day" || return 1   # quality group still on
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected 23 skills with --without optional (24 default - kanban-github)"
+    assert_eq "23" "$count" "Expected 23 skills with --without optional (25 default - kanban-github - sdd-learn)"
 }
 
 test_without_quality_excludes_judgment_day() {
@@ -1108,7 +1116,7 @@ test_without_quality_excludes_judgment_day() {
     assert_dir_exists "$base/kanban-github" || return 1         # optional group still on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected 23 skills with --without quality"
+    assert_eq "24" "$count" "Expected 24 skills with --without quality (25 default - judgment-day)"
 }
 
 test_without_both_groups() {
@@ -1116,9 +1124,10 @@ test_without_both_groups() {
     local base="$HOME/.claude/skills"
     if [ -d "$base/judgment-day" ]; then echo "judgment-day should be excluded"; return 1; fi
     if [ -d "$base/kanban-github" ]; then echo "kanban-github should be excluded"; return 1; fi
+    if [ -d "$base/sdd-learn" ]; then echo "sdd-learn should be excluded"; return 1; fi
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "22" "$count" "Expected 22 skills with both optional groups excluded"
+    assert_eq "22" "$count" "Expected 22 skills with both optional groups excluded (25 default - judgment-day - kanban-github - sdd-learn)"
 }
 
 test_reject_without_required_group() {
@@ -1135,7 +1144,7 @@ test_reject_without_required_group() {
 
 test_default_install_includes_tdd() {
     # The tdd group is now default-on: a plain install ships skills/tdd as part of
-    # the 24-skill default set. Installing the module does NOT activate TDD —
+    # the 25-skill default set. Installing the module does NOT activate TDD —
     # activation stays opt-in per project.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local base="$HOME/.claude/skills"
@@ -1144,12 +1153,12 @@ test_default_install_includes_tdd() {
     assert_file_not_empty "$base/tdd/SKILL.md" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Default install must include tdd (24 skills)"
+    assert_eq "25" "$count" "Default install must include tdd (25 skills)"
 }
 
 test_without_tdd_excludes_tdd() {
     # --without tdd opts the module out: skills/tdd is dropped, landing the
-    # remaining 23 default skills. The other default-on groups stay on.
+    # remaining 24 default skills. The other default-on groups stay on.
     bash "$INSTALL_SCRIPT" --agent claude-code --without tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/tdd" ]; then
@@ -1161,7 +1170,7 @@ test_without_tdd_excludes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected 23 skills with --without tdd"
+    assert_eq "24" "$count" "Expected 24 skills with --without tdd"
 }
 
 test_lang_group_is_opt_in() {
@@ -1180,12 +1189,12 @@ test_lang_group_is_opt_in() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected 25 skills with --with lang (24 default + go-testing)"
+    assert_eq "26" "$count" "Expected 26 skills with --with lang (25 default + go-testing)"
 }
 
 test_with_tdd_includes_tdd() {
     # tdd is default-on, so --with tdd is idempotent: skills/tdd ships and the
-    # count stays at the 24-skill default set.
+    # count stays at the 25-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --with tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     assert_dir_exists "$base/tdd" || return 1
@@ -1197,7 +1206,7 @@ test_with_tdd_includes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected 24 skills with --with tdd (default set already includes tdd)"
+    assert_eq "25" "$count" "Expected 25 skills with --with tdd (default set already includes tdd)"
 }
 
 test_with_tdd_uninstall_round_trip() {
@@ -1240,7 +1249,7 @@ test_omp_skill_count() {
     bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
     local count
     count=$(find "$HOME/.omp/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for omp"
+    assert_eq "25" "$count" "Expected exactly 25 skills for omp"
 }
 
 test_omp_writes_install_manifest() {
@@ -1372,7 +1381,7 @@ test_pi_skill_count() {
     bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
     local count
     count=$(find "$HOME/.pi/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected exactly 24 skills for Pi"
+    assert_eq "25" "$count" "Expected exactly 25 skills for Pi"
 }
 
 test_pi_writes_install_manifest() {
@@ -1664,7 +1673,7 @@ test_without_review_excludes_lenses() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "19" "$count" "Expected 19 skills with --without review (24 default - 5 lenses)"
+    assert_eq "20" "$count" "Expected 20 skills with --without review (25 default - 5 lenses)"
 }
 
 # ============================================================================
@@ -2078,7 +2087,8 @@ test_orchestrator_prompt_delegates_heavy_blocks() {
     for f in "$REPO_DIR/examples/claude-code/CLAUDE.md" \
              "$REPO_DIR/examples/pi/AGENTS.md" \
              "$REPO_DIR/examples/codex/agents.md" \
-             "$REPO_DIR/examples/opencode/AGENTS.md"; do
+             "$REPO_DIR/examples/opencode/AGENTS.md" \
+             "$REPO_DIR/examples/omp/AGENTS.md"; do
         assert_file_exists "$f" || return 1
         flat=$(tr '\n' ' ' < "$f")
         case "$flat" in
@@ -5098,35 +5108,35 @@ run_test "Unknown option exits non-zero" test_invalid_option
 echo ""
 
 echo -e "${BOLD}Claude Code${NC}"
-run_test "Installs all 24 skills to ~/.claude/skills" test_install_claude_code
-run_test "Exactly 24 SKILL.md files" test_claude_code_skill_count
+run_test "Installs all 25 skills to ~/.claude/skills" test_install_claude_code
+run_test "Exactly 25 SKILL.md files" test_claude_code_skill_count
 echo ""
 
 echo -e "${BOLD}OpenCode${NC}"
-run_test "Installs all 24 skills to ~/.config/opencode/skills" test_install_opencode
-run_test "Exactly 24 SKILL.md files" test_opencode_skill_count
+run_test "Installs all 25 skills to ~/.config/opencode/skills" test_install_opencode
+run_test "Exactly 25 SKILL.md files" test_opencode_skill_count
 run_test "Installs 9 command files" test_opencode_commands
 echo ""
 
 echo -e "${BOLD}Codex${NC}"
-run_test "Installs all 24 skills to ~/.codex/skills" test_install_codex
-run_test "Exactly 24 SKILL.md files" test_codex_skill_count
+run_test "Installs all 25 skills to ~/.codex/skills" test_install_codex
+run_test "Exactly 25 SKILL.md files" test_codex_skill_count
 echo ""
 
 echo -e "${BOLD}Project-local${NC}"
-run_test "Installs all 24 skills to ./skills/" test_install_project_local
-run_test "Exactly 24 SKILL.md files" test_project_local_skill_count
+run_test "Installs all 25 skills to ./skills/" test_install_project_local
+run_test "Exactly 25 SKILL.md files" test_project_local_skill_count
 echo ""
 
 echo -e "${BOLD}Custom path${NC}"
 run_test "Installs to arbitrary custom path" test_custom_path
-run_test "Exactly 24 SKILL.md files" test_custom_path_skill_count
+run_test "Exactly 25 SKILL.md files" test_custom_path_skill_count
 run_test "Handles deeply nested custom path" test_nested_custom_path
 echo ""
 
 echo -e "${BOLD}All-global${NC}"
 run_test "Installs to all 5 global targets" test_all_global
-run_test "120 total SKILL.md files (5x24)" test_all_global_total_skill_count
+run_test "125 total SKILL.md files (5x25)" test_all_global_total_skill_count
 run_test "Also installs OpenCode commands" test_all_global_opencode_commands
 echo ""
 
@@ -5165,7 +5175,7 @@ run_test "Balanced marker updates in place + writes backup" test_setup_balanced_
 echo ""
 
 echo -e "${BOLD}setup.sh manifest-driven install + receipt${NC}"
-run_test "setup.sh installs the 24 default skills" test_setup_installs_default_skill_set
+run_test "setup.sh installs the 25 default skills" test_setup_installs_default_skill_set
 run_test "setup.sh includes the default tdd module" test_setup_includes_tdd
 run_test "setup.sh writes an install manifest (receipt)" test_setup_writes_install_manifest
 run_test "uninstall.sh cleans a setup.sh install" test_setup_uninstall_round_trip
@@ -5195,8 +5205,8 @@ run_test "--version prints the version" test_version_flag
 run_test "--version exits with code 0" test_version_exits_zero
 run_test "Install writes an install manifest" test_install_writes_install_manifest
 run_test "Default install includes optional groups" test_default_install_includes_optional_groups
-run_test "--without optional excludes kanban-github (23 skills)" test_without_optional_excludes_go_testing
-run_test "--without quality excludes judgment-day (23 skills)" test_without_quality_excludes_judgment_day
+run_test "--without optional excludes kanban-github + sdd-learn (23 skills)" test_without_optional_excludes_go_testing
+run_test "--without quality excludes judgment-day (24 skills)" test_without_quality_excludes_judgment_day
 run_test "--without quality --without optional (22 skills)" test_without_both_groups
 run_test "--without sdd-core is rejected" test_reject_without_required_group
 echo ""
@@ -5205,13 +5215,13 @@ echo -e "${BOLD}TDD module (default-on group)${NC}"
 run_test "Default install includes tdd (25 skills)" test_default_install_includes_tdd
 run_test "--without tdd excludes tdd (24 skills)" test_without_tdd_excludes_tdd
 run_test "lang group is opt-in (--with lang adds go-testing)" test_lang_group_is_opt_in
-run_test "--with tdd is idempotent (24 skills)" test_with_tdd_includes_tdd
+run_test "--with tdd is idempotent (25 skills)" test_with_tdd_includes_tdd
 run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_round_trip
 echo ""
 
 echo -e "${BOLD}Pi agent (P5 installer wiring)${NC}"
-run_test "install.sh --agent omp installs 24 skills" test_install_omp
-run_test "Exactly 24 SKILL.md files for omp" test_omp_skill_count
+run_test "install.sh --agent omp installs 25 skills" test_install_omp
+run_test "Exactly 25 SKILL.md files for omp" test_omp_skill_count
 run_test "omp install writes an install manifest" test_omp_writes_install_manifest
 run_test "omp honors PI_CODING_AGENT_DIR relocation" test_omp_honors_relocated_agent_base
 run_test "setup.sh --agent omp merges the orchestrator prompt" test_setup_omp_writes_orchestrator
@@ -7201,7 +7211,7 @@ test_g_setup_without_review_is_a_full_review_free_setup() {
     assert_dir_exists "$base/judgment-day" || return 1    # quality still on
     local count
     count=$(find "$base" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "19" "$count" "full setup --without review lands 19 skills" || return 1
+    assert_eq "20" "$count" "full setup --without review lands 20 skills" || return 1
     # A genuinely full setup: Claude Code hooks were still installed.
     assert_file_exists "$HOME/.claude/settings.json" || return 1
     return 0
@@ -7219,7 +7229,7 @@ test_g_setup_with_lang_adds_language_skills() {
     assert_dir_exists "$HOME/.claude/skills/go-testing" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "setup.sh --with lang lands 25 skills" || return 1
+    assert_eq "26" "$count" "setup.sh --with lang lands 26 skills" || return 1
     return 0
 }
 
@@ -7241,7 +7251,7 @@ test_g_setup_reinstall_without_review_prunes() {
 # --- (b) install.sh wrapper maps each documented flag onto setup.sh --------------
 
 test_g_wrapper_agent_maps_to_full_setup() {
-    # install.sh --agent NAME runs the SAME full setup.sh install (24 skills) and
+    # install.sh --agent NAME runs the SAME full setup.sh install (25 skills) and
     # writes setup.sh's slug-tool receipt with the setup-only keys — proof the full
     # installer ran through the delegate, not install.sh's old skills-only path.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
@@ -7262,7 +7272,7 @@ test_g_wrapper_all_global_installs_five_unconditionally() {
     for d in "$HOME/.claude/skills" "$HOME/.config/opencode/skills" "$HOME/.codex/skills" \
              "$HOME/.pi/agent/skills" "$HOME/.omp/agent/skills"; do
         local c; c=$(find "$d" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-        assert_eq "24" "$c" "all-global must install 24 skills into $d" || return 1
+        assert_eq "25" "$c" "all-global must install 25 skills into $d" || return 1
     done
     return 0
 }
@@ -7273,7 +7283,7 @@ test_g_wrapper_forwards_group_flags() {
     [ -d "$HOME/.claude/skills/review-risk" ] && { echo "--without review not forwarded through the wrapper"; return 1; }
     local count
     count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "19" "$count" "wrapper --without review lands 19 skills" || return 1
+    assert_eq "20" "$count" "wrapper --without review lands 20 skills" || return 1
     return 0
 }
 
@@ -7361,7 +7371,7 @@ test_g_setup_missing_examples_fails_loud_before_write() {
 echo -e "${BOLD}UNIT-G (issue #38) — collapse install.sh into setup.sh${NC}"
 run_test "setup.sh --without review is a full review-free setup" test_g_setup_without_review_is_a_full_review_free_setup
 run_test "setup.sh --without sdd-core is rejected" test_g_setup_without_rejects_required_group
-run_test "setup.sh --with lang adds language skills (25)" test_g_setup_with_lang_adds_language_skills
+run_test "setup.sh --with lang adds language skills (26)" test_g_setup_with_lang_adds_language_skills
 run_test "setup.sh --without review re-install prunes stale review" test_g_setup_reinstall_without_review_prunes
 run_test "wrapper --agent maps to the full setup.sh install" test_g_wrapper_agent_maps_to_full_setup
 run_test "wrapper all-global installs all five (no detection)" test_g_wrapper_all_global_installs_five_unconditionally
@@ -8297,6 +8307,481 @@ echo -e "${BOLD}UNIT-K (issue #71): uninstall silent-success paths${NC}"
 run_test "uninstall refuses a corrupt opencode.json (non-zero, names the config)" test_k_uninstall_refuses_a_corrupt_opencode_config
 run_test "uninstall refuses a corrupt tui.json with jq present (logo plugin survives)" test_k_uninstall_refuses_a_corrupt_tui_json_with_jq_present
 run_test "uninstall refuses a 'dir/' receipt entry and still sweeps the rest" test_k_uninstall_refuses_a_dir_slash_entry_and_finishes_the_rest
+
+echo ""
+
+# ============================================================================
+# UNIT-L (issue #73): session identity — persona, the user's name, sdd-learn
+#
+# Three additions share one plumbing point (the settings the preflight already
+# resolves at session start), and each carries a property that breaks silently:
+#
+#   * persona ABSENT must stay indistinguishable from the pre-#73 install. The
+#     installer must never read, branch on, or template the setting.
+#   * a persona that IS set must reach the orchestrator's conversation and stop
+#     there. Losing the artifact-boundary clause while keeping the persona line
+#     is the exact failure #73 exists to prevent, and no other case in this file
+#     would notice it.
+#   * the user's name is resolved per-machine from git and must never reach a
+#     file git would carry into a commit. `openspec/config.yaml` is SHARED, so a
+#     name persisted there greets every teammate as whoever ran `sdd-init`.
+#   * `sdd-learn` ships in the manifest's `optional` group, which is in setup.sh's
+#     default active set — so it installs by default, and every skill count in
+#     this file moved 24 -> 25 for it (120 -> 125 across the five global targets).
+#
+# NOTE on the control run. A "byte-identical to before the feature" case invites
+# `git show main:examples/claude-code/CLAUDE.md` as its control, but
+# .github/workflows/pr-check.yml checks out at actions/checkout's default depth
+# of 1: `main` is not a ref on CI, so a history-based control would either fail
+# there or degrade to a skip — a vacuous green in the one place it matters most.
+# The control used instead needs no history and is stronger for what is actually
+# claimed: the same repo state installed three ways (no settings file at all /
+# `persona: neutral` / `persona: rioplatense`) must produce three byte-identical
+# trees. Persona-absent behaving differently would diverge them; the installer
+# templating the persona anywhere would diverge them.
+# ============================================================================
+
+# Write the `openspec/config.yaml` shape `sdd-init` persists into the repo at $1,
+# carrying the persona in $2. Trimmed to the settings block these cases need — the
+# canonical schema lives in skills/sdd-init/SKILL.md; what is required here is a
+# real settings home with a real persona key, not a full fixture.
+write_sdd_init_config() {
+    local repo="$1" persona="$2"
+    mkdir -p "$repo/openspec"
+    {
+        printf '# openspec/config.yaml\n'
+        printf 'schema: spec-driven\n'
+        printf 'artifact_store:\n'
+        printf '  mode: openspec\n'
+        printf 'execution_mode: supervised\n'
+        printf 'compliance_mode: behavioral\n'
+        printf 'persona: %s\n' "$persona"
+        printf 'tdd:\n'
+        printf '  enabled: false\n'
+        printf 'kanban:\n'
+        printf '  enabled: false\n'
+    } > "$repo/openspec/config.yaml"
+}
+
+# Fail unless the installed trees at $1 and $2 are byte-identical. `.git` is
+# excluded because the two repos are genuinely different repositories, and
+# `openspec/` because it is the settings home the caller deliberately varies —
+# it is the INPUT, not part of what the installer produced. $3 names the
+# comparison so a failure says which pair diverged.
+assert_installed_trees_identical() {
+    local a="$1" b="$2" what="$3"
+    local out
+    out="$(diff -r -x '.git' -x 'openspec' "$a" "$b" 2>&1)" || true
+    if [ -n "$out" ]; then
+        echo "  $what: the installed trees differ"
+        printf '%s\n' "$out" | head -20
+        return 1
+    fi
+    return 0
+}
+
+# Print the kurama orchestrator block of the prompt file $1 — everything strictly
+# between the BEGIN/END markers, so a user's own rules above or below the block
+# can never answer for it. Empty when the file or the markers are missing, which
+# is why every caller size-checks the result before grepping it.
+kurama_block() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    awk '/<!-- BEGIN:kurama -->/ { f = 1; next } /<!-- END:kurama -->/ { f = 0 } f' "$file"
+}
+
+# Fail unless $1 is a plausible orchestrator block rather than the empty string a
+# missing file or an unbalanced marker pair yields. Every `grep -q ... || return 1`
+# in this section is a pass-by-default over an empty haystack without it.
+assert_block_is_substantial() {
+    local block="$1"
+    local bytes
+    bytes=$(printf '%s' "$block" | wc -c | tr -d ' ')
+    if [ "$bytes" -lt 2000 ]; then
+        echo "  the extracted kurama block is ${bytes}B — the markers or the merge are broken,"
+        echo "  and every content assertion below would pass over an empty string"
+        return 1
+    fi
+    return 0
+}
+
+# Fail unless the ERE $2 matches a line of $1 (case-insensitively). $3 names the
+# contract clause, so a failure reports what the prompt lost rather than a regex.
+assert_matches() {
+    local haystack="$1" pattern="$2" what="$3"
+    if printf '%s\n' "$haystack" | grep -Eqi "$pattern"; then
+        return 0
+    fi
+    echo "  the shipped text no longer carries: $what"
+    echo "    (nothing matched: $pattern)"
+    return 1
+}
+
+# The inverse: fail when the ERE $2 DOES match.
+assert_not_matches() {
+    local haystack="$1" pattern="$2" what="$3"
+    if printf '%s\n' "$haystack" | grep -Eqi "$pattern"; then
+        echo "  the shipped text must not carry: $what"
+        printf '%s\n' "$haystack" | grep -Ein "$pattern" | head -3 | awk '{ print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+# Print the file $1 as a single line, newlines collapsed to spaces. Every contract
+# sentence pinned in this section is a wrapped markdown bullet, so a line-oriented
+# match would miss it for a reason that has nothing to do with the contract.
+flatten_file() {
+    tr '\n' ' ' < "$1"
+}
+
+# Print every tracked path in the repo $1 whose CONTENT holds the literal $2.
+# Routed through `git grep` on purpose: "tracked" then means what git itself
+# would carry into a commit — .gitignore and all — rather than what a filesystem
+# walk happens to find.
+tracked_files_containing() {
+    local repo="$1" needle="$2"
+    git -C "$repo" grep -lF -- "$needle" 2>/dev/null || true
+}
+
+# validate_skills.sh's own frontmatter rule: the file must open with `---` on line
+# 1 and close the fence later. A file that opens a fence and never closes it has
+# no frontmatter at all, rather than a frontmatter that is the whole file.
+skill_frontmatter_fence_closed() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+    head -1 "$file" | grep -q '^---[[:space:]]*$' || return 1
+    tail -n +2 "$file" | grep -q '^---[[:space:]]*$' || return 1
+    return 0
+}
+
+# Print the YAML frontmatter of $1 — the lines strictly between the opening and
+# closing fences. Callers must have checked the fence closes first.
+skill_frontmatter() {
+    awk 'NR == 1 { next } /^---[[:space:]]*$/ { exit } { print }' "$1"
+}
+
+test_l_persona_absent_installs_a_byte_identical_tree() {
+    # What would make this pass for the wrong reason: three installs that all
+    # FAILED leave three identically empty trees, and `diff -r` is silent over
+    # them. Three guards close that: every tree is asserted to be a COMPLETE
+    # install, the inputs are asserted to genuinely differ, and the comparator is
+    # proved to notice a planted file before its silence is trusted anywhere.
+    local none="$TEST_TMPDIR/persona-none"
+    local neutral="$TEST_TMPDIR/persona-neutral"
+    local preset="$TEST_TMPDIR/persona-preset"
+    make_git_repo "$none"
+    make_git_repo "$neutral"
+    make_git_repo "$preset"
+    write_sdd_init_config "$neutral" neutral
+    write_sdd_init_config "$preset" rioplatense
+
+    local d
+    for d in "$none" "$neutral" "$preset"; do
+        bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$d" \
+            --non-interactive --without-engram > /dev/null 2>&1 \
+            || { echo "project-scope setup exited non-zero for ${d##*/}"; return 1; }
+        assert_all_skills_installed "$d/.claude/skills" || return 1
+        assert_eq "${#EXPECTED_SKILLS[@]}" "$(count_skill_files "$d/.claude/skills")" \
+            "${d##*/} is not a complete install — an empty tree compares equal to anything" || return 1
+        assert_balanced_kurama_block "$d/CLAUDE.md" || return 1
+    done
+
+    # The inputs really did differ, or this compares three copies of one question.
+    grep -q '^persona: rioplatense$' "$preset/openspec/config.yaml" \
+        || { echo "the preset variant never received persona: rioplatense"; return 1; }
+    grep -q '^persona: neutral$' "$neutral/openspec/config.yaml" \
+        || { echo "the neutral variant never received persona: neutral"; return 1; }
+    if [ -e "$none/openspec/config.yaml" ]; then
+        echo "the persona-absent variant must have NO settings file at all"
+        return 1
+    fi
+
+    # Positive control for the comparator itself.
+    printf 'sentinel\n' > "$neutral/.kurama-tree-compare-sentinel"
+    if assert_installed_trees_identical "$none" "$neutral" "positive control" > /dev/null 2>&1; then
+        rm -f "$neutral/.kurama-tree-compare-sentinel"
+        echo "diff -r stayed silent over a planted file — its silence below proves nothing"
+        return 1
+    fi
+    rm -f "$neutral/.kurama-tree-compare-sentinel"
+
+    assert_installed_trees_identical "$none" "$neutral" \
+        "persona absent vs persona: neutral" || return 1
+    assert_installed_trees_identical "$none" "$preset" \
+        "persona absent vs persona: rioplatense" || return 1
+    return 0
+}
+
+test_l_neutral_and_absent_are_the_same_declared_no_op() {
+    # The byte-identical trees above prove the INSTALLER is persona-blind. They say
+    # nothing about the orchestrator, which resolves the setting at runtime out of
+    # files this repo ships — so those files have to state the no-op themselves.
+    #
+    # The sharpest observable of the no-op is that `_shared/personas.md` is never
+    # opened on the neutral or absent path. This suite CANNOT watch that read: the
+    # reader is a model consuming a prompt, and install_test.sh runs installers and
+    # inspects files — there is no session to trace and no descriptor to watch. What
+    # it can pin, and does, is the instruction that forbids the read, in the exact
+    # file the orchestrator executes. Anything stronger needs a session-level probe
+    # this repo does not have, and pretending otherwise would be the worst outcome:
+    # a case that reads like it proves the read never happens and proves nothing.
+    #
+    # Both paths are pinned, not just the absent one. `sdd-init` writes
+    # `persona: neutral` EXPLICITLY today, so absent is the legacy shape and
+    # explicit-neutral is what almost every real settings home carries.
+    #
+    # What would make this pass for the wrong reason: grepping the whole CLAUDE.md
+    # would also match a user's own rules outside the block, and grepping a MISSING
+    # file matches nothing at all while the `|| return 1` chain still reads as a
+    # pass. So the prompt is narrowed to the block between the markers and
+    # size-checked, and every protocol file is asserted to exist before it is read.
+    local repo="$TEST_TMPDIR/persona-absent-prompt"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --non-interactive --without-engram > /dev/null 2>&1 \
+        || { echo "project-scope setup exited non-zero"; return 1; }
+
+    local block
+    block="$(kurama_block "$repo/CLAUDE.md")"
+    assert_block_is_substantial "$block" || return 1
+    assert_matches "$block" 'persona.*neutral.*(today|unchanged|no-op|exact behavio)' \
+        "absent/neutral declared a no-op in the prompt (today's behavior, no voice adopted)" || return 1
+
+    # The preflight that actually resolves the key. Pinned against the skill file the
+    # orchestrator executes, never against docs/ — the two can drift and only one runs.
+    local protocol="$repo/.claude/skills/_shared/orchestrator-sdd-protocol.md"
+    assert_file_exists "$protocol" || return 1
+    assert_file_not_empty "$protocol" 1000 || return 1
+    local proto_flat
+    proto_flat="$(flatten_file "$protocol")"
+
+    assert_matches "$proto_flat" 'do not read.{0,40}personas\.md' \
+        "the instruction NOT to open the preset registry on the neutral/absent path" || return 1
+    assert_matches "$proto_flat" 'read the file only in this case' \
+        "the read confined to the known-preset branch (nothing else may open the registry)" || return 1
+    assert_matches "$proto_flat" 'behaves exactly as it did before the key existed' \
+        "the equivalence contract (no persona key == the pre-#73 session)" || return 1
+    assert_matches "$proto_flat" 'persona: neutral.{0,40}written explicitly.{0,40}identical to absent' \
+        "explicit neutral declared identical to absent (the path sdd-init actually writes)" || return 1
+    # A committed config means a typo in it reaches all three teammates at once, so
+    # the unknown-value branch must degrade, never fail.
+    assert_matches "$proto_flat" 'unknown value.{0,40}fall back to.{0,20}neutral' \
+        "the unknown-value fallback to neutral" || return 1
+    assert_matches "$proto_flat" 'never fail the preflight' \
+        "the rule that an unknown persona never fails the preflight" || return 1
+
+    local registry_flat
+    registry_flat="$(flatten_file "$repo/.claude/skills/_shared/personas.md")"
+    assert_matches "$registry_flat" 'degrades to.{0,20}neutral.{0,40}never fails' \
+        "the same degrade-never-fail rule restated in the registry" || return 1
+    return 0
+}
+
+test_l_persona_reaches_the_orchestrator_conversation_only() {
+    # The persona setting is inert at install time — the case above pins that — so
+    # what is verified here is the prompt the orchestrator will consult once the
+    # setting resolves: it must carry the persona instruction AND, in the same
+    # prompt, the boundary that keeps the persona out of every artifact.
+    #
+    # What would make this pass for the wrong reason: a single `grep -q persona`
+    # over the whole file passes on a prompt that adopts a voice and says nothing
+    # about artifacts — the exact regression #73 is designed to avoid. So the
+    # boundary clause is asserted as its own anchor, on the extracted block, and
+    # the block is size-checked so an empty haystack cannot answer for it.
+    local repo="$TEST_TMPDIR/persona-set"
+    make_git_repo "$repo"
+    write_sdd_init_config "$repo" rioplatense
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --non-interactive --without-engram > /dev/null 2>&1 \
+        || { echo "project-scope setup exited non-zero"; return 1; }
+
+    local block
+    block="$(kurama_block "$repo/CLAUDE.md")"
+    assert_block_is_substantial "$block" || return 1
+
+    assert_matches "$block" 'persona' \
+        "the persona instruction" || return 1
+    # THE half that matters.
+    assert_matches "$block" '(specs|proposals|designs).*commit messages.*language' \
+        "the artifact boundary (specs/proposals/designs/commits keep the project's language)" || return 1
+    assert_matches "$block" 'never an override' \
+        "the precedence rule (an explicit user instruction beats the configured persona)" || return 1
+    # #73 composes the persona with the Language Domain Contract already in core.md
+    # rather than replacing it: the persona sets the register of the half that was
+    # ALREADY going out in the user's language, and grants nothing on the artifact
+    # half. Both halves are asserted, because a persona that quietly widened the
+    # contract would still satisfy the persona anchors above on their own.
+    assert_matches "$block" 'language domain contract' \
+        "the Language Domain Contract the persona composes with" || return 1
+    assert_matches "$block" 'artifacts default to neutral english' \
+        "the artifact half of that contract (a persona must not widen it)" || return 1
+    # #73 keeps the presets in a registry file "so adding one is a file, not a code
+    # change". A preset NAME baked into the shipped prompt would break that, and
+    # would also mean this case was reading its own input back.
+    assert_not_matches "$block" 'rioplatense' \
+        "a hardcoded preset name (presets belong to _shared/personas.md, not the prompt)" || return 1
+
+    # The registry the prompt points at has to be installed, or a resolved persona
+    # has nothing to resolve against — and the boundary must be restated there,
+    # since that file is what a non-neutral session actually reads.
+    local registry="$repo/.claude/skills/_shared/personas.md"
+    assert_file_exists "$registry" || return 1
+    assert_file_not_empty "$registry" 500 || return 1
+    grep -q 'rioplatense' "$registry" \
+        || { echo "the installed personas.md carries no rioplatense preset"; return 1; }
+    local registry_flat
+    registry_flat="$(flatten_file "$registry")"
+    assert_matches "$registry_flat" '(specs|proposals|designs).*commit messages.*language' \
+        "the artifact boundary, restated in the registry a non-neutral session actually reads" || return 1
+    return 0
+}
+
+test_l_user_name_never_lands_in_a_committed_file() {
+    # #73 resolves the user's name from `git config user.name` precisely so it stays
+    # per-machine. `openspec/config.yaml` is committed and shared, so a name written
+    # into it — or into the receipt, or into a generated prompt — greets all three
+    # teammates as whoever happened to run `sdd-init`.
+    #
+    # What would make this pass for the wrong reason: `git grep` finding nothing
+    # because nothing is tracked, because the search itself is broken, or because
+    # the name was never distinctive enough to tell from ordinary prose. Guarded by
+    # asserting the name IS configured, that a real install IS staged, and — the
+    # one that matters — that the same search finds a deliberately planted copy
+    # before it is trusted to report zero.
+    local repo="$TEST_TMPDIR/named-proj"
+    local who='Zzyzx Quillfeather'
+    make_git_repo "$repo"
+    # Set BOTH homes for the name. Repo-local alone would only be visible to a
+    # leak that ran `git -C <target> config`; the global one (safe — HOME is the
+    # per-test sandbox) is what a resolution running in the installer's own cwd
+    # would read. A case blind to half the resolution paths is a case that reports
+    # clean over the leak it did not think of.
+    git -C "$repo" config user.name "$who" >/dev/null 2>&1
+    git config --global user.name "$who" >/dev/null 2>&1
+    git config --global user.email test@example.com >/dev/null 2>&1
+    assert_eq "$who" "$(git -C "$repo" config user.name)" \
+        "the distinctive name was not configured — the search below would prove nothing" || return 1
+    assert_eq "$who" "$(git config --global user.name)" \
+        "the sandboxed global git identity was not set — a leak from the installer's cwd would go unseen" || return 1
+
+    write_sdd_init_config "$repo" rioplatense
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --non-interactive --without-engram > /dev/null 2>&1 \
+        || { echo "project-scope setup exited non-zero"; return 1; }
+    git -C "$repo" add -A >/dev/null 2>&1
+
+    # A real install is staged: the search has something to look through.
+    local tracked
+    tracked=$(git -C "$repo" ls-files | wc -l | tr -d ' ')
+    if [ "$tracked" -lt 20 ]; then
+        echo "only $tracked tracked files — nothing was installed, so finding no name means nothing"
+        return 1
+    fi
+    git -C "$repo" ls-files | grep -qx 'CLAUDE.md' \
+        || { echo "the merged orchestrator prompt is not tracked — it was never searched"; return 1; }
+    git -C "$repo" ls-files | grep -qx 'openspec/config.yaml' \
+        || { echo "the settings home is not tracked — it was never searched"; return 1; }
+
+    # Positive control: plant the name in a tracked file and require the search to
+    # find it, then take it back out.
+    printf '%s\n' "$who" > "$repo/.kurama-name-probe"
+    git -C "$repo" add -A >/dev/null 2>&1
+    if [ -z "$(tracked_files_containing "$repo" "$who")" ]; then
+        echo "the tracked-content search missed a planted copy of the name — it cannot report a clean tree"
+        return 1
+    fi
+    git -C "$repo" rm -q --cached .kurama-name-probe >/dev/null 2>&1
+    rm -f "$repo/.kurama-name-probe"
+
+    local hits
+    hits="$(tracked_files_containing "$repo" "$who")"
+    if [ -n "$hits" ]; then
+        echo "the user's name reached files git would commit:"
+        printf '%s\n' "$hits" | head -10 | awk '{ print "    " $0 }'
+        return 1
+    fi
+    # Named explicitly, because these three are the ones a future change is most
+    # likely to start writing the name into.
+    if grep -qF "$who" "$repo/openspec/config.yaml"; then
+        echo "the name was persisted into the SHARED openspec/config.yaml"; return 1
+    fi
+    if grep -qF "$who" "$repo/.kurama-install-manifest.json"; then
+        echo "the name was recorded in the install receipt"; return 1
+    fi
+    if grep -qF "$who" "$repo/CLAUDE.md"; then
+        echo "the name was baked into the merged orchestrator prompt"; return 1
+    fi
+    # The generated overlays this repo ships are committed files too: they must
+    # carry the RULE about the name, never a resolved value.
+    grep -Eqi "name .*(never|not) written to a committed file" "$REPO_DIR/examples/claude-code/CLAUDE.md" \
+        || { echo "the shipped prompt states no rule keeping the name out of committed files"; return 1; }
+    return 0
+}
+
+test_l_sdd_learn_installs_by_default() {
+    # `sdd-learn` sits in the manifest's `optional` group, which is in setup.sh's
+    # SETUP_ACTIVE_GROUPS — so a plain install ships it, with no flag.
+    #
+    # What would make this pass for the wrong reason: asserting only that the
+    # directory exists, which an empty leftover directory satisfies. The file is
+    # size-checked, and the count is pinned to EXPECTED_SKILLS so adding the skill
+    # without moving the totals cannot slip through.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local base="$HOME/.claude/skills"
+    assert_dir_exists "$base/sdd-learn" || return 1
+    assert_file_exists "$base/sdd-learn/SKILL.md" || return 1
+    assert_file_not_empty "$base/sdd-learn/SKILL.md" 500 || return 1
+    assert_eq "${#EXPECTED_SKILLS[@]}" "$(count_skill_files "$base")" \
+        "the default set must be exactly the EXPECTED_SKILLS list, sdd-learn included" || return 1
+    return 0
+}
+
+test_l_sdd_learn_is_a_well_formed_registered_skill() {
+    # Installed is not the same as loadable: a SKILL.md whose frontmatter fence
+    # never closes, or whose name:/description: are empty, is dead weight in every
+    # harness. validate_skills.sh is the shipped gate for exactly that, so it is
+    # run here rather than reimplemented — but running it proves nothing about
+    # sdd-learn unless sdd-learn is registered in the manifest it walks, which is
+    # asserted first.
+    assert_file_exists "$MANIFEST_FILE" || return 1
+    grep -q '"sdd-learn"' "$MANIFEST_FILE" \
+        || { echo "sdd-learn is not registered in skills/manifest.json — validate_skills.sh never sees it"; return 1; }
+
+    local src="$REPO_DIR/skills/sdd-learn/SKILL.md"
+    assert_file_exists "$src" || return 1
+    skill_frontmatter_fence_closed "$src" \
+        || { echo "skills/sdd-learn/SKILL.md: the frontmatter fence never closes"; return 1; }
+    local fm
+    fm="$(skill_frontmatter "$src")"
+    printf '%s\n' "$fm" | grep -qE '^name:[[:space:]]*sdd-learn[[:space:]]*$' \
+        || { echo "skills/sdd-learn/SKILL.md: frontmatter 'name:' is not sdd-learn"; return 1; }
+    printf '%s\n' "$fm" | grep -qE '^description:[[:space:]]*[^[:space:]]' \
+        || { echo "skills/sdd-learn/SKILL.md: frontmatter 'description:' is missing or empty"; return 1; }
+    # A folded/literal scalar (`description: >`) satisfies the rule above with an
+    # empty body, so the continuation has to carry real text of its own.
+    if printf '%s\n' "$fm" | grep -qE '^description:[[:space:]]*[>|][-+0-9]*[[:space:]]*$'; then
+        printf '%s\n' "$fm" | grep -qE '^[[:space:]]+[^[:space:]]' \
+            || { echo "skills/sdd-learn/SKILL.md: 'description:' folds into an empty block"; return 1; }
+    fi
+
+    local output status=0
+    output=$(bash "$VALIDATE_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "validate_skills.sh exited $status with sdd-learn registered:"
+        printf '%s\n' "$output" | grep -a 'FAIL' | head -5
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-L (issue #73): session identity — persona, name, sdd-learn${NC}"
+run_test "persona absent installs a byte-identical tree" test_l_persona_absent_installs_a_byte_identical_tree
+run_test "neutral and absent are the same declared no-op" test_l_neutral_and_absent_are_the_same_declared_no_op
+run_test "a set persona reaches conversation only, never artifacts" test_l_persona_reaches_the_orchestrator_conversation_only
+run_test "the user's name never lands in a committed file" test_l_user_name_never_lands_in_a_committed_file
+run_test "sdd-learn installs by default (optional group)" test_l_sdd_learn_installs_by_default
+run_test "sdd-learn is a well-formed, registered skill" test_l_sdd_learn_is_a_well_formed_registered_skill
 
 echo ""
 

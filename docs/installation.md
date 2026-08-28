@@ -10,6 +10,7 @@ For manual installation or specific tools, see below.
 ## Table of Contents
 - [Install scope: global vs. project (trial a repo)](#install-scope-global-vs-project-trial-a-repo)
 - [Engram (optional persistence engine)](#engram-optional-persistence-engine)
+- [Session identity: persona and name](#session-identity-persona-and-name)
 - [Claude Code](#claude-code)
 - [OpenCode](#opencode)
 - [Codex](#codex)
@@ -186,6 +187,91 @@ Codex's TOML), backup + atomic, leaving every other MCP server and key intact.
 
 ---
 
+## Session identity: persona and name
+
+Two settings shape how the orchestrator **talks to you**. Neither one changes
+what it **writes**.
+
+### `persona` — the conversational register
+
+**This is not a "speak Spanish" switch.** The orchestrator already speaks your
+language: its **Language Domain Contract** — shipped in every generated
+orchestrator, from `examples/_templates/core.md` — requires every direct reply,
+clarifying question and status update to be written in the language *you* write
+in, while generated artifacts default to neutral English. `persona` does not
+move that line and never chooses the language. It picks the **register and
+vocabulary of the half that was already going out in your language.**
+
+Kurama ships no voice of its own by default, which is why it coexists with
+Claude Code's output style, `gentle-pi`, and whatever else already sets a tone.
+The register is therefore a **setting, not a hardcode**: a top-level `persona:`
+key resolved by the same preflight that resolves the artifact store.
+
+| Value | Effect |
+|-------|--------|
+| `neutral` | **The default — today's exact behavior.** Nothing changes for an existing install, or for anyone who does not opt in. |
+| `rioplatense` | A shipped preset for Spanish-language conversation: voseo (`vos`, `tenés`, `fijate`, `dale`), Latin American technical vocabulary, warm and close in tone while staying technically precise. Never Peninsular Spanish. |
+
+The presets live in `skills/_shared/personas.md`, so adding one is a file, not a
+code change.
+
+**Where it lives:** `openspec/config.yaml` — a **committed** file, deliberately,
+so the whole team shares the same register rather than each machine picking its
+own. In `engram` mode there is no `config.yaml`, so the value rides in the
+`sdd-init/{project}` context artifact along with every other pipeline setting
+(see [persistence.md](persistence.md#where-pipeline-settings-are-configured)).
+`sdd-init` asks the persona question once and persists the answer there.
+
+**Changing it later** — either way works: re-run `sdd-init`, which upserts the
+setting as it does for every setting it writes, or edit the key in
+`openspec/config.yaml` by hand. It is a plain config key.
+
+**A value that matches no shipped preset degrades to `neutral`** with a one-line
+note, and never fails the session. A typo in a committed file must not break the
+cycle for everyone who pulls it.
+
+**Boundary — conversation only.** Specs, proposals, designs, task lists, commit
+messages and code comments keep the project's own language: the artifact half of
+the Language Domain Contract is untouched. A repo whose specs are written in one
+teammate's dialect is worse off, not better. This is the same rule the repo
+already applies to process skills — they run inside the phases, they do not take
+the phases over.
+
+**Precedence — your machine wins.** The setting is a *project default for people
+who have not chosen*, never an override of a choice a teammate made on their own
+machine. Most specific first:
+
+1. an explicit instruction in the conversation ("contestame en inglés");
+2. the voice your own environment already imposes — a Claude Code output style,
+   `gentle-pi`, whatever your harness sets;
+3. Kurama's `persona:` setting from `openspec/config.yaml`;
+4. `neutral`.
+
+So: the team set `rioplatense`, but your harness speaks formal English — who
+wins? Your harness does. `orchestrator-sdd-protocol.md` already tells the
+orchestrator to match *the user's active persona*; this setting adds a default
+**underneath** that rule rather than replacing it.
+
+### Your name — resolved, never configured
+
+The orchestrator addresses you by name when it has one. It is resolved at
+session start, in this order:
+
+1. `git config user.name`;
+2. only if that is empty, `gh api user --jq '.name // .login'`;
+3. if neither answers, no name is used and nothing else changes.
+
+It is used in orchestrator conversation only, and sparingly — the greeting, the
+gates, the summary at the end of a cycle. Not in artifacts, not in every message.
+
+**Why this is deliberately not a config key.** `openspec/config.yaml` is
+committed and shared, so a name written into it would greet every teammate as
+whoever ran `sdd-init`. `git config user.name` is already per-machine, costs no
+network call, and every contributor has it set — which makes the name per-user
+by construction and keeps it out of every committed file.
+
+---
+
 ## Claude Code
 
 > **Automatic:** `./scripts/setup.sh --agent claude-code` handles all steps below,
@@ -264,7 +350,7 @@ for the full roster and the tools table.
 Installing the agents changes nothing about how skills or the orchestrator
 behave — a project that removes them keeps working exactly as before, with the
 orchestrator resolving models and skills itself per the Model Assignments table
-in [`examples/claude-code/CLAUDE.md`](../examples/claude-code/CLAUDE.md).
+in [`skills/_shared/model-assignments.md`](../skills/_shared/model-assignments.md).
 
 <a id="hooks-installed-automatically"></a>
 **Hooks (installed automatically).** `setup.sh --agent claude-code` now

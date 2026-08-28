@@ -60,6 +60,11 @@ rules:
     compliance_mode: behavioral   # behavioral | static
 ```
 
+The same home also carries `persona:` — a **top-level** key, not part of
+`rules.verify`, because it steers the conversation rather than the pipeline. The
+preflight resolves it alongside the artifact store. See
+[installation.md](installation.md#session-identity-persona-and-name).
+
 ## Hybrid mode: authority and reconciliation
 
 Filesystem is authoritative in `hybrid`; Engram is a searchable mirror, not a
@@ -100,6 +105,58 @@ infrastructure, not an SDD project artifact:
   store the project chose, because the hooks cannot query Engram; see
   [persistence-contract.md](../skills/_shared/persistence-contract.md) →
   *Hook-visible cycle markers* and [docs/hooks.md](hooks.md).
+
+## `MEMORY.md` — durable team knowledge
+
+`MEMORY.md` lives at the repo root and is **committed**, like everything else
+the team versions. It holds the accumulated knowledge about *this* project that
+the repo does not already record, and it is written by the `sdd-learn` skill —
+automatically at cycle close, invoked by the orchestrator right after
+`sdd-archive` (the moment the cycle's learnings are freshest and complete), and
+on demand whenever you ask for it mid-session.
+
+It is **independent of the persistence mode**. `artifact_store` decides where a
+change's SDD artifacts go; it says nothing about where the team's knowledge
+lives. `MEMORY.md` sits at the repo root and is committed in every mode,
+`engram` included — "artifacts live in Engram" never means "nothing is on disk".
+The **first `sdd-learn` write creates the file**; `sdd-init` does not, because an
+empty `MEMORY.md` committed into a repo that never uses the feature is noise.
+
+This is a **fourth store**, and the boundary between the four has to be
+explicit or `MEMORY.md` becomes a dumping ground:
+
+| Store | Scope | Holds |
+|-------|-------|-------|
+| `openspec/` | committed | the SDD artifacts of each change |
+| `.kurama/` | machine-local, gitignored | harness state, registry, cycle markers |
+| Engram | machine-local | cross-session recall for one developer |
+| **`MEMORY.md`** | **committed** | **durable team knowledge about the project** |
+
+The distinction that matters day to day is the last two: **Engram is yours,
+`MEMORY.md` is the team's.** Engram is a machine-local memory engine — it
+survives *your* compactions and *your* sessions, and a teammate who never
+installs it has no access to a single line of it. `MEMORY.md` travels through
+git, so a teammate without Engram loses nothing from it. That is the whole
+reason it exists as a separate file rather than as more Engram artifacts.
+
+**What goes in it** — non-obvious discoveries, gotchas and failure modes,
+conventions the team established, decisions together with the rationale behind
+them, and the reason a surprising piece of code is the way it is. **What does
+not** — anything git history, the specs, or the code already say.
+
+The admission test for an entry is one question: **would a teammate waste an
+hour rediscovering this?** If the answer is no, it does not go in — `sdd-learn`
+refuses to write an entry it cannot justify against that test.
+
+**Curation rules.** This file is read at session start, so every line it grows
+is a context tax paid on every session, by everyone. Unbounded growth is the
+failure mode:
+
+- one entry per learning — the entry format itself (fields, dating, which change
+  it names) is fixed by the skill, not restated here, so the two cannot drift:
+  see [`skills/sdd-learn/SKILL.md`](../skills/sdd-learn/SKILL.md);
+- a new entry that supersedes an old one **replaces** it — entries do not stack;
+- an entry that later proves wrong is **deleted**, not annotated.
 
 ## OpenSpec File Structure
 

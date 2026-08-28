@@ -19,7 +19,7 @@
       "required": false
     },
     "optional": {
-      "description": "Optional language/testing skills plus the GitHub Projects kanban-github module. Installed by default; opt out with --without optional. Installing the kanban-github module does not activate the board \u2014 activation stays opt-in per project via kanban.enabled.",
+      "description": "Optional modules: the GitHub Projects kanban-github board and the sdd-learn MEMORY.md curator. Installed by default; opt out with --without optional. Installing the kanban-github module does not activate the board \u2014 activation stays opt-in per project via kanban.enabled. sdd-learn is active as soon as it installs; when it is absent the orchestrator skips the post-archive handoff silently.",
       "default": true,
       "required": false
     },
@@ -129,6 +129,10 @@
     },
     {
       "name": "kanban-github",
+      "group": "optional"
+    },
+    {
+      "name": "sdd-learn",
       "group": "optional"
     },
     {

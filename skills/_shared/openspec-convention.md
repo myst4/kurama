@@ -146,6 +146,8 @@ schema: spec-driven
 
 execution_mode: supervised  # supervised | auto; supervised stops at human gates, auto continues unless blocked/verify FAIL
 
+persona: neutral  # neutral | rioplatense; conversation tone ONLY — artifacts keep the project's language. Preset registry: skills/_shared/personas.md
+
 context: |
   Tech stack: {detected stack}
   Architecture: {detected patterns}

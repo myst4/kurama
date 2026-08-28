@@ -25,6 +25,7 @@ When working on this project, load the relevant skill(s) BEFORE writing any code
 | `sdd-apply` | When implementing tasks, writing actual code following specs and design. | [`skills/sdd-apply/SKILL.md`](skills/sdd-apply/SKILL.md) |
 | `sdd-verify` | When validating that implementation matches specs, design, and tasks. | [`skills/sdd-verify/SKILL.md`](skills/sdd-verify/SKILL.md) |
 | `sdd-archive` | When archiving a completed change after implementation and verification. | [`skills/sdd-archive/SKILL.md`](skills/sdd-archive/SKILL.md) |
+| `sdd-learn` | When capturing a cycle's durable learnings into the committed `MEMORY.md` — invoked right after `sdd-archive`, and on request mid-session. | [`skills/sdd-learn/SKILL.md`](skills/sdd-learn/SKILL.md) |
 | `tdd` | When a phase resolves TDD as active (`tdd.enabled`) and needs the RED-GREEN-REFACTOR cycle contract — loaded by sdd-apply, referenced by sdd-tasks and sdd-verify. | [`skills/tdd/SKILL.md`](skills/tdd/SKILL.md) |
 | `skill-registry` | When creating or updating the skill registry for the project. | [`skills/skill-registry/SKILL.md`](skills/skill-registry/SKILL.md) |
 | `judgment-day` | When running a dual adversarial review, or user says "judgment day". | [`skills/judgment-day/SKILL.md`](skills/judgment-day/SKILL.md) |
