@@ -47,6 +47,43 @@ specs are the source of truth and a silent partial merge is unrecoverable withou
 
 The exploration artifact (`explore` in engram, `exploration.md` in openspec) is OPTIONAL — if absent, note it in `risks` and continue; do NOT block.
 
+## Mechanical Copy Contract (MANDATORY)
+
+Archiving is a MECHANICAL filesystem operation. Whenever an artifact is reproduced **without
+transformation** — a full-file spec copy, the change-folder move — its bytes MUST NEVER pass
+through the model's Read/Write path. A model that summarizes, truncates, reorders, or tidies a
+single byte while reporting success corrupts an audit trail that nothing downstream re-checks:
+`openspec/specs/` has exactly ONE writer, this skill, and the archive folder is never read again
+until someone needs it.
+
+1. **Native commands only.** Copy and move with `cp`, `cp -R`, `mv`, or `git mv` in the shell.
+   NEVER Read a file and Write its content to the destination.
+2. **A `diff -r` readback is MANDATORY after every copy and every move**, comparing the source
+   (or a pre-move snapshot of it) against the destination.
+3. **Empty `diff -r` output is the ONLY passing evidence.** Put the readback's VERBATIM output in
+   the phase result — including when it is empty, stated as such next to the exact command that
+   produced it. Any difference is truncation or alteration and FAILS the phase. A skipped,
+   missing, or unreported `diff -r` ALSO FAILS the phase. **Agent self-report is never
+   sufficient**: "I moved the folder and it looks correct" is not evidence — it is the same
+   sentence a silent truncation produces.
+4. **A destination collision REFUSES.** If the destination already exists (file, directory, or
+   symlink), STOP with source and destination both unchanged. Do NOT append a suffix, pick
+   another name, overwrite, merge, or delete anything. Return `status: blocked` naming both paths
+   and let a human resolve it.
+5. **No shell, no archive.** In `openspec`/`hybrid` mode, if the platform's tool allowlist does
+   not grant shell access, return `status: blocked` with the reason
+   `shell access required for mechanical archive copy is unavailable` and
+   `next_recommended: sdd-archive`. Do NOT fall back to Read/Write copying. A blocked archive is
+   recoverable; a silently corrupted source of truth is not. In `engram` mode there is no byte
+   copy to protect, but the Step 2 *Merge preservation readback* still applies — run it on temp
+   files, or, without a shell, enumerate both heading/scenario-ID lists verbatim in the phase
+   result and state the comparison explicitly.
+
+**Scope.** This contract governs reproduction WITHOUT transformation. The delta merge in Step 2
+(applying ADDED / MODIFIED / REMOVED / RENAMED into an EXISTING main spec) is a transformation and
+cannot be a `cp`; it carries its own mechanical guard — the *Merge preservation readback* in
+Step 2 — which is equally mandatory.
+
 ## What to Do
 
 ### Step 0: Read and Gate on the Verification Report
@@ -110,11 +147,15 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 **IF mode is `engram`:** Merge the change's delta into the cross-change MAIN SPEC artifacts `sdd-specs/{project}/{domain}` (one per domain) — the engram equivalent of the filesystem merge below. This is what makes specs a living source of truth in engram mode; do NOT skip it. The delta `spec` artifact (`sdd/{change-name}/spec`) concatenates all domains under domain headers (`# Delta for {Domain}`). Split it by domain and, FOR EACH domain:
 
 1. Retrieve the current main spec: `mem_search("sdd-specs/{project}/{domain}")` → `mem_get_observation(id)`.
-2. Apply the delta with the SAME semantics as the filesystem merge below:
+2. Apply the delta with the canonical semantics from `skills/_shared/openspec-convention.md` →
+   *Delta Spec Sections*. That section is the single definition, shared with `sdd-spec` (the
+   writer) and with the filesystem merge below — there is no engram-specific variant:
    - ADDED → append to the main spec's Requirements section
-   - MODIFIED → replace the matching requirement (match by `### Requirement: {name}`)
-   - REMOVED → delete the matching requirement
+   - MODIFIED → REPLACE the WHOLE matching requirement block, scenarios included (match by `### Requirement: {name}`, verbatim)
+   - REMOVED → delete the matching requirement block (the delta must carry `(Reason: ...)`)
+   - RENAMED → rewrite the heading in place, KEEPING the existing scenarios and their `S-{req}-{n}` IDs; never delete-and-recreate
    - PRESERVE every requirement the delta does NOT mention
+   - Run the **Merge preservation readback** (below, in the openspec branch) before upserting: write the RETRIEVED main spec and your MERGED text to two temp files and compare their `### Requirement:` / `#### Scenario:` lines. Every line present before and absent after MUST be accounted for by the delta, or you BLOCK. This matters MORE in engram mode than on the filesystem: there is no git history to recover a dropped scenario from.
    - If NO main spec exists yet for the domain, the delta IS the full spec — use it directly as the new main spec (first-cycle baseline).
 3. Refresh the frontmatter `last_updated` to today (ISO), then upsert:
    `mem_save(title/topic_key: "sdd-specs/{project}/{domain}", type: "architecture", project: "{project}", capture_prompt: false, content: {merged spec})`. The stable `topic_key` upserts in place, and `capture_prompt: false` keeps this automated main-spec upsert from capturing the user prompt (see `skills/_shared/engram-convention.md`).
@@ -125,29 +166,106 @@ Then continue to Step 3 (the archive report records the observation IDs for trac
 
 #### If Main Spec Exists (`openspec/specs/{domain}/spec.md`)
 
-Read the existing main spec and apply the delta:
+Read the existing main spec and apply the delta. **The four delta sections and their exact merge
+semantics are defined once, in `skills/_shared/openspec-convention.md` → *Delta Spec Sections*.**
+Resolve them there and apply them verbatim; do NOT re-derive them here. `sdd-spec` writes against
+that same section — the writer and the merger drifting apart is precisely how a delta comes to
+mean one thing when written and another when merged.
+
+What you apply (the canonical section above is authoritative):
 
 ```
-FOR EACH SECTION in delta spec:
-├── ADDED Requirements → Append to main spec's Requirements section
-├── MODIFIED Requirements → Replace the matching requirement in main spec
-└── REMOVED Requirements → Delete the matching requirement from main spec
+FOR EACH SECTION in delta spec — requirements matched by `### Requirement: {name}`, verbatim:
+├── ADDED Requirements    → Append to main spec's Requirements section
+├── MODIFIED Requirements → REPLACE the whole matching requirement block, scenarios included
+├── REMOVED Requirements  → Delete the matching requirement block (delta must carry a Reason)
+└── RENAMED Requirements  → Rewrite the heading in place, KEEPING the existing scenarios and
+                            their S-{req}-{n} IDs — never delete-and-recreate
 ```
 
 **Merge carefully:**
 - Match requirements by name (e.g., "### Requirement: Session Expiration")
 - Preserve all OTHER requirements that aren't in the delta
 - Maintain proper Markdown formatting and heading hierarchy
+- A MODIFIED block replaces the ENTIRE requirement. You CANNOT distinguish a deliberate scenario
+  deletion from an author who pasted only the scenario they edited — so run the preservation
+  readback below BEFORE the merged file becomes the source of truth
+
+#### Merge preservation readback (MANDATORY whenever the main spec already exists)
+
+The merge is the one archive operation the Mechanical Copy Contract cannot turn into a `cp`, so
+it gets a mechanical guard instead. Snapshot the main spec BEFORE writing the merge, then compare
+requirement headings and scenario IDs afterwards:
+
+```bash
+main_spec="openspec/specs/{domain}/spec.md"
+before_snapshot="$(mktemp "${TMPDIR:-/tmp}/sdd-mainspec.XXXXXX")"
+trap 'rm -f -- "$before_snapshot"' EXIT
+cp "$main_spec" "$before_snapshot"
+
+# ... write the merged main spec to "$main_spec" now, then: ...
+
+# Requirement headings and scenario IDs that existed BEFORE and are gone AFTER.
+# Lines prefixed "<" are losses; "> " lines are additions and are expected.
+diff \
+  <(grep -E '^(### Requirement:|#### Scenario:)' "$before_snapshot" | sort) \
+  <(grep -E '^(### Requirement:|#### Scenario:)' "$main_spec" | sort)
+```
+
+Every `<` line the diff reports MUST be accounted for by the delta:
+
+- a `### Requirement:` line only via a `## REMOVED Requirements` entry, or as the OLD name of a
+  `## RENAMED Requirements` entry;
+- a `#### Scenario:` line only because its entire requirement was REMOVED, or because a MODIFIED
+  block deletes it deliberately — and then the delta's `(Previously: ...)` line MUST say so.
+
+**Any loss the delta does not account for is the partial-MODIFIED data-loss case**: the author
+wrote a MODIFIED block without copying the full requirement. Do NOT write it through. Restore
+`$main_spec` from `$before_snapshot`, return `status: blocked` with
+`next_recommended: sdd-spec`, and name the EXACT scenario IDs that would have been deleted,
+quoting the diff verbatim in `executive_summary` / `risks`. Scenarios lost from the source of
+truth are unrecoverable without git history — and in engram mode, unrecoverable at all. A blocked
+archive is neither.
+
+An accounted-for removal that is still large keeps the existing destructive-merge rule: WARN the
+orchestrator and ask for confirmation before proceeding.
 
 #### If Main Spec Does NOT Exist
 
-The delta spec IS a full spec (not a delta). Copy it directly:
+The delta spec IS a full spec (not a delta). Copy it MECHANICALLY with the shell — do NOT Read
+the file and Write its content back, which routes every byte through model generation where a
+truncation is silent:
 
 ```bash
-# Copy new spec to main specs
-openspec/changes/{change-name}/specs/{domain}/spec.md
-  → openspec/specs/{domain}/spec.md
+source_spec="openspec/changes/{change-name}/specs/{domain}/spec.md"
+target_dir="openspec/specs/{domain}"
+target_path="$target_dir/spec.md"
+
+# Collision guard: REFUSE, never choose a name or overwrite.
+if [ -e "$target_path" ] || [ -L "$target_path" ]; then
+  printf 'main spec collision: %s already exists; %s left unchanged. Merge it as an existing main spec instead of copying over it.\n' "$target_path" "$source_spec" >&2
+  exit 1
+fi
+
+mkdir -p "$target_dir"
+
+temp_path=""
+cleanup_temp() { if [ -n "$temp_path" ]; then rm -f -- "$temp_path"; fi; return 0; }
+trap cleanup_temp EXIT
+temp_path="$(mktemp "$target_dir/.spec.md.XXXXXX")"
+
+cp "$source_spec" "$temp_path" || exit $?
+
+# MANDATORY readback — empty output is the ONLY passing evidence.
+diff -r "$source_spec" "$temp_path" || exit $?
+
+mv "$temp_path" "$target_path" || exit $?
+temp_path=""
 ```
+
+The copy lands on a temp file in the target directory and is only promoted after the readback
+passes, so a failed copy never leaves a half-written main spec. Paste the `diff -r` output —
+empty — into the phase result.
 
 #### Hybrid: mirror the merged spec to Engram
 
@@ -157,24 +275,91 @@ openspec/changes/{change-name}/specs/{domain}/spec.md
 
 **IF mode is `engram`:** Skip — there are no `openspec/` directories to move. The archive report in Engram serves as the audit trail.
 
-**IF mode is `openspec` or `hybrid`:** Move the entire change folder to archive with date prefix:
+**IF mode is `openspec` or `hybrid`:** Move the ENTIRE change folder to the archive with a date
+prefix, using a mechanical shell move. NEVER Read each artifact and Write it into the archive —
+that routes the whole audit trail through model generation:
 
-```
-openspec/changes/{change-name}/
-  → openspec/changes/archive/YYYY-MM-DD-{change-name}/
+```bash
+# Run this block as ONE shell transaction so the EXIT trap stays active.
+source="openspec/changes/{change-name}"
+destination="openspec/changes/archive/YYYY-MM-DD-{change-name}"
+
+# Pre-move recursive snapshot — this is what the readback compares against.
+snapshot_root="$(mktemp -d "${TMPDIR:-/tmp}/sdd-archive.XXXXXX")"
+trap 'rm -rf -- "$snapshot_root"' EXIT
+cp -R "$source" "$snapshot_root/source" || exit $?
+
+mkdir -p openspec/changes/archive
+
+# Destination-collision guard: REFUSE. Never suffix, overwrite, merge, or delete.
+if [ -e "$destination" ] || [ -L "$destination" ]; then
+  printf 'archive destination collision: %s already exists. Source %s and destination left unchanged. Resolve it by hand, then rerun this step.\n' "$destination" "$source" >&2
+  exit 1
+fi
+
+# Mechanical move (MANDATORY): git mv when tracked, plain mv otherwise.
+if ! git mv "$source" "$destination"; then
+  git_mv_status=$?
+  # Fall back ONLY when git left the source exactly as the snapshot found it.
+  if [ ! -e "$source" ] && [ ! -L "$source" ]; then
+    printf 'git mv failed with status %s and source %s is absent; refusing plain mv fallback.\n' "$git_mv_status" "$source" >&2
+    exit "$git_mv_status"
+  fi
+  if ! diff -r "$snapshot_root/source" "$source"; then
+    printf 'git mv failed with status %s and source %s changed; refusing plain mv fallback.\n' "$git_mv_status" "$source" >&2
+    exit "$git_mv_status"
+  fi
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    printf 'archive destination collision after the failed git mv: %s exists. Nothing moved.\n' "$destination" >&2
+    exit 1
+  fi
+  mv "$source" "$destination" || exit $?
+fi
+
+# The source must be gone before the archived tree is compared with its snapshot.
+if [ -e "$source" ] || [ -L "$source" ]; then
+  printf 'archive move left the source directory %s in place\n' "$source" >&2
+  exit 1
+fi
+
+# MANDATORY readback: only EMPTY output passes. Paste it verbatim into the phase result.
+diff -r "$snapshot_root/source" "$destination" || exit $?
 ```
 
 Use today's date in ISO format (e.g., `2026-02-16`).
 
+What makes this block correct here, and not merely copied from somewhere:
+
+- The EXIT trap removes `snapshot_root` on every path, success or failure. Run the block as ONE
+  shell transaction — split across invocations the trap fires early and the snapshot is gone
+  before the readback needs it.
+- Compare against the PRE-MOVE snapshot only. Never against a post-move source, a staged tree, or
+  a model readback of either side.
+- **No `diff -r` exclusions are needed.** In kurama the archive report never lands inside the
+  moved folder: Step 5 writes it to the mode's store and to
+  `.kurama/sdd/{change-name}/archive-report.md`, both outside `$destination`. The archived tree
+  must therefore be byte-identical to the snapshot, with nothing added and nothing missing.
+- `openspec/` is excluded from the Step 0 `Tree-Hash` pathspec, so this move does NOT invalidate
+  the content-binding receipt you revalidated before starting.
+- The collision guard is a portable pre-check, not an atomic cross-process no-clobber. The rule
+  stands regardless: on a collision nothing moves and a human decides.
+
 ### Step 4: Verify Archive
 
-**IF mode is `openspec` or `hybrid`:** Confirm:
+**IF mode is `openspec` or `hybrid`:** The Mechanical Copy Contract IS the verification — the
+verbatim `diff -r` readback output from Steps 2 and 3 MUST appear in the phase result, and empty
+output is the only thing that passes. In addition, confirm:
+- [ ] Verbatim `diff -r` readback output included in the result, and EMPTY (Step 2 spec copy, Step 3 folder move)
+- [ ] Merge preservation readback ran on every domain whose main spec already existed, and every removed requirement heading / scenario ID is accounted for by the delta (Step 2)
 - [ ] Main specs updated correctly (per domain)
 - [ ] Change folder moved to archive
 - [ ] Archive contains all artifacts (exploration, proposal, specs, design, tasks, verify-report)
 - [ ] Active changes directory no longer has this change
 
-**IF mode is `engram`:** Confirm each affected `sdd-specs/{project}/{domain}` main spec was upserted, and all artifact observation IDs — including `explore` (if present) and `verify-report` — are recorded in the archive report.
+A failed, skipped, or unreported `diff -r` FAILS the phase regardless of the checkboxes above —
+agent self-report is never evidence of byte-identity.
+
+**IF mode is `engram`:** Confirm each affected `sdd-specs/{project}/{domain}` main spec was upserted, that the Merge preservation readback ran for every domain that already had a main spec, and that all artifact observation IDs — including `explore` (if present) and `verify-report` — are recorded in the archive report.
 
 **IN EVERY mode:** confirm the cycle markers on disk with `test -f` or Read — never a finder, since `.kurama/` is hidden AND gitignored:
 - [ ] `.kurama/sdd/{change-name}/verify-report.md` is present (written by `sdd-verify` Step 7)
@@ -248,6 +433,13 @@ Ready for the next change.
 - ALWAYS revalidate the **content binding** in Step 0 when the report carries a `Tree-Hash`: recompute the live reviewed-tree hash (throwaway index, excluding `openspec/` and `.kurama/` — byte-identical to sdd-verify Step 6b and archive-gate.sh) and BLOCK on a mismatch with `"verify receipt stale — re-run sdd-verify"`. Only the same explicit override bypasses it; a legacy report with no `Tree-Hash` falls back to the verdict gate alone
 - ALWAYS write `.kurama/sdd/{change-name}/archive-report.md` on a successful archive, in EVERY mode (Step 5). It is the only signal that retires the cycle for `orchestrator-write-guard.sh`; without it the guard blocks the orchestrator indefinitely after the change is closed
 - ALWAYS sync delta specs BEFORE moving to archive
+- Archival is a MECHANICAL filesystem operation: copy and move artifacts with `cp`/`cp -R`/`mv`/`git mv` in the shell, NEVER through model Read/Write — a model can truncate or alter bytes silently while reporting success, and only an independent `diff -r` catches it
+- ALWAYS run `diff -r` after every archive copy and move (source or pre-move snapshot vs. destination) and include its VERBATIM output in the phase result; EMPTY output is the only passing evidence, and a skipped, missing, or unreported `diff -r` FAILS the phase — agent self-report is never sufficient
+- On a destination collision (the target already exists as a file, directory, or symlink), REFUSE: leave source and destination untouched and return `status: blocked` naming both paths. Never append a suffix, choose another name, overwrite, merge, or delete
+- If shell access is unavailable in `openspec`/`hybrid` mode, return `status: blocked` with `shell access required for mechanical archive copy is unavailable` — NEVER fall back to Read/Write copying
+- Resolve ADDED / MODIFIED / REMOVED / RENAMED from `skills/_shared/openspec-convention.md` → *Delta Spec Sections* — the canonical definition `sdd-spec` also writes against; do not re-derive it
+- A `MODIFIED` block REPLACES the entire matching requirement, scenarios included. ALWAYS run the **Merge preservation readback** (Step 2) before a merged main spec becomes the source of truth, and BLOCK with `next_recommended: sdd-spec` when a requirement heading or scenario ID disappears without the delta accounting for it — that is a partial MODIFIED block, and writing it through deletes behavior permanently
+- `RENAMED` rewrites the requirement heading in place and PRESERVES its scenarios and their `S-{req}-{n}` IDs; never implement a rename as a delete plus a re-create
 - In engram mode, main specs ARE the `sdd-specs/{project}/{domain}` artifacts — merge deltas there exactly as openspec merges into `openspec/specs/{domain}/spec.md`; never skip the merge
 - When merging into existing specs, PRESERVE requirements not mentioned in the delta
 - A missing REQUIRED upstream artifact → return `status: blocked` naming it (Section D); never archive an incomplete audit trail silently

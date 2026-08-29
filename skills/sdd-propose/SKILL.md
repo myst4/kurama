@@ -149,9 +149,15 @@ separate `sdd-spec` and `sdd-design` phases, so they carry the SAME content thos
 would have produced — the same rigor in one document, not a lighter version of it.
 
 The inline spec MUST use the standalone delta-spec format verbatim (`# Delta for {Domain}`,
-`## ADDED/MODIFIED/REMOVED Requirements`, RFC 2119 keywords, `#### Scenario: [S-{req}-N]`
+`## ADDED/MODIFIED/REMOVED/RENAMED Requirements`, RFC 2119 keywords, `#### Scenario: [S-{req}-N]`
 with GIVEN/WHEN/THEN). `sdd-archive` merges this section into the main specs unchanged, so a
 malformed or empty spec here corrupts the source of truth — it MUST block instead.
+
+The section semantics are defined once, canonically, in `_shared/openspec-convention.md` →
+*Delta Spec Sections*. Read it before writing a `MODIFIED` block: the merge replaces the ENTIRE
+matching requirement, so a block that omits unchanged scenarios deletes them from the main spec.
+The `small` path takes the same rule as the standalone `sdd-spec` phase — a collapsed cycle is
+not a lighter contract.
 
 ```markdown
 ## Spec (inline)

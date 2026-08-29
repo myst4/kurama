@@ -67,6 +67,76 @@ Main specs: openspec/specs/{domain}/spec.md
 - If the change directory already exists with artifacts, the change is being CONTINUED
 - Use `openspec/config.yaml` `rules` section for project-specific constraints per phase
 
+## Delta Spec Sections (canonical)
+
+**This section is the single source of truth for delta semantics.** `sdd-spec` (the writer),
+`sdd-propose` (which writes the `## Spec (inline)` delta on the `small` path), and `sdd-archive`
+(the merger) all resolve ADDED / MODIFIED / REMOVED / RENAMED here. They MUST link to this
+section instead of restating it: a delta that means one thing when written and another when
+merged is exactly how scenarios disappear, and the merge is what writes `openspec/specs/` —
+the declared source of truth, with `sdd-archive` as its only writer.
+
+A delta spec MAY contain any of these four sections:
+
+```markdown
+## ADDED Requirements
+## MODIFIED Requirements
+## REMOVED Requirements
+## RENAMED Requirements
+```
+
+Requirements are matched between the delta and the main spec **by heading text** —
+`### Requirement: {name}`, compared verbatim. Any requirement the delta does not name is
+PRESERVED untouched by the merge.
+
+| Section | What the delta MUST carry | What the merge does to the main spec |
+|---------|---------------------------|--------------------------------------|
+| `ADDED` | The complete new requirement and all of its scenarios | Appends it to the main spec's Requirements section |
+| `MODIFIED` | The **ENTIRE** requirement block — heading, description, and **every scenario, including the ones that did not change** | REPLACES the whole matching requirement block with the delta's block |
+| `REMOVED` | The heading plus `(Reason: ...)`, and `(Migration: ...)` when consumers, persisted behavior, docs, or tests are affected | Deletes the matching requirement block |
+| `RENAMED` | `### Requirement: {Old Name} → {New Name}` with both names explicit, plus `(Reason: ...)` and `(Migration: ...)` | Rewrites the heading in place and KEEPS the existing scenarios untouched |
+
+### Why MODIFIED is a whole-block replacement
+
+`MODIFIED` does not merge scenario by scenario. The merger cannot distinguish "this scenario was
+deleted on purpose" from "the author only pasted the scenario they were editing" — both arrive as
+a requirement block with fewer scenarios than the baseline. It resolves that ambiguity the only
+way that is safe to automate: the delta's block wins in full.
+
+The consequence is the rule. A five-scenario requirement whose author changes one scenario and
+writes only that scenario archives as a one-scenario requirement: the other four are deleted from
+the source of truth, silently, recoverable only from git history — and in `engram` mode, not
+recoverable at all. That is why the writer MUST copy the full block before editing it
+(`sdd-spec` → *MODIFIED Requirements Workflow*) and why the merger MUST NOT write through a
+MODIFIED block that drops scenarios the delta does not account for (`sdd-archive` → Step 2,
+*Merge preservation readback*).
+
+Two corollaries follow directly:
+
+- **Adding behavior without changing existing behavior → use `ADDED`, never `MODIFIED`.** ADDED
+  appends and cannot lose a scenario; MODIFIED replaces and always can.
+- **Deleting a scenario on purpose → delete it from the copied full block, and say so** in the
+  requirement's `(Previously: ...)` line. The delta is then a truthful statement of the
+  requirement's new complete shape, and the archive's preservation readback is satisfied.
+
+### Scenario IDs across a delta
+
+Scenario IDs (`S-{requirement-slug}-{n}`, defined in `sdd-spec`) are STABLE for the life of the
+requirement — `sdd-tasks` and `sdd-verify` reference them:
+
+- A scenario carried through a MODIFIED block unchanged keeps its EXACT id. Never renumber it.
+- A scenario added inside a MODIFIED block continues that requirement's numbering from the
+  highest existing `{n}`, even when lower numbers are now unused.
+- `RENAMED` changes the requirement heading only. Existing scenario ids keep their old
+  `{requirement-slug}`; renumbering them would break every reference that already points at them.
+
+### Renames are RENAMED, not REMOVED + ADDED
+
+Modelling a rename as a REMOVED block plus an ADDED block deletes the requirement and recreates
+it, which discards its scenario history and every stable id downstream phases hold. Use
+`RENAMED`. To rename AND change behavior in one cycle, emit a `RENAMED` entry plus a `MODIFIED`
+block under the NEW name carrying the full requirement.
+
 ## Config File Reference
 
 The `rules` block is a single canonical schema. The guidance phases (`proposal`,
