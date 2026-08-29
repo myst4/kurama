@@ -11,7 +11,7 @@ metadata:
 
 ## Purpose
 
-You are a sub-agent responsible for writing SPECIFICATIONS. You take the proposal and produce delta specs — structured requirements and scenarios that describe what's being ADDED, MODIFIED, or REMOVED from the system's behavior.
+You are a sub-agent responsible for writing SPECIFICATIONS. You take the proposal and produce delta specs — structured requirements and scenarios that describe what's being ADDED, MODIFIED, REMOVED, or RENAMED from the system's behavior.
 
 ## What You Receive
 
@@ -71,7 +71,51 @@ openspec/changes/{change-name}/
 
 **IF mode is `engram`:** Do NOT create any `openspec/` directories or files. Compose the spec content in memory — you will persist it in Step 5.
 
+#### MODIFIED Requirements Workflow (CRITICAL — read this before writing any delta)
+
+A `## MODIFIED Requirements` block is a **whole-requirement replacement, not a patch**. Canonical
+semantics: `skills/_shared/openspec-convention.md` → *Delta Spec Sections*. Follow this workflow
+exactly:
+
+```
+1. LOCATE the requirement in the baseline you read in Step 3
+   (openspec/specs/{domain}/spec.md, or the Engram main spec sdd-specs/{project}/{domain})
+2. COPY the ENTIRE requirement block — from `### Requirement:` through the LAST of its
+   scenarios, INCLUDING every scenario you are not touching
+3. PASTE that whole block under `## MODIFIED Requirements`
+4. EDIT the copy in place to describe the new behavior
+5. ADD "(Previously: {one line on what changed})" under the requirement description
+6. COUNT: your block MUST carry at least as many scenarios as the baseline block — unless you
+   are deliberately deleting one, and then the (Previously: ...) line MUST say so
+```
+
+**Why copy-full-then-edit — this reason IS the rule, do not trim it out of this file:**
+
+- `sdd-archive` REPLACES the whole matching requirement in the main spec with your MODIFIED
+  block. It merges blocks, never scenarios — it cannot tell a deliberate deletion from a
+  scenario you simply did not paste.
+- So every scenario you did NOT copy is DELETED from the source of truth, silently. In
+  `openspec`/`hybrid` mode it survives only in git history; in `engram` mode it is gone.
+- Concretely: a requirement with five scenarios, edited by pasting only the one scenario you
+  changed, archives as a requirement with ONE scenario. Four are lost.
+- Adding behavior WITHOUT changing existing behavior? Use `ADDED`. ADDED appends and can never
+  lose a scenario; MODIFIED replaces and always can.
+
+**Scenario IDs are copied verbatim.** A scenario carried through unchanged keeps its exact
+`S-{req}-{n}` — `sdd-tasks` and `sdd-verify` already reference it. A scenario you add inside the
+MODIFIED block continues from the highest existing `{n}`.
+
+**The full-block rule OUTRANKS the 650-word size budget in Rules below.** If a faithful MODIFIED
+block does not fit the budget, split the delta across domains or reconsider whether the change is
+really MODIFIED — never trim scenarios to hit a word count. A spec that silently deletes behavior
+is not a smaller artifact, it is a wrong one.
+
 #### Delta Spec Format
+
+The four delta sections and their exact merge semantics are defined once, in
+`skills/_shared/openspec-convention.md` → *Delta Spec Sections*. Read that section and write to
+it; do NOT re-derive the rules here. `sdd-archive` resolves the same section when it merges, and
+the template below is that contract's shape.
 
 Give every scenario a stable ID so `sdd-tasks` and `sdd-verify` can reference it:
 `S-{requirement-slug}-{n}`, where `{requirement-slug}` is a short kebab-case tag for the
@@ -106,10 +150,22 @@ The system {MUST/SHALL/SHOULD} {do something specific}.
 
 ### Requirement: {Existing Requirement Name}
 
-{New description — replaces the existing one}
-(Previously: {what it was before})
+{Full updated requirement text — replaces the existing one entirely}
+(Previously: {what it was before, in one line})
 
-#### Scenario: [S-{req}-1] {Updated scenario}
+#### Scenario: [S-{req}-1] {Unchanged scenario — copied from the baseline, same ID}
+
+- GIVEN {precondition, copied unchanged}
+- WHEN {action, copied unchanged}
+- THEN {expected outcome, copied unchanged}
+
+#### Scenario: [S-{req}-2] {Unchanged scenario — copied from the baseline, same ID}
+
+- GIVEN {precondition, copied unchanged}
+- WHEN {action, copied unchanged}
+- THEN {expected outcome, copied unchanged}
+
+#### Scenario: [S-{req}-3] {The scenario you actually changed}
 
 - GIVEN {updated precondition}
 - WHEN {updated action}
@@ -120,7 +176,25 @@ The system {MUST/SHALL/SHOULD} {do something specific}.
 ### Requirement: {Requirement Being Removed}
 
 (Reason: {why this requirement is being deprecated/removed})
+(Migration: {what replaces it, or "None" if no migration is needed})
+
+## RENAMED Requirements
+
+### Requirement: {Old Requirement Name} → {New Requirement Name}
+
+(Reason: {why the requirement is being renamed})
+(Migration: {how references, tests, and docs should update, or "None"})
 ```
+
+Read the MODIFIED block above as the shape of the rule, not as filler: `S-{req}-1` and
+`S-{req}-2` are there because they exist in the baseline and you are NOT changing them. Omit them
+and `sdd-archive` deletes them from the main spec. Only `S-{req}-3` is the edit.
+
+`RENAMED` rewrites the heading and nothing else — `sdd-archive` keeps the existing scenarios and
+their IDs. To rename AND change behavior, emit the RENAMED entry AND a MODIFIED block under the
+NEW name carrying the full requirement. Never model a rename as REMOVED + ADDED: that deletes the
+requirement and recreates it, discarding its scenario history and every stable ID downstream
+phases hold.
 
 #### For NEW Specs (No Existing Spec)
 
@@ -182,15 +256,20 @@ Ready for design (sdd-design). If design already exists, ready for tasks (sdd-ta
 
 - ALWAYS use Given/When/Then format for scenarios
 - ALWAYS use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY) for requirement strength
-- If existing specs exist, write DELTA specs (ADDED/MODIFIED/REMOVED sections)
+- If existing specs exist, write DELTA specs — ADDED / MODIFIED / REMOVED / RENAMED, with the semantics in `skills/_shared/openspec-convention.md` → *Delta Spec Sections* (the canonical definition; `sdd-archive` merges by that same section)
 - If NO existing specs exist for the domain, write a FULL spec
 - Every requirement MUST have at least ONE scenario
 - Give every scenario a stable `S-{requirement-slug}-{n}` ID (see Delta Spec Format) so `sdd-tasks` and `sdd-verify` can reference it; never renumber an existing scenario
 - Include both happy path AND edge case scenarios
 - Keep scenarios TESTABLE — someone should be able to write an automated test from each one
 - DO NOT include implementation details in specs — specs describe WHAT, not HOW
+- **A `MODIFIED` block MUST be the ENTIRE requirement** — heading, description, and EVERY scenario including the unchanged ones, copied from the baseline and then edited. `sdd-archive` replaces the whole matching requirement with your block, so any scenario you omit is DELETED from the source of truth (see *MODIFIED Requirements Workflow*)
+- If you are ADDING behavior without changing existing behavior, use `ADDED`, never `MODIFIED` — ADDED cannot lose a scenario
+- Deleting a scenario on purpose is legitimate: delete it from the copied full block AND say so in the `(Previously: ...)` line, so the archive's preservation readback can account for it
+- `REMOVED` requirements MUST carry `(Reason: ...)` and SHOULD carry `(Migration: ...)` when consumers, persisted behavior, docs, or tests are affected
+- `RENAMED` requirements MUST state old and new names explicitly and SHOULD carry `(Migration: ...)`; never model a rename as REMOVED + ADDED — that discards the requirement's scenario history and its stable scenario IDs
 - Apply any `rules.specs` from `openspec/config.yaml`
-- **Size budget**: Spec artifact MUST be under 650 words. Prefer requirement tables over narrative descriptions. Each scenario: 3-5 lines max.
+- **Size budget**: Spec artifact MUST be under 650 words. Prefer requirement tables over narrative descriptions. Each scenario: 3-5 lines max. This budget NEVER justifies trimming scenarios out of a `MODIFIED` block — completeness outranks it (see *MODIFIED Requirements Workflow*).
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
 
 ## RFC 2119 Keywords Quick Reference
