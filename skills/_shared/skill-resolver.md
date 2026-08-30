@@ -124,7 +124,7 @@ Sub-agents MUST report their skill resolution status in their return envelope:
 
 **Orchestrator self-correction rule**: if a sub-agent reports anything other than `injected`, the orchestrator MUST:
 1. Re-read the skill registry immediately (it may have been lost to compaction)
-2. Ensure ALL subsequent delegations include `## Project Standards (auto-resolved)`
+2. Ensure ALL subsequent delegations carry a `## Project Standards` block — `(skills to load)` by default, `(auto-resolved)` only when the budget forced the opt-in
 3. Log a warning to the user: "Skill cache miss detected — reloaded registry for future delegations."
 
 This prevents silent degradation where the orchestrator forgets skills after compaction and all subsequent sub-agents work without standards.
