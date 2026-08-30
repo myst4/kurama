@@ -1502,7 +1502,13 @@ setup_opencode() {
             cmd_name=$(basename "$cmd_file" .md)
 
             if [[ "$OPENCODE_MODE" == "multi" ]] && grep -q "^subtask:" "$cmd_file"; then
-                # Multi mode: subtask commands point to their dedicated subagent
+                # Multi mode: subtask commands point to their dedicated subagent.
+                # The committed files say "agent: sdd-orchestrator" precisely so
+                # this rewrite has something to match — and so single mode, which
+                # copies them verbatim and defines no phase agents, routes to the
+                # one agent it does define. They used to ship the phase name
+                # already, which made this sed a no-op and left five single-mode
+                # commands pointing at agents that did not exist.
                 sed "s/^agent: sdd-orchestrator/agent: $cmd_name/" "$cmd_file" > "$commands_target/$(basename "$cmd_file")"
             else
                 cp "$cmd_file" "$commands_target/"
@@ -1618,8 +1624,13 @@ $(receipt_rel "$config_file")"
     fi
 
     # Install the shared SDD phase prompt files. Both opencode.multi.json and any
-    # named profile reference these via {file:~/.config/opencode/prompts/sdd/...},
-    # so a single prompt file is shared across the base agents and every profile.
+    # named profile reference these via {file:./prompts/sdd/...} — a path relative
+    # to the opencode.json that contains it, which is what upstream gentle-ai emits
+    # (internal/components/sdd/prompts.go). The tilde form this used to carry came
+    # from upstream's PRD prose, not its code, and nothing verifies that OpenCode
+    # expands ~ inside {file:}. The relative form resolves because this flow is
+    # global-only: the config lands in $home/.config/opencode/opencode.json and the
+    # prompts in $home/.config/opencode/prompts/sdd/, one directory below it.
     local prompts_src="$EXAMPLES_DIR/opencode/prompts/sdd"
     local prompts_target="$home/.config/opencode/prompts/sdd"
     if [ -d "$prompts_src" ]; then

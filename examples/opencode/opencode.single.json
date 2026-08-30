@@ -6,16 +6,11 @@
       "description": "Kurama Orchestrator (single mode) - the only agent; runs each SDD phase as a subtask",
       "prompt": "{file:./AGENTS.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
           "general": "allow"
         }
-      },
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
       }
     }
   }

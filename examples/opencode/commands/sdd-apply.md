@@ -1,6 +1,6 @@
 ---
 description: Implement SDD tasks — writes code following specs and design
-agent: sdd-apply
+agent: sdd-orchestrator
 subtask: true
 ---
 
@@ -9,8 +9,8 @@ You are an SDD sub-agent. Read the skill file at ~/.config/opencode/skills/sdd-a
 The sdd-apply skill (v2.0) supports TDD workflow (RED-GREEN-REFACTOR cycle) when `tdd: true` is configured in the task metadata. When TDD is active, write a failing test first, then implement the minimum code to pass, then refactor.
 
 CONTEXT:
-- Working directory: !`echo -n "$(pwd)"`
-- Current project: !`echo -n "$(basename $(pwd))"`
+- Working directory: before doing anything else, run `git rev-parse --show-toplevel 2>/dev/null || pwd` with your bash tool and use the returned path as the authoritative workspace. In OpenCode Desktop (Electron) the parse-time interpolation resolves to the app data directory, not the project.
+- Current project: the `basename` of the detected workspace above.
 - Artifact store mode: resolve it — a value the orchestrator propagated in this prompt WINS; otherwise read `artifact_store.mode` from `openspec/config.yaml` or the `sdd-init/{project}` settings bundle. Never assume `engram`.
 
 TASK:

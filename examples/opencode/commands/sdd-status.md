@@ -6,8 +6,8 @@ agent: sdd-orchestrator
 Report the current state of Spec-Driven Development in this project. Do NOT execute phase work — this is a read-only status report.
 
 CONTEXT:
-- Working directory: !`echo -n "$(pwd)"`
-- Current project: !`echo -n "$(basename $(pwd))"`
+- Working directory: before doing anything else, run `git rev-parse --show-toplevel 2>/dev/null || pwd` with your bash tool and use the returned path as the authoritative workspace. In OpenCode Desktop (Electron) the parse-time interpolation resolves to the app data directory, not the project.
+- Current project: the `basename` of the detected workspace above.
 - Artifact store mode: resolve it from the persisted settings (`artifact_store.mode` in `openspec/config.yaml` or the `sdd-init/{project}` settings bundle) before reporting. Never assume `engram`.
 - Scope: `/sdd-status` is an OpenCode-only command; no other harness installs it.
 

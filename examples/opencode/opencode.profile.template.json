@@ -6,128 +6,83 @@
       "description": "Kurama Orchestrator (kurama profile) - coordinates the kurama-suffixed per-phase sub-agents, never does work inline. Switch to it with Tab.",
       "prompt": "{file:./AGENTS.md}",
       "permission": {
+        "question": "allow",
         "task": {
           "*": "deny",
-          "sdd-*-kurama": "allow",
-          "review-*": "allow",
-          "jd-*": "allow",
-          "general": "allow"
+          "general": "allow",
+          "sdd-init-kurama": "allow",
+          "sdd-explore-kurama": "allow",
+          "sdd-propose-kurama": "allow",
+          "sdd-spec-kurama": "allow",
+          "sdd-design-kurama": "allow",
+          "sdd-tasks-kurama": "allow",
+          "sdd-apply-kurama": "allow",
+          "sdd-verify-kurama": "allow",
+          "sdd-archive-kurama": "allow",
+          "review-risk": "allow",
+          "review-readability": "allow",
+          "review-reliability": "allow",
+          "review-resilience": "allow",
+          "review-refuter": "allow",
+          "jd-judge-a": "allow",
+          "jd-judge-b": "allow",
+          "jd-fix-agent": "allow"
         }
-      },
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
       }
     },
     "sdd-init-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Bootstrap SDD context and project configuration",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-init.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-init.md}"
     },
     "sdd-explore-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Investigate codebase and think through ideas",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-explore.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-explore.md}"
     },
     "sdd-propose-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Create change proposals from explorations",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-propose.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-propose.md}"
     },
     "sdd-spec-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Write detailed specifications from proposals",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-spec.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-spec.md}"
     },
     "sdd-design-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Create technical design from proposals",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-design.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-design.md}"
     },
     "sdd-tasks-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Break down specs and designs into implementation tasks",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-tasks.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-tasks.md}"
     },
     "sdd-apply-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Implement code changes from task definitions",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-apply.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-apply.md}"
     },
     "sdd-verify-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Validate implementation against specs",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-verify.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-verify.md}"
     },
     "sdd-archive-kurama": {
       "mode": "subagent",
       "hidden": true,
       "description": "Archive completed change artifacts",
-      "prompt": "{file:~/.config/opencode/prompts/sdd/sdd-archive.md}",
-      "tools": {
-        "read": true,
-        "write": true,
-        "edit": true,
-        "bash": true
-      }
+      "prompt": "{file:./prompts/sdd/sdd-archive.md}"
     }
   }
 }
