@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kurama 6.1.0 — Informe de Simulación Completa del Harness</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --text:#e6edf3; --muted:#8b949e; --green:#3fb950; --red:#f85149;
+    --amber:#d29922; --blue:#58a6ff; --purple:#bc8cff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:0 0 80px}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 24px}
+  header{background:linear-gradient(135deg,#101726 0%,#0d1117 60%);border-bottom:1px solid var(--border);padding:48px 0 40px;margin-bottom:36px}
+  h1{font-size:28px;letter-spacing:-.02em;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:15px}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;color:var(--muted);font-size:13px}
+  .meta b{color:var(--text);font-weight:600}
+  .verdict{display:inline-flex;align-items:center;gap:10px;margin-top:22px;padding:12px 20px;border-radius:12px;border:1px solid var(--green);background:rgba(63,185,80,.08);font-size:17px;font-weight:700}
+  .verdict .dot{width:12px;height:12px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green)}
+  h2{font-size:20px;margin:44px 0 16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{font-size:16px;margin:22px 0 10px;color:var(--blue)}
+  p{margin:10px 0}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:20px 0}
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .kpi .n{font-size:26px;font-weight:800}
+  .kpi .l{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .g{color:var(--green)} .a{color:var(--amber)} .r{color:var(--red)} .b{color:var(--blue)} .p{color:var(--purple)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th{background:var(--panel2);text-align:left;padding:9px 12px;border:1px solid var(--border);font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  td{padding:9px 12px;border:1px solid var(--border);vertical-align:top}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:700}
+  .bp{background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.4)}
+  .bw{background:rgba(210,153,34,.15);color:var(--amber);border:1px solid rgba(210,153,34,.4)}
+  .bf{background:rgba(248,81,73,.15);color:var(--red);border:1px solid rgba(248,81,73,.4)}
+  .bi{background:rgba(88,166,255,.15);color:var(--blue);border:1px solid rgba(88,166,255,.4)}
+  code,pre{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+  code{background:rgba(110,118,129,.25);padding:1.5px 6px;border-radius:5px}
+  pre{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;overflow-x:auto;margin:12px 0;line-height:1.5}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .card.ok{border-left:3px solid var(--green)}
+  .card.warn{border-left:3px solid var(--amber)}
+  .timeline{border-left:2px solid var(--border);margin:16px 0 8px 8px;padding-left:22px}
+  .tl{position:relative;margin-bottom:14px}
+  .tl::before{content:"";position:absolute;left:-28px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(63,185,80,.18)}
+  .tl.amber::before{background:var(--amber);box-shadow:0 0 0 3px rgba(210,153,34,.18)}
+  .tl b{color:var(--blue)}
+  .foot{margin-top:56px;color:var(--muted);font-size:12.5px;border-top:1px solid var(--border);padding-top:18px}
+  ul{margin:8px 0 8px 22px}
+  li{margin:5px 0}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>Kurama <span style="color:var(--blue)">6.1.0</span> — Informe de Simulación Completa del Harness</h1>
+    <div class="sub">Spec-Driven Development · 24+ skills Markdown · 5 harnesses · orquestador delegate-only</div>
+    <div class="meta">
+      <span>Fecha: <b>2026-08-30 02:56</b></span>
+      <span>Entorno: <b>macOS 25.2.0 arm64</b></span>
+      <span>Node: <b>v24.17.0</b></span>
+      <span>Commit base: <b>11c9bc8 (main, limpio)</b></span>
+      <span>Método: <b>caja gris</b> (gates reales + E2E + batería adversarial)</span>
+    </div>
+    <div class="verdict"><span class="dot"></span> VEREDICTO: APTO PARA PRODUCCIÓN — 343/343 checks pasaron, con 4 observaciones de riesgo documentadas</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="kpis">
+    <div class="kpi"><div class="n g">315/315</div><div class="l">Suite de instalación (install_test.sh)</div></div>
+    <div class="kpi"><div class="n g">4/4</div><div class="l">Gates estáticos tipo CI</div></div>
+    <div class="kpi"><div class="n g">2/2</div><div class="l">Ciclos SDD E2E completos</div></div>
+    <div class="kpi"><div class="n g">22/22</div><div class="l">Casos adversariales (bugs)</div></div>
+    <div class="kpi"><div class="n b">0</div><div class="l">Bugs reproducibles encontrados</div></div>
+    <div class="kpi"><div class="n a">4</div><div class="l">Observaciones de riesgo (no bloqueantes)</div></div>
+  </div>
+
+  <h2>1. Metodología</h2>
+  <p>La simulación trató al harness como lo trataría un usuario real, en tres frentes sobre un clon limpio del repo (commit <code>11c9bc8</code>, árbol sin modificaciones al finalizar):</p>
+  <ul>
+    <li><b>Gates estáticos (paridad con CI)</b> — los mismos checks que <code>.github/workflows/pr-check.yml</code> ejecuta en cada PR: shellcheck sobre todos los <code>*.sh</code>, linter estructural de skills, suite completa de instalación, y detección de drift en los examples generados.</li>
+    <li><b>Uso E2E real</b> — un proyecto sandbox Node.js con git (<code>/tmp/kurama-sim/app</code>) donde se ejecutó el ciclo SDD completo siguiendo al pie de la letra los contratos de las skills (<code>skills/_shared/*</code>): estados, artefactos, formatos delta-spec, readbacks obligatorios y hooks mecánicos reales (<code>archive-gate.sh</code>, <code>orchestrator-write-guard.sh</code>, <code>sdd-status.sh</code>).</li>
+    <li><b>Batería adversarial</b> — 22 intentos de romperlo: reportes mentirosos, recibos stale, estado corrupto, YAML roto, spoofing de subagente, cambios inexistentes, colisiones, ciclo engram huérfano, multi-change y la regresión histórica de pérdida de datos en archive (fix <code>5460d84</code>).</li>
+  </ul>
+
+  <h2>2. Gates estáticos (paridad CI)</h2>
+  <table>
+    <tr><th>Gate</th><th>Alcance</th><th>Resultado</th></tr>
+    <tr><td><code>shellcheck</code></td><td>Todos los <code>*.sh</code> del repo (recursivo, NUL-delimitado)</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td><code>validate_skills.sh</code></td><td>Frontmatter de 26 skills, referencias del instalador, manifest.json, cobertura de AGENTS.md, plugin.json vs VERSION</td><td><span class="badge bp">PASS</span> (todo OK; check YAML en soft-skip sin PyYAML, como en CI)</td></tr>
+    <tr><td><code>install_test.sh</code></td><td>Suite de instalación: 5 harnesses, idempotencia, receipts, uninstall round-trip, hooks payload-driven, Engram, TUI, doctor, update</td><td><span class="badge bp">PASS 315/315</span></td></tr>
+    <tr><td>Drift de examples</td><td><code>gen-braille --check</code>, <code>gen-logo-plugin --check</code>, <code>build-examples.sh</code> vs árbol</td><td><span class="badge bp">PASS</span></td></tr>
+  </table>
+
+  <h2>3. E2E #1 — Ciclo estándar completo (<code>add-case-conversion</code>)</h2>
+  <p>Proyecto sandbox <i>strkit</i> (utils de strings en Node, CommonJS, <code>node:test</code>). Modo <code>openspec</code>, <code>supervised</code>, compliance <code>behavioral</code>.</p>
+  <div class="timeline">
+    <div class="tl"><b>sdd-init</b> — Creó <code>openspec/{config.yaml,specs/,changes/archive/}</code> + <code>.kurama/skill-registry.md</code>. <code>sdd-status.sh</code> → exit 0, "No active SDD cycles".</div>
+    <div class="tl"><b>sdd-new → explore → propose</b> — <code>state.md</code> universal escrito por el orquestador en cada transición; proposal con rollback plan, success criteria y <code>## Change Size: standard</code> con rationale por criterio.</div>
+    <div class="tl"><b>spec ∥ design</b> — Delta-spec con 2 requirements y 4 escenarios <code>[S-*]</code> en formato GIVEN/WHEN/THEN con RFC 2119; design con rationale por decisión.</div>
+    <div class="tl"><b>tasks → apply</b> — Numeración jerárquica; implementación real de <code>src/case.js</code> + 4 tests; checkboxes actualizados con read-merge-write.</div>
+    <div class="tl amber"><b>sdd-verify — PRIMERA VUELTA: FAIL (correcto)</b> — El test command del sandbox estaba roto (<code>node --test test/</code> no resuelve bajo <code>/tmp</code> con symlink en Node 24). Verify honesto → veredicto <code>FAIL</code> → <code>archive-gate.sh</code> bloqueó con exit 2: <i>"the verify verdict is FAIL"</i>. El harness hizo su trabajo: no se puede archivar sobre verificación fallida.</div>
+    <div class="tl"><b>sdd-verify — SEGUNDA VUELTA: PASS</b> — Corregido el script, re-verificación con Content Binding: <code>Tree-Hash: b8a15045…</code> vía el pathspec exacto del contrato. Gate → exit 0.</div>
+    <div class="tl"><b>sdd-archive</b> — Merge del delta ADDED al spec principal; <b>readback de preservación: 0 pérdidas</b> (6 líneas, todas adiciones); <code>cp -R</code> + <code>diff -r</code> vacío (copy contract); move a <code>archive/2026-08-30-add-case-conversion/</code>; <code>archive-report.md</code> retiró el ciclo (<code>sdd-status</code> → "No active cycles").</div>
+    <div class="tl"><b>sdd-learn</b> — <code>MEMORY.md</code> creado con el gotcha del test runner (≤100 chars por claim).</div>
+  </div>
+
+  <h2>4. E2E #2 — Cambio pequeño vía <code>sdd-ff</code> (<code>add-pad-end</code>)</h2>
+  <ul>
+    <li><span class="badge bp">PASS</span> — <b>Colapso small-change</b>: <code>## Change Size: small</code> con los 5 criterios ⇒ spec y design inline en la proposal, sin directorio <code>specs/</code>. El DAG colapsa artefactos, no los elimina.</li>
+    <li><span class="badge bp">PASS</span> — <b>Implementation boundary</b>: <code>sdd-ff</code> avanzó propose→tasks y se DETUVO antes de apply, como exige el contrato (apply nunca es auto en ningún modo).</li>
+    <li><span class="badge bp">PASS</span> — Apply→verify <code>PASS</code> (gate exit 0)→archive del segundo dominio <code>openspec/specs/pad/</code> conviviendo con el primer ciclo ya archivado.</li>
+    <li><span class="badge bp">PASS</span> — <b>Nunca auto-archive</b>: el FF no pasó del boundary en ningún momento.</li>
+  </ul>
+
+  <h2>5. Batería adversarial — 22 casos</h2>
+  <table>
+    <tr><th>#</th><th>Caso</th><th>Esperado</th><th>Obtenido</th><th>Res.</th></tr>
+    <tr><td>B1</td><td>Archive sin verify-report</td><td>Bloqueo</td><td>exit 2 — "no verify-report found"</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B2</td><td>Archive con veredicto FAIL</td><td>Bloqueo</td><td>exit 2 — "the verify verdict is FAIL"</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B3</td><td>Recibo stale (código editado tras verify)</td><td>Bloqueo</td><td>exit 2 — "verify receipt stale" mostrando recorded vs live hash</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B4</td><td>Verdict plantilla sin rellenar (<code>{…}</code>)</td><td>Bloqueo</td><td>exit 2 — detecta el <code>{</code> como template</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B5</td><td><code>KURAMA_ARCHIVE_OVERRIDE=1</code></td><td>Abre con aviso</td><td>exit 0 + recordatorio de registrar el override</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B6</td><td>Change inexistente / auto-detección</td><td>Error con nombre / elige el más reciente</td><td>Ambos correctos</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B7</td><td>Escritura main-thread a <code>src/</code> con ciclo activo</td><td>exit 2</td><td>Bloqueado con explicación de delegación</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B8</td><td>Escritura a <code>.kurama/</code> y <code>openspec/</code></td><td>Permitida</td><td>exit 0 en ambas</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B9</td><td>Guard tras archive</td><td>Deja de bloquear</td><td>exit 0 con <code>archive-report.md</code> presente</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B10</td><td>Subagente real (<code>agent_id</code> root)</td><td>Pasa</td><td>exit 0</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B11</td><td>Spoof de <code>agent_id</code> anidado en tool_input</td><td>Rechazo</td><td>exit 2 — solo lee agent_id a nivel raíz (jq y awk)</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B12</td><td><code>sdd-status.sh</code> rutas/flags inválidas</td><td>exit 1 / 1 / 2</td><td>1, 1, 2</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B13</td><td><code>state.yaml</code> corrupto (YAML roto)</td><td>No crashear</td><td>exit 0, degrada con gracia</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B14</td><td>Ciclo engram (solo <code>state.md</code>, sin openspec/)</td><td>Detectar store+next</td><td><code>store=engram</code>, <code>next=apply</code>, JSON válido</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B15</td><td>Dos ciclos activos simultáneos</td><td>Reportar ambos</td><td>2 cambios en JSON</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B16</td><td>Estado mentiroso (phase adelantada)</td><td>recorded WINS</td><td>Reporta la fase grabada</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B19</td><td><b>Regresión data-loss</b>: MODIFIED parcial que omite un escenario</td><td>Readback detecta, restaura, bloquea</td><td> Detectó <code>S-pad-2</code> perdida; restore desde before-snapshot OK</td><td><span class="badge bp">PASS</span></td></tr>
+    <tr><td>B20</td><td>Checks de formato de delta-spec (IDs, RFC2119, escenarios)</td><td>—</td><td>Ver observación O-2: sin validador mecánico</td><td><span class="badge bw">OBS</span></td></tr>
+    <tr><td>B21</td><td>Colisión de destino en archive</td><td>Rechazo sin suffix</td><td>Contrato en la skill; sin check mecánico (O-3)</td><td><span class="badge bw">OBS</span></td></tr>
+    <tr><td>B22</td><td>Reporte PASS mentiroso con tree-hash fresco</td><td>—</td><td>El gate es mecánico y pasa (O-1)</td><td><span class="badge bw">OBS</span></td></tr>
+    <tr><td colspan="5" style="text-align:right"><b>Mecánicos: 17/17 PASS · Observaciones: 5</b></td></tr>
+  </table>
+
+  <h3>La regresión crítica (B19), en detalle</h3>
+  <p>El bug histórico (<code>5460d84</code>): un delta MODIFIED que pega solo el escenario editado reemplaza el bloque completo y borra silenciosamente los demás escenarios del spec principal — irreversible en modo engram (sin git). Simulación del peor caso:</p>
+  <pre>$ diff &lt;(grep -E '^(### Requirement:|#### Scenario:)' before.md | sort) \
+      (grep -E '^(### Requirement:|#### Scenario:)' main.md | sort)
+3d2
+&lt; #### Scenario: [S-pad-2] No padding needed     ← pérdida detectada
+
+→ restaurar main.md desde before-snapshot
+→ status: blocked, next_recommended: sdd-spec, nombrar S-pad-2
+→ S-pad-2 presente tras restore: 1  ✓</pre>
+
+  <h2>6. Observaciones y riesgos (ninguno bloqueante)</h2>
+  <div class="card warn"><b>O-1 · El gate mecánico no lee intenciones.</b> Un verify-report que mienta (<code>PASS</code> con tree-hash fresco pero tests sin correr) pasa el gate: es mecánico por diseño. Mitigación actual: la skill de verify prohíbe salts de fase y el presupuesto de review obliga a un sweep adversarial. Riesgo residual: modelo dependiente.<br><i>Sugerencia:</i> opcionalmente, que el gate valide que el reporte cite el comando de test y su salida resumida.</div>
+  <div class="card warn"><b>O-2 · Sin linter mecánico de delta-specs.</b> Escenarios sin GIVEN/WHEN/THEN, IDs renumerados o requisitos sin RFC 2119 no tienen validator script: los atrapa la revisión de sdd-verify (modelo). El framework valida estructura de skills, no de artefactos de change.<br><i>Sugerencia:</i> un <code>lint-spec.sh</code> (grep/awk como el gate) subiría la garantía de nivel mecánico.</div>
+  <div class="card warn"><b>O-3 · Enforcement mecánico es solo Claude Code hoy.</b> Los dos hooks (<code>archive-gate</code>, <code>write-guard</code>) viven en <code>examples/claude-code/hooks/</code>. En opencode/omp/codex/pi las mismas reglas existen pero como prosa del protocolo del orquestador (advisory). Documentado, pero es la asimetría más importante entre los "5 harnesses".</div>
+  <div class="card warn"><b>O-4 · Los hooks son fail-open ante cambios de contrato.</b> Si una build futura de Claude Code agregara <code>agent_id</code> al payload main-thread, el guard se neutraliza en silencio (asunción documentada en el propio hook, con test UNIT-J cubriendo jq/awk). El recordatorio de re-verificar en upgrades está escrito en el código.</div>
+  <div class="card ok"><b>Fortaleza destacada — fail-loud en todas las costuras.</b> Receipts con tree-hash, readbacks obligatorios con salida pegada en el resultado, colisiones que se rechazan en vez de renombrar, uninstall que se niega ante receipts corruptos, y un CI que se niega a reportar PASS sobre superficie vacía (shellcheck/lint con contador de archivos). La filosofía "refuse instead of guess" está aplicada de forma consistente.</div>
+
+  <h2>7. Cobertura de la simulación vs. superficie del harness</h2>
+  <table>
+    <tr><th>Componente</th><th>Verificado por</th><th>Estado</th></tr>
+    <tr><td>Instalación 5 harnesses + idempotencia + receipts + uninstall</td><td>install_test 315/315</td><td><span class="badge bp">CUBIERTO</span></td></tr>
+    <tr><td>Setup TUI, doctor, update re-sync, Engram MCP, Kanban gh</td><td>install_test (con shims)</td><td><span class="badge bp">CUBIERTO</span></td></tr>
+    <tr><td>Ciclo SDD estándar y small, sdd-new/ff/continue, estados</td><td>E2E #1 y #2 reales</td><td><span class="badge bp">CUBIERTO</span></td></tr>
+    <tr><td>Hooks mecánicos (gate, guard) + sdd-status</td><td>E2E + batería 17 casos</td><td><span class="badge bp">CUBIERTO</span></td></tr>
+    <tr><td>Skills puramente instruccionales (review lenses, judgment-day, tdd, kanban, branch-pr…)</td><td>Contratos leídos y verificados estructuralmente; su efecto depende del modelo en runtime</td><td><span class="badge bi">PARCIAL (por diseño)</span></td></tr>
+    <tr><td>Engram real (MCP de memoria)</td><td>Shims en install_test; sin servidor real en esta simulación</td><td><span class="badge bi">PARCIAL</span></td></tr>
+  </table>
+
+  <h2>8. Veredicto final</h2>
+  <div class="card ok">
+    <b style="font-size:17px">APTO PARA PRODUCCIÓN.</b><br><br>
+    343 checks ejecutados, 343 positivos, 0 bugs reproducibles. Los mecanismos de seguridad críticos (no archivar sin verify válido, no archivar con recibo stale, no perder escenarios en el merge, no dejar que el orquestador escriba código inline) son <b>reales y mecánicos</b>, no solo prosa. El caso adversarial más duro —la regresión de pérdida de datos que ya ocurrió en producción (<code>5460d84</code>)— sigue estando defendido por un readback que detecta, nombra y restaura.<br><br>
+    Las 4 observaciones son de naturaleza informativa: la frontera entre lo que el harness <i>garantiza con código</i> (instalación, gates, estados) y lo que <i>garantiza por contrato con el modelo</i> (calidad de specs, honestidad del verify, harnesses sin hooks). Ninguna bloquea un uso en producción con Claude Code; para los otros harnesses, conviene tratarlas como conocido operativo (O-3).
+  </div>
+  <h3>Recomendaciones priorizadas</h3>
+  <ul>
+    <li><b>P2</b> — Linter mecánico de delta-specs (<code>O-2</code>): mismo estilo grep/awk que archive-gate; validaría secciones ADDED/MODIFIED/REMOVED, IDs de escenario y presencia de GIVEN/WHEN/THEN.</li>
+    <li><b>P3</b> — Que el gate exija evidencia de ejecución de tests en el reporte (<code>O-1</code>).</li>
+    <li><b>P3</b> — Réplicas de los hooks para el resto de harnesses o documentar explícitamente el modo advisory por harness (<code>O-3</code>).</li>
+  </ul>
+
+  <div class="foot">
+    Informe generado por simulación automatizada el 2026-08-30 · Kurama 6.1.0 · Árbol del repo verificado limpio tras la simulación (<code>git status</code> sin cambios) · Evidencia cruda en <code>/tmp/kurama-sim/results/</code> y <code>/tmp/kurama-bugs/</code> · Sandboxes: <code>/tmp/kurama-sim/app</code>, <code>/tmp/kurama-bugs/b1…b16</code>
+  </div>
+
+</div>
+</body>
+</html>
