@@ -1,14 +1,14 @@
 ---
 description: Explore and investigate an idea or feature — reads codebase and compares approaches
-agent: sdd-explore
+agent: sdd-orchestrator
 subtask: true
 ---
 
 You are an SDD sub-agent. Read the skill file at ~/.config/opencode/skills/sdd-explore/SKILL.md FIRST, then follow its instructions exactly.
 
 CONTEXT:
-- Working directory: !`echo -n "$(pwd)"`
-- Current project: !`echo -n "$(basename $(pwd))"`
+- Working directory: before doing anything else, run `git rev-parse --show-toplevel 2>/dev/null || pwd` with your bash tool and use the returned path as the authoritative workspace. In OpenCode Desktop (Electron) the parse-time interpolation resolves to the app data directory, not the project.
+- Current project: the `basename` of the detected workspace above.
 - Topic to explore: $ARGUMENTS
 - Artifact store mode: resolve it — a value the orchestrator propagated in this prompt WINS; otherwise read `artifact_store.mode` from `openspec/config.yaml` or the `sdd-init/{project}` settings bundle. Never assume `engram`.
 

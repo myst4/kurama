@@ -1,14 +1,14 @@
 ---
 description: Initialize SDD context — detects project stack and bootstraps persistence backend
-agent: sdd-init
+agent: sdd-orchestrator
 subtask: true
 ---
 
 You are an SDD sub-agent. Read the skill file at ~/.config/opencode/skills/sdd-init/SKILL.md FIRST, then follow its instructions exactly.
 
 CONTEXT:
-- Working directory: !`echo -n "$(pwd)"`
-- Current project: !`echo -n "$(basename $(pwd))"`
+- Working directory: before doing anything else, run `git rev-parse --show-toplevel 2>/dev/null || pwd` with your bash tool and use the returned path as the authoritative workspace. In OpenCode Desktop (Electron) the parse-time interpolation resolves to the app data directory, not the project.
+- Current project: the `basename` of the detected workspace above.
 - Artifact store mode: YOU resolve and record it — a value the orchestrator propagated in this prompt WINS; otherwise resolve it with the user as your SKILL.md specifies. Never assume `engram`.
 
 TASK:

@@ -919,8 +919,16 @@ test_opencode_multi_references_prompt_files() {
     # The committed multi template must reference the shared prompt files (not
     # inline the prompt text) so profiles can share one file per phase.
     local f="$REPO_DIR/examples/opencode/opencode.multi.json"
-    grep -q 'file:~/.config/opencode/prompts/sdd/sdd-apply.md' "$f" || {
+    # #78: the reference is a path RELATIVE to the opencode.json that contains it,
+    # which is what upstream gentle-ai emits from code
+    # (internal/components/sdd/prompts.go). The tilde form this used to assert came
+    # from upstream's PRD prose, and nothing verifies that OpenCode expands ~ inside
+    # {file:} — if it does not, all 9 subagents start with no prompt at all.
+    grep -q 'file:\./prompts/sdd/sdd-apply.md' "$f" || {
         echo "opencode.multi.json does not reference the shared apply prompt file"; return 1; }
+    if grep -q 'file:~' "$f"; then
+        echo "opencode.multi.json still uses the unverified {file:~...} form"; return 1
+    fi
     # And it must NOT still carry the old inline executor prompt.
     if grep -q 'You are an SDD executor' "$f"; then
         echo "opencode.multi.json still inlines executor prompt text"; return 1
@@ -944,9 +952,16 @@ test_opencode_profile_generates_agents() {
         "kurama-orchestrator must be mode:primary" || return 1
     assert_eq "subagent" "$(jq -r '.agent["sdd-apply-testp"].mode' "$cfg")" \
         "sdd-apply-testp must be mode:subagent" || return 1
-    # Task permission scoped to this profile's own suffixed agents.
-    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["sdd-*-testp"]' "$cfg")" \
-        "orchestrator task permission not scoped to sdd-*-testp" || return 1
+    # Task permission scoped to this profile's own suffixed agents. #78 named each
+    # one instead of globbing, so the scoping is asserted phase by phase: every
+    # suffixed agent is granted, and no unsuffixed base phase agent is.
+    local phase
+    for phase in init explore propose spec design tasks apply verify archive; do
+        assert_eq "allow" "$(jq -r --arg k "sdd-$phase-testp" '.agent["kurama-orchestrator"].permission.task[$k]' "$cfg")" \
+            "orchestrator task permission not scoped to sdd-$phase-testp" || return 1
+        assert_eq "null" "$(jq -r --arg k "sdd-$phase" '.agent["kurama-orchestrator"].permission.task[$k]' "$cfg")" \
+            "the profile orchestrator must not grant the unsuffixed sdd-$phase" || return 1
+    done
     # The model passed on the flag is applied to profile agents on first install.
     assert_eq "prov/model" "$(jq -r '.agent["sdd-apply-testp"].model' "$cfg")" \
         "flag model not applied to sdd-apply-testp" || return 1
@@ -4942,17 +4957,28 @@ test_opencode_profile_permission_allows_review_layer() {
     local cfg="$HOME/.config/opencode/opencode.json"
     assert_eq "deny" "$(jq -r '.agent["kurama-orchestrator"].permission.task["*"]' "$cfg")" \
         "the profile orchestrator must still deny by default" || return 1
-    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["sdd-*-testp"]' "$cfg")" \
-        "the profile orchestrator must delegate to its own suffixed subagents" || return 1
+    # #78: the allowlist names every target explicitly instead of globbing. A
+    # wildcard OpenCode does not expand in permission.task falls through to
+    # "*": "deny" and kills delegation with no error, so each grant must also
+    # correspond to an agent that actually exists in the installed config.
+    local key
+    for key in init explore propose spec design tasks apply verify archive; do
+        assert_eq "allow" "$(jq -r --arg k "sdd-$key-testp" '.agent["kurama-orchestrator"].permission.task[$k]' "$cfg")" \
+            "the profile orchestrator must delegate to its own sdd-$key-testp subagent" || return 1
+        jq -e --arg k "sdd-$key-testp" '.agent[$k]' "$cfg" > /dev/null 2>&1 || {
+            echo "granted sdd-$key-testp but no agent by that name is defined"; return 1; }
+    done
     assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["general"]' "$cfg")" \
         "the profile orchestrator cannot delegate to general" || return 1
-    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["review-*"]' "$cfg")" \
-        "the profile orchestrator cannot delegate the review lenses" || return 1
-    assert_eq "allow" "$(jq -r '.agent["kurama-orchestrator"].permission.task["jd-*"]' "$cfg")" \
-        "the profile orchestrator cannot delegate Judgment Day" || return 1
-    # The base sdd-* pattern must NOT leak in: the profile only drives its own
-    # suffixed subagents.
-    assert_eq "null" "$(jq -r '.agent["kurama-orchestrator"].permission.task["sdd-*-kurama"]' "$cfg")" \
+    # The 8 review-layer agents #25 enumerated, each named rather than globbed.
+    for key in review-risk review-readability review-reliability review-resilience \
+               review-refuter jd-judge-a jd-judge-b jd-fix-agent; do
+        assert_eq "allow" "$(jq -r --arg k "$key" '.agent["kurama-orchestrator"].permission.task[$k]' "$cfg")" \
+            "the profile orchestrator cannot delegate $key" || return 1
+    done
+    # The template's "-kurama" placeholder must NOT leak in: the profile only
+    # drives its own suffixed subagents.
+    assert_eq "null" "$(jq -r '.agent["kurama-orchestrator"].permission.task["sdd-apply-kurama"]' "$cfg")" \
         "the template's placeholder suffix was not renamed" || return 1
     return 0
 }
@@ -4962,10 +4988,24 @@ test_opencode_templates_allow_the_review_layer() {
     local prof="$REPO_DIR/examples/opencode/opencode.profile.template.json"
     assert_eq "allow" "$(jq -r '.agent["sdd-orchestrator"].permission.task["general"]' "$multi")" \
         "opencode.multi.json denies the general agent" || return 1
-    local key
-    for key in "review-*" "jd-*" "general"; do
+    # #25 enumerated 8 review-layer agents and proposed "review-*"/"jd-*" as
+    # shorthand for exactly those. #78 replaced the shorthand with the 8 names, so
+    # the grant no longer depends on OpenCode expanding a glob in permission.task.
+    # Both templates must carry the same set — that is the drift #25 closed.
+    local key f globs
+    for key in review-risk review-readability review-reliability review-resilience \
+               review-refuter jd-judge-a jd-judge-b jd-fix-agent general; do
         assert_eq "allow" "$(jq -r --arg k "$key" '.agent["kurama-orchestrator"].permission.task[$k]' "$prof")" \
             "the profile template denies $key" || return 1
+        assert_eq "allow" "$(jq -r --arg k "$key" '.agent["sdd-orchestrator"].permission.task[$k]' "$multi")" \
+            "opencode.multi.json denies $key" || return 1
+    done
+    # No "allow" in either template may be expressed as a glob.
+    for f in "$multi" "$prof"; do
+        globs=$(jq -r '[.agent[] | (.permission.task // {}) | to_entries[]
+            | select(.value == "allow") | select(.key | test("[*]")) | .key] | join(",")' "$f")
+        [ -z "$globs" ] || {
+            echo "$(basename "$f") still grants via glob: $globs"; return 1; }
     done
     return 0
 }
