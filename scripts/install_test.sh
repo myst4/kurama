@@ -8464,7 +8464,7 @@ echo ""
 # there or degrade to a skip — a vacuous green in the one place it matters most.
 # The control used instead needs no history and is stronger for what is actually
 # claimed: the same repo state installed three ways (no settings file at all /
-# `persona: neutral` / `persona: rioplatense`) must produce three byte-identical
+# `persona: neutral` / `persona: argentino`) must produce three byte-identical
 # trees. Persona-absent behaving differently would diverge them; the installer
 # templating the persona anywhere would diverge them.
 # ============================================================================
@@ -8602,7 +8602,7 @@ test_l_persona_absent_installs_a_byte_identical_tree() {
     make_git_repo "$neutral"
     make_git_repo "$preset"
     write_sdd_init_config "$neutral" neutral
-    write_sdd_init_config "$preset" rioplatense
+    write_sdd_init_config "$preset" argentino
 
     local d
     for d in "$none" "$neutral" "$preset"; do
@@ -8616,8 +8616,8 @@ test_l_persona_absent_installs_a_byte_identical_tree() {
     done
 
     # The inputs really did differ, or this compares three copies of one question.
-    grep -q '^persona: rioplatense$' "$preset/openspec/config.yaml" \
-        || { echo "the preset variant never received persona: rioplatense"; return 1; }
+    grep -q '^persona: argentino$' "$preset/openspec/config.yaml" \
+        || { echo "the preset variant never received persona: argentino"; return 1; }
     grep -q '^persona: neutral$' "$neutral/openspec/config.yaml" \
         || { echo "the neutral variant never received persona: neutral"; return 1; }
     if [ -e "$none/openspec/config.yaml" ]; then
@@ -8637,7 +8637,7 @@ test_l_persona_absent_installs_a_byte_identical_tree() {
     assert_installed_trees_identical "$none" "$neutral" \
         "persona absent vs persona: neutral" || return 1
     assert_installed_trees_identical "$none" "$preset" \
-        "persona absent vs persona: rioplatense" || return 1
+        "persona absent vs persona: argentino" || return 1
     return 0
 }
 
@@ -8719,7 +8719,7 @@ test_l_persona_reaches_the_orchestrator_conversation_only() {
     # the block is size-checked so an empty haystack cannot answer for it.
     local repo="$TEST_TMPDIR/persona-set"
     make_git_repo "$repo"
-    write_sdd_init_config "$repo" rioplatense
+    write_sdd_init_config "$repo" argentino
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
         --non-interactive --without-engram > /dev/null 2>&1 \
         || { echo "project-scope setup exited non-zero"; return 1; }
@@ -8747,7 +8747,7 @@ test_l_persona_reaches_the_orchestrator_conversation_only() {
     # #73 keeps the presets in a registry file "so adding one is a file, not a code
     # change". A preset NAME baked into the shipped prompt would break that, and
     # would also mean this case was reading its own input back.
-    assert_not_matches "$block" 'rioplatense' \
+    assert_not_matches "$block" 'argentino' \
         "a hardcoded preset name (presets belong to _shared/personas.md, not the prompt)" || return 1
 
     # The registry the prompt points at has to be installed, or a resolved persona
@@ -8756,8 +8756,8 @@ test_l_persona_reaches_the_orchestrator_conversation_only() {
     local registry="$repo/.claude/skills/_shared/personas.md"
     assert_file_exists "$registry" || return 1
     assert_file_not_empty "$registry" 500 || return 1
-    grep -q 'rioplatense' "$registry" \
-        || { echo "the installed personas.md carries no rioplatense preset"; return 1; }
+    grep -q 'argentino' "$registry" \
+        || { echo "the installed personas.md carries no argentino preset"; return 1; }
     local registry_flat
     registry_flat="$(flatten_file "$registry")"
     assert_matches "$registry_flat" '(specs|proposals|designs).*commit messages.*language' \
@@ -8793,7 +8793,7 @@ test_l_user_name_never_lands_in_a_committed_file() {
     assert_eq "$who" "$(git config --global user.name)" \
         "the sandboxed global git identity was not set — a leak from the installer's cwd would go unseen" || return 1
 
-    write_sdd_init_config "$repo" rioplatense
+    write_sdd_init_config "$repo" argentino
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
         --non-interactive --without-engram > /dev/null 2>&1 \
         || { echo "project-scope setup exited non-zero"; return 1; }

@@ -103,12 +103,12 @@ Read the project to understand:
   user does not choose). Note for the user: `/sdd-ff` always fast-forwards its phases in `auto`
   regardless of this setting.
 - **Persona (explicit question — default `neutral`)**: Ask the user directly:
-  **"Conversation persona: `neutral` or `rioplatense`?"** The persona shapes the
+  **"Conversation persona: `neutral` or `argentino`?"** The persona shapes the
   orchestrator's CONVERSATION ONLY — specs, proposals, designs, task lists, commit
   messages, and code comments keep the project's own language regardless of it.
   - `neutral` (the default) is today's exact behavior: a project that does not opt in
     changes in no way.
-  - `rioplatense` is a shipped preset — voseo, Latin American technical vocabulary, warm
+  - `argentino` is a shipped preset — voseo, Latin American technical vocabulary, warm
     and close in tone while staying technically precise.
   `skills/_shared/personas.md` is the preset REGISTRY: offer what it lists (the two above
   ship today) and record the preset name the user picked, so adding a persona stays a
@@ -173,7 +173,7 @@ schema: spec-driven
 
 execution_mode: supervised  # supervised | auto; supervised stops at human gates, auto continues unless blocked/verify FAIL
 
-persona: neutral  # neutral | rioplatense; conversation tone ONLY — artifacts keep the project's language. Preset registry: skills/_shared/personas.md
+persona: neutral  # neutral | argentino; conversation tone ONLY — artifacts keep the project's language. Preset registry: skills/_shared/personas.md
 
 context: |
   Tech stack: {detected stack}
@@ -284,7 +284,7 @@ for the settings that steer the whole cycle:
 
 - `artifact_store.mode`: `engram | openspec | hybrid`
 - `execution_mode`: `supervised | auto` (chosen in Step 1)
-- `persona`: `neutral | rioplatense` (chosen in Step 1; conversation tone only — never reaches an artifact)
+- `persona`: `neutral | argentino` (chosen in Step 1; conversation tone only — never reaches an artifact)
 - `compliance_mode`: `behavioral | static` (chosen in Step 1)
 - `test_command`, `build_command`, `coverage_threshold` (detected in Step 1)
 - `tdd.enabled`: `true | false` (from the explicit TDD question in Step 1 — the single switch for the optional TDD module)
@@ -335,7 +335,7 @@ Phase-specific fields to surface in `detailed_report` (adapt wording to the mode
 - **Stack**: {detected stack}
 - **Persistence**: {engram | openspec | hybrid}
 - **Execution mode**: {supervised | auto} — {user's answer to the explicit question}
-- **Persona**: {neutral | rioplatense} — {user's answer to the explicit question}
+- **Persona**: {neutral | argentino} — {user's answer to the explicit question}
 - **Compliance mode**: {behavioral | static} — {test infra detected? one-line rationale}
 - **TDD**: {enabled | disabled} — {user's answer to the explicit question; single_test_command if enabled}
 - **Kanban**: {enabled | disabled} — {user's answer; when enabled: project_number + stage mapping + merge_method; when a `gh` prerequisite failed: which check and the fix command}

@@ -210,7 +210,7 @@ key resolved by the same preflight that resolves the artifact store.
 | Value | Effect |
 |-------|--------|
 | `neutral` | **The default — today's exact behavior.** Nothing changes for an existing install, or for anyone who does not opt in. |
-| `rioplatense` | A shipped preset for Spanish-language conversation: voseo (`vos`, `tenés`, `fijate`, `dale`), Latin American technical vocabulary, warm and close in tone while staying technically precise. Never Peninsular Spanish. |
+| `argentino` | A shipped preset for Spanish-language conversation: voseo (`vos`, `tenés`, `fijate`, `dale`), Latin American technical vocabulary, warm and close in tone while staying technically precise. Never Peninsular Spanish. |
 
 The presets live in `skills/_shared/personas.md`, so adding one is a file, not a
 code change.
@@ -247,7 +247,7 @@ machine. Most specific first:
 3. Kurama's `persona:` setting from `openspec/config.yaml`;
 4. `neutral`.
 
-So: the team set `rioplatense`, but your harness speaks formal English — who
+So: the team set `argentino`, but your harness speaks formal English — who
 wins? Your harness does. `orchestrator-sdd-protocol.md` already tells the
 orchestrator to match *the user's active persona*; this setting adds a default
 **underneath** that rule rather than replacing it.

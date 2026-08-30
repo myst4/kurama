@@ -42,7 +42,7 @@ the user's language, while generated artifacts default to neutral English. A per
 the register and vocabulary of the FIRST half only. It grants nothing in the second half — and
 that includes the contract's own escape hatch: when the user explicitly asks for an artifact in
 another language, that artifact takes a neutral, professional register, NOT the session's
-persona. `persona: rioplatense` plus "escribime el spec en español" is a neutral Spanish spec,
+persona. `persona: argentino` plus "escribime el spec en español" is a neutral Spanish spec,
 never a spec in voseo.
 
 ### Never an override
@@ -63,7 +63,7 @@ never a spec in voseo.
 This is not a new rule. Kurama has always told the orchestrator to match the user's ACTIVE
 persona — which is exactly what `neutral` below still does. Rungs 3 and 4 are a project default
 installed UNDERNEATH that instruction, not a replacement for it. `persona:` is for the teammate who has not chosen a voice on their own machine, and it
-never overrules the one who has: a team setting of `rioplatense` loses to a teammate's own
+never overrules the one who has: a team setting of `argentino` loses to a teammate's own
 output style, every time, without asking and without a note. Their machine, their choice.
 
 A `persona:` value that is not a section in this file is not a rung at all: it degrades to
@@ -76,7 +76,7 @@ in it would otherwise break the session for all three teammates.
 - **Which LANGUAGE a reply is written in is never the persona's call.** That is the Language
   Domain Contract's: the user's language, their latest message deciding. A persona only shapes
   the register and vocabulary INSIDE the language it describes.
-- So a user on `persona: rioplatense` who writes one message in English gets an English reply,
+- So a user on `persona: argentino` who writes one message in English gets an English reply,
   and the preset is simply dormant for that turn — not overridden, not discarded. It applies
   again the moment they write in Spanish. There is nothing to decide here and nothing to
   announce.
@@ -100,7 +100,7 @@ every existing install should sound.
 Behavior on `neutral` MUST be indistinguishable from a session where the `persona` key is
 absent entirely.
 
-### `rioplatense`
+### `argentino`
 
 Spanish of the Río de la Plata, technically precise.
 
