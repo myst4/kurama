@@ -2108,6 +2108,92 @@ test_orchestrator_prompt_delegates_heavy_blocks() {
     done
 }
 
+test_phase_skill_loading_reads_paths_by_default() {
+    # #79.1. `skill-resolver.md` is the canonical resolution protocol: the delegator passes
+    # exact SKILL.md PATHS by default and compact rules are an opt-in low-token trade, because
+    # a digest is lossy by construction and goes stale silently. `sdd-phase-common.md` is the
+    # file EVERY phase agent reads at startup, and it used to order the opposite on BOTH of its
+    # surfaces — "Do NOT read any SKILL.md files" on the injected path, and "apply the
+    # registry's Compact Rules" on the registry fallback. A sub-agent obeys the file it is told
+    # to load, not the protocol it never sees, so the startup file wins in practice and the
+    # canonical default is dead letter. Both surfaces are pinned here, against the canonical
+    # file in the same test so a future flip of the default fails loudly instead of drifting.
+    local common="$REPO_DIR/skills/_shared/sdd-phase-common.md"
+    local resolver="$REPO_DIR/skills/_shared/skill-resolver.md"
+    assert_file_exists "$common" || return 1
+    assert_file_exists "$resolver" || return 1
+
+    # The canonical rule this test measures against. If it ever flips, this test is stale and
+    # must be re-pointed — never deleted, or the contradiction returns unobserved.
+    grep -qi 'opt-in' "$resolver" \
+        || { echo "skill-resolver.md no longer calls compact rules opt-in — this test is stale"; return 1; }
+
+    # Surface 1 — the injected path. The contradictory order must be gone...
+    if grep -qF 'Do NOT read any SKILL.md files' "$common"; then
+        echo "sdd-phase-common.md still forbids reading SKILL.md on the injected path"; return 1
+    fi
+    # ...and the DEFAULT block shape must be named, with the instruction to read it in full.
+    grep -qF 'Project Standards (skills to load)' "$common" \
+        || { echo "sdd-phase-common.md never names the default 'skills to load' block"; return 1; }
+    grep -qiF 'read each listed file in full' "$common" \
+        || { echo "sdd-phase-common.md does not tell the phase agent to read the listed SKILL.md files"; return 1; }
+    # The opt-in shape stays documented — removing it would strand the low-token mode the
+    # delegator is still allowed to choose.
+    grep -qF 'Project Standards (auto-resolved)' "$common" \
+        || { echo "sdd-phase-common.md dropped the opt-in auto-resolved block"; return 1; }
+
+    # Surface 2 — the registry fallback. It must route through the index, not Compact Rules.
+    if grep -qF 'Compact Rules** section, apply rules' "$common"; then
+        echo "sdd-phase-common.md fallback still applies compact rules instead of reading paths"; return 1
+    fi
+    grep -qF '**skills index**' "$common" \
+        || { echo "sdd-phase-common.md fallback never routes through the registry's skills index"; return 1; }
+
+    # #41 invariant, untouched by the above: `.kurama/` is hidden AND gitignored, so existence
+    # is `test -f` or Read — a finder reports "missing" for a file that is right there.
+    grep -qF 'test -f' "$common" \
+        || { echo "sdd-phase-common.md lost the fail-loud check for .kurama/skill-registry.md"; return 1; }
+    grep -qi 'never with a finder' "$common" \
+        || { echo "sdd-phase-common.md no longer bans finders as an existence check"; return 1; }
+    return 0
+}
+
+test_preflight_resolves_no_dangling_delivery_value() {
+    # #79.2. The preflight used to resolve a fourth value, `delivery`, declare that it fed the
+    # Review Workload Guard, and forward it in every phase prompt — while no phase read it and
+    # the guard it named measures the real diff with git at PR time instead. A contract the
+    # repo declares and nothing consumes is a false promise, so the promise was removed rather
+    # than wired. This pins BOTH halves: the value is gone from the whole skills tree, and the
+    # preflight's arity is consistently three everywhere it is counted.
+    local osp="$REPO_DIR/skills/_shared/orchestrator-sdd-protocol.md"
+    assert_file_exists "$osp" || return 1
+
+    # No skill resolves, forwards, or names the dangling strategy anywhere.
+    local leftovers
+    leftovers=$(grep -rl 'delivery_strategy\|ask-on-risk' "$REPO_DIR/skills" 2>/dev/null || true)
+    if [ -n "$leftovers" ]; then
+        echo "a delivery strategy value nothing reads is back in: $leftovers"; return 1
+    fi
+
+    # Arity: three, with no counting artifact of the removed fourth left behind.
+    if grep -qi 'four values\|all four\|four groups' "$osp"; then
+        echo "orchestrator-sdd-protocol.md still counts the preflight as four values"; return 1
+    fi
+    grep -qi 'three values' "$osp" \
+        || { echo "orchestrator-sdd-protocol.md never states the preflight's three values"; return 1; }
+
+    # The reason it is three, recorded where the next reader would otherwise re-add it.
+    grep -qi 'delivery is not a preflight value' "$osp" \
+        || { echo "orchestrator-sdd-protocol.md does not say why delivery is not a preflight value"; return 1; }
+
+    # The guard that DOES decide partitioning is a git measurement and stays untouched.
+    local bpr="$REPO_DIR/skills/branch-pr/SKILL.md"
+    assert_file_exists "$bpr" || return 1
+    grep -qi 'Review Workload Guard' "$bpr" \
+        || { echo "branch-pr lost the Review Workload Guard that replaces the preflight value"; return 1; }
+    return 0
+}
+
 test_change_size_absent_means_standard() {
     # S-seq-2 / S-size-2. Every change created before the size field existed has no
     # `## Change Size` section. The contract must resolve that to `standard` — the long path
@@ -5290,6 +5376,8 @@ run_test "dropped harnesses are rejected by name" test_dropped_harnesses_rejecte
 run_test "dropped harness artifacts are gone" test_dropped_harness_artifacts_are_gone
 run_test ".kurama state survives the mode removal" test_kurama_state_survives_mode_removal
 run_test "orchestrator prompt delegates heavy blocks to _shared" test_orchestrator_prompt_delegates_heavy_blocks
+run_test "phase skill loading reads SKILL.md paths by default" test_phase_skill_loading_reads_paths_by_default
+run_test "preflight resolves no dangling delivery value" test_preflight_resolves_no_dangling_delivery_value
 run_test "absent change size resolves to standard" test_change_size_absent_means_standard
 run_test "small change collapses spec/design, never omits" test_small_change_collapses_without_omitting
 run_test "sdd-design description marks spec optional" test_sdd_design_description_marks_spec_optional

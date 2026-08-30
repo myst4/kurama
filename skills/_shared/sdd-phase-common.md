@@ -70,15 +70,31 @@ For a `small` change the spec and design arrive as inline sections of the propos
 
 ## A. Skill Loading
 
-1. Check if the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt. If yes, follow those rules — they are pre-digested compact rules from the skill registry. **Do NOT read any SKILL.md files.**
-2. If no Project Standards block was provided, check for `SKILL: Load` instructions. If present, load those exact skill files.
+1. Check whether the orchestrator injected a `## Project Standards` block in your launch
+   prompt. Its heading names the resolution mode the orchestrator chose
+   (`skill-resolver.md` → *Step 3*); follow the mode you were sent, do not pick one:
+   - **`## Project Standards (skills to load)`** — the DEFAULT shape: skill names plus exact
+     `SKILL.md` paths. **READ each listed file in full** before starting work and follow it
+     strictly. A full read is authoritative and complete.
+   - **`## Project Standards (auto-resolved)`** — the OPT-IN low-token shape: pre-digested
+     compact rules pasted inline. Apply them as given, and do NOT go read the SKILL.md files
+     the orchestrator deliberately did not send. Compact rules are a lossy summary
+     (`skill-resolver.md` → *Why Not Compact Rules?*), which is why they are the exception
+     and not the default.
+2. If no Project Standards block was provided, check for `SKILL: Load` instructions. If present, read those exact skill files in full.
 3. If neither was provided, search for the skill registry as a fallback:
    a. `mem_search(query: "skill-registry", project: "{project}")` — if found, `mem_get_observation(id)` for full content
-   b. Fallback: read `.kurama/skill-registry.md` from the project root if it exists
-   c. From the registry's **Compact Rules** section, apply rules whose triggers match your current task.
+   b. Fallback: read `.kurama/skill-registry.md` from the project root. Check with `test -f` or
+      your harness's Read tool — never with a finder: `.kurama/` is both hidden AND gitignored,
+      so `fd`/`rg` skip it even with hidden flags. A read that ERRORED is a broken check, not a
+      missing registry (`skill-resolver.md` → *Step 1*).
+   c. From the registry's **skills index** (`Trigger | Skill | Path`), match triggers to your
+      current task and **read the exact listed `SKILL.md` paths**. The registry's *Compact
+      Rules* section is the delegator's opt-in budget surface, not your default; fall back to a
+      skill's compact rules only if its listed path cannot be read, and note that in `risks`.
 4. If no registry exists, proceed with your phase skill only.
 
-NOTE: the preferred path is (1) — compact rules pre-injected by the orchestrator. Paths (2) and (3) are fallbacks for backwards compatibility. Searching the registry is SKILL LOADING, not delegation. If `## Project Standards` is present, IGNORE any `SKILL: Load` instructions — they are redundant.
+NOTE: the preferred path is (1) — standards resolved by the orchestrator, which by default sends SKILL.md paths for you to read in full. Paths (2) and (3) are fallbacks for backwards compatibility. Searching the registry is SKILL LOADING, not delegation. If `## Project Standards` is present, IGNORE any `SKILL: Load` instructions — they are redundant.
 
 ## B. Artifact Retrieval (Engram Mode)
 

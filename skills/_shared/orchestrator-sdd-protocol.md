@@ -13,14 +13,14 @@ file carries the procedure.
 
 Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, the
 executor skills, or a natural-language equivalent ("use SDD to add X", "do it with
-SDD") — RESOLVE the Preflight block of four values.
+SDD") — RESOLVE the Preflight block of three values.
 
 **Resolving does NOT mean asking:**
 
 - **Silent path (the normal case)**: read the persisted settings (`openspec/config.yaml`
-  or the `sdd-init/{project}` settings bundle). If ALL FOUR values resolve from there,
+  or the `sdd-init/{project}` settings bundle). If ALL THREE values resolve from there,
   DO NOT ask anything — print a one-line status in the user's language (e.g.
-  "Preflight: supervisado · openspec · chained · 400 — decime si querés cambiar algo
+  "Preflight: supervisado · openspec · 400 — decime si querés cambiar algo
   esta sesión") and start working. `sdd-init` already asked these once; re-asking
   answered questions is friction, not safety.
 - **Ask ONLY the missing pieces**: if some values have no persisted answer (project
@@ -31,23 +31,26 @@ SDD") — RESOLVE the Preflight block of four values.
   re-offer it in a preflight. Switching stores mid-project fragments artifacts — only
   change it on an explicit user request, with that warning.
 
-The four values (when something does need asking):
+The three values (when something does need asking):
 
 1. **Pace** — Interactive or Automatic. This IS `execution_mode`: Interactive →
    `supervised`, Automatic → `auto`. Same value as *Execution Mode* in the orchestrator
    prompt, not a parallel concept.
 2. **Artifact store** — OpenSpec, Engram, or Both (`hybrid`). Offer only file-safe
    choices when Engram is not callable.
-3. **Delivery** — Ask on risk, Single PR, Chained, or Auto-chain. Feeds the Delivery
-   Strategy consumed by `skills/branch-pr` (`ask-on-risk` | `single-pr` | `chained` |
-   `auto-chain`).
-4. **Review budget** — maximum authored changed lines before stopping for
+3. **Review budget** — maximum authored changed lines before stopping for
    reviewer-burden approval (default `400`), feeding the Review Workload Guard.
 
-**Rendering.** On Claude Code, use the native `AskUserQuestion` tool with all four
-groups in ONE call so they render as a single interactive prompt — never four separate
+**Delivery is NOT a preflight value.** How work is partitioned into PRs is decided at PR
+time by the **Review Workload Guard** and **Delivery Strategy** in `skills/branch-pr`,
+from a `git diff` measurement against the base — a measurement of the real change, not a
+session setting chosen before the change exists. Do not resolve, ask for, or forward a
+delivery/chaining value here: nothing downstream reads one.
+
+**Rendering.** On Claude Code, use the native `AskUserQuestion` tool with all three
+groups in ONE call so they render as a single interactive prompt — never three separate
 calls, never the menu pasted as chat text. On harnesses without that primitive, ask ONE
-grouped text question covering the same four groups. Match the user's conversation
+grouped text question covering the same three groups. Match the user's conversation
 language and the resolved persona (*Session identity* below) for the labels: this UI is
 orchestrator conversation, not a technical artifact. Never show internal codes or canonical values in the UI; map the
 chosen labels to canonical values internally after the prompt returns.
@@ -55,17 +58,17 @@ chosen labels to canonical values internally after the prompt returns.
 **Precedence.** A value the user chose THIS session (grouped prompt or explicit
 override) wins over the persisted one, for this session only. Persisted settings SATISFY
 the preflight on their own — that is the point of `sdd-init`. Cache the resolved block
-for the session and forward the four values in every phase prompt.
+for the session and forward the three values in every phase prompt.
 
 ### Session identity (resolved, never asked)
 
-Alongside the four values, the Preflight resolves two identity values. Neither is a fifth
+Alongside the three values, the Preflight resolves two identity values. Neither is a fourth
 question: they NEVER enter the grouped prompt, never block, and never gate a phase. An
 unresolved one degrades silently — `neutral`, or no name at all. The rule above stands
-unchanged: when the four values resolve from the persisted settings, the session starts
+unchanged: when the three values resolve from the persisted settings, the session starts
 without asking anything, whatever these two resolve to.
 
-**`persona`** — read the `persona` key from the SAME settings home the four values came from
+**`persona`** — read the `persona` key from the SAME settings home the three values came from
 (`openspec/config.yaml`, or the `sdd-init/{project}` settings bundle in engram mode).
 
 - **Absent → `neutral`, and `neutral` means DO NOTHING.** Do not read
@@ -109,7 +112,7 @@ commit message.
 every message, not inside an artifact. A name in every turn reads as a tic, not as attention.
 
 **Neither value is forwarded into phase prompts.** They are cached for the session like the
-four values, but phases exist to produce artifacts, and artifacts are outside a persona's
+three values, but phases exist to produce artifacts, and artifacts are outside a persona's
 scope (`personas.md` → *Conversation only*).
 
 ### Artifact existence checks (fail-loud)

@@ -109,11 +109,10 @@ Each step lists the command, what should happen, and **what to verify**. The
 ### Step 0 — SDD Session Preflight
 
 The first SDD command in a session triggers a one-time grouped prompt (on Claude
-Code, the native `AskUserQuestion` with four groups). Answer:
+Code, the native `AskUserQuestion` with three groups). Answer:
 
 - **Pace** → *Interactive* (`supervised`) — you want to stop at each human gate.
 - **Artifact store** → per your pass (Engram / OpenSpec / inline-safe for Pass C).
-- **Delivery** → *Ask on risk* (default).
 - **Review budget** → *400* (default).
 
 ✅ **Verify**: the prompt renders once as a single grouped question (not four
