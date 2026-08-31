@@ -4,6 +4,13 @@ This file keeps the **current (6.x)** and **previous (5.x)** release series. For
 everything before 5.0.0, read the full history from the tags: `git log` (each
 release is a tagged commit) or the [GitHub Releases page](https://github.com/myst4/kurama/releases).
 
+## 6.1.2 — 2026-08-30
+
+Patch: one change merged after `v6.1.1` was tagged, so the tag and `main` had diverged — an
+install from the tag received the old preset name.
+
+- **The Spanish persona preset is now `argentino`, not `rioplatense`.** `rioplatense` is the linguistically exact term for the dialect the preset describes, but a preset name is a discovery surface: someone looking for a Spanish persona in `skills/_shared/personas.md`, or answering the `sdd-init` question, searches for the word they use for their own speech. The preset's content is unchanged — voseo, Latin American technical vocabulary, warm without losing rigor, never Peninsular Spanish. Renamed straight rather than kept as an alias, because the preset shipped in 6.1.0 hours earlier and a permanent second name for a preset with no installed base is surface paid forever. Note the failure mode if a stale config survives somewhere: an unrecognised `persona:` value degrades to `neutral` with a one-line note and never fails, so `persona: rioplatense` goes *quiet* rather than loud — no error, just no more voseo. The 6.1.0 entry below is deliberately left as written; it records what that version shipped.
+
 ## 6.1.1 — 2026-08-30
 
 Patch: three defect corrections merged after `v6.1.0` was tagged, so an install from that tag
