@@ -8439,7 +8439,12 @@ run_test "uninstall refuses a 'dir/' receipt entry and still sweeps the rest" te
 echo ""
 
 # ============================================================================
-# UNIT-L (issue #73): session identity — persona, the user's name, sdd-learn
+# UNIT-L (issues #73, #102): session identity — persona, the user's name, sdd-learn
+#
+# #102 added a fifth property: BOTH values must be resolvable in a session that
+# never runs an SDD cycle. #73 wrote them for "session start" but left the
+# resolution instructions in a file the prompt loads at CYCLE start, so a session
+# with no cycle greeted nobody and adopted no voice, whatever the config said.
 #
 # Three additions share one plumbing point (the settings the preflight already
 # resolves at session start), and each carries a property that breaks silently:
@@ -8516,6 +8521,35 @@ kurama_block() {
     local file="$1"
     [ -f "$file" ] || return 0
     awk '/<!-- BEGIN:kurama -->/ { f = 1; next } /<!-- END:kurama -->/ { f = 0 } f' "$file"
+}
+
+# Print the orchestrator half of the prompt text on stdin: the lines from the
+# `## Kurama Orchestrator` heading up to — and not including — `## SDD Workflow`.
+# That half is what every session reads regardless of whether a cycle ever starts,
+# so an instruction found HERE is an instruction that is not behind the SDD gate,
+# and one found only after the cut is one a non-SDD session never executes.
+pre_sdd_region() {
+    awk '/^## SDD Workflow/ { exit } /^## Kurama Orchestrator/ { f = 1 } f'
+}
+
+# Fail unless $1 carries the session-identity RESOLUTION instructions themselves —
+# the literal settings home the persona key is read from, the literal name ladder,
+# and the two rules that must travel with them. $2 names the prompt under test.
+assert_region_carries_session_identity() {
+    local region="$1" what="$2"
+    assert_matches "$region" 'persona.*openspec/config\.yaml' \
+        "$what: where the persona key is read from (the settings home, named in the prompt itself)" || return 1
+    assert_matches "$region" 'sdd-init/.project.' \
+        "$what: the engram-mode settings home for that same key" || return 1
+    assert_matches "$region" 'do not open.{0,40}personas\.md' \
+        "$what: the neutral/absent no-op — the preset registry is never opened" || return 1
+    assert_matches "$region" 'git config user\.name' \
+        "$what: step 1 of the name ladder, as the runnable command" || return 1
+    assert_matches "$region" 'empty.*gh api user' \
+        "$what: the gh fallback, conditioned on step 1 coming back empty" || return 1
+    assert_matches "$region" 'name .*(never|not) written to a committed file' \
+        "$what: the never-committed rule, travelling WITH the instruction" || return 1
+    return 0
 }
 
 # Fail unless $1 is a plausible orchestrator block rather than the empty string a
@@ -8903,11 +8937,95 @@ test_l_sdd_learn_is_a_well_formed_registered_skill() {
     return 0
 }
 
-echo -e "${BOLD}UNIT-L (issue #73): session identity — persona, name, sdd-learn${NC}"
+test_l_session_identity_resolves_without_an_sdd_cycle() {
+    # #102. Both identity values were WRITTEN for session start and READ from a file
+    # the prompt only loads when a cycle starts — "Load it when a cycle starts. A
+    # session that never invokes SDD never needs it". So in a session that never ran
+    # SDD, neither the greeting nor the persona ever fired: confirmed in the field on
+    # a 6.1.1 repo where no cycle had run and neither took effect. The first use the
+    # protocol itself lists for the name is the GREETING, which happens before any
+    # cycle exists, so the instruction could never fire where it was needed most.
+    #
+    # The fix moves the resolution INSTRUCTIONS into the always-read half of the
+    # prompt and leaves only the rationale and the full ladder behind the gate. What
+    # is pinned here is that the shipped prompt carries the instruction ITSELF — the
+    # literal settings home the persona key is read from and the literal `git config
+    # user.name` ladder — plus the two rules that must travel with it rather than
+    # stay behind it: the personas.md read ban on the neutral path, and the name
+    # never reaching a committed file.
+    #
+    # What would make this pass for the wrong reason:
+    #
+    #   * Grepping the WHOLE prompt. The SDD half still names the protocol file and
+    #     still points at *Session identity* inside it, so a whole-prompt grep for
+    #     "persona" or "session identity" is satisfied by exactly the broken shape
+    #     this case exists to catch. Every assertion runs on the region BEFORE
+    #     `## SDD Workflow`.
+    #   * An empty region — a renamed heading, an unbalanced marker pair — over which
+    #     every `assert_matches ... || return 1` reads as a pass. Size-checked first.
+    #   * A splitter that silently returns the whole block, putting the SDD half back
+    #     into the haystack. Proved against a sentinel before it is trusted:
+    #     `orchestrator-sdd-protocol.md` is in the full block and must be ABSENT from
+    #     the region.
+    #   * A pointer standing in for the instruction. A pointer sentence cannot carry
+    #     `git config user.name` or `openspec/config.yaml`, which is why the runnable
+    #     command and the literal path are what is asserted — not the word "persona".
+    local repo="$TEST_TMPDIR/identity-no-cycle"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --non-interactive --without-engram > /dev/null 2>&1 \
+        || { echo "project-scope setup exited non-zero"; return 1; }
+
+    local block region
+    block="$(kurama_block "$repo/CLAUDE.md")"
+    assert_block_is_substantial "$block" || return 1
+    region="$(printf '%s\n' "$block" | pre_sdd_region)"
+
+    # The splitter's own positive control, before its output is trusted as a haystack.
+    printf '%s\n' "$block" | grep -q 'orchestrator-sdd-protocol\.md' \
+        || { echo "the full block never named the protocol file — the sentinel below proves nothing"; return 1; }
+    if printf '%s\n' "$region" | grep -q 'orchestrator-sdd-protocol\.md'; then
+        echo "the pre-SDD region still contains the SDD half — the split did not happen,"
+        echo "and every assertion below would be answered by the gated text"
+        return 1
+    fi
+    local region_bytes
+    region_bytes=$(printf '%s' "$region" | wc -c | tr -d ' ')
+    if [ "$region_bytes" -lt 2000 ]; then
+        echo "  the pre-SDD region is ${region_bytes}B — the headings moved, and every"
+        echo "  assertion below would match over an empty string"
+        return 1
+    fi
+
+    assert_region_carries_session_identity "$region" "the installed CLAUDE.md" || return 1
+
+    # All five harnesses ship this prompt, and omp/opencode are the ones a byte-budget
+    # trim would quietly reach for first. The committed outputs carry no BEGIN/END
+    # markers — the installer adds those — so they are regioned straight from the file.
+    local f
+    for f in "$REPO_DIR/examples/claude-code/CLAUDE.md" \
+             "$REPO_DIR/examples/pi/AGENTS.md" \
+             "$REPO_DIR/examples/codex/agents.md" \
+             "$REPO_DIR/examples/opencode/AGENTS.md" \
+             "$REPO_DIR/examples/omp/AGENTS.md"; do
+        assert_file_exists "$f" || return 1
+        local shipped
+        shipped="$(pre_sdd_region < "$f")"
+        if [ "$(printf '%s' "$shipped" | wc -c | tr -d ' ')" -lt 2000 ]; then
+            echo "  ${f##*/examples/}: the pre-SDD region is empty or truncated"
+            return 1
+        fi
+        assert_region_carries_session_identity "$shipped" "${f##*/examples/}" || return 1
+    done
+    return 0
+}
+
+echo -e "${BOLD}UNIT-L (issues #73, #102): session identity — persona, name, sdd-learn${NC}"
 run_test "persona absent installs a byte-identical tree" test_l_persona_absent_installs_a_byte_identical_tree
 run_test "neutral and absent are the same declared no-op" test_l_neutral_and_absent_are_the_same_declared_no_op
 run_test "a set persona reaches conversation only, never artifacts" test_l_persona_reaches_the_orchestrator_conversation_only
 run_test "the user's name never lands in a committed file" test_l_user_name_never_lands_in_a_committed_file
+run_test "session identity resolves without an SDD cycle (#102)" test_l_session_identity_resolves_without_an_sdd_cycle
 run_test "sdd-learn installs by default (optional group)" test_l_sdd_learn_installs_by_default
 run_test "sdd-learn is a well-formed, registered skill" test_l_sdd_learn_is_a_well_formed_registered_skill
 
