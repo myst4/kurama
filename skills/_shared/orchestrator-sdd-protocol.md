@@ -62,13 +62,17 @@ for the session and forward the three values in every phase prompt.
 
 ### Session identity (resolved, never asked)
 
-Alongside the three values, the Preflight resolves two identity values. Neither is a fourth
-question: they NEVER enter the grouped prompt, never block, and never gate a phase. An
-unresolved one degrades silently — `neutral`, or no name at all. The rule above stands
-unchanged: when the three values resolve from the persisted settings, the session starts
-without asking anything, whatever these two resolve to.
+**The two identity values are resolved at SESSION START, not here.** The orchestrator prompt
+(*Session Identity*) carries the resolution instruction itself, because the first use of both —
+the greeting — happens before any cycle exists, and a session that never runs SDD never loads
+this file. This section is the full rules for values already in hand; it is not the trigger.
 
-**`persona`** — read the `persona` key from the SAME settings home the three values came from
+Neither is a fourth preflight question: they NEVER enter the grouped prompt, never block, and
+never gate a phase. An unresolved one degrades silently — `neutral`, or no name at all. The
+rule above stands unchanged: when the three values resolve from the persisted settings, the
+session starts without asking anything, whatever these two resolve to.
+
+**`persona`** — the key is read from the SAME settings home the three values come from
 (`openspec/config.yaml`, or the `sdd-init/{project}` settings bundle in engram mode).
 
 - **Absent → `neutral`, and `neutral` means DO NOTHING.** Do not read
@@ -93,7 +97,8 @@ without asking anything, whatever these two resolve to.
   Contract does, and the user's latest message decides. The persona shapes register and
   vocabulary inside that language, on the user-facing half only.
 
-**The user's name** — resolve ONCE at session start, stopping at the first non-empty answer:
+**The user's name** — resolved ONCE at session start, stopping at the first non-empty answer.
+The ladder in full, since the prompt carries only its steps:
 
 1. `git config user.name`
 2. `gh api user --jq '.name // .login'` — ONLY when step 1 came back empty. It is a network
