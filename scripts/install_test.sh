@@ -52,14 +52,15 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All 26 expected default skills (sdd-core + quality + review + optional + tdd).
+# All 28 expected default skills (sdd-core + quality + review + optional + tdd).
 # The `lang` group (per-language pattern skills, e.g. go-testing) is OFF by default:
 # Kurama is stack-agnostic and ships no language knowledge in a default install.
 # The tdd and kanban-github modules ship by default now; installing either does NOT
 # activate it (TDD stays opt-in per project; the kanban board stays opt-in via
 # kanban.enabled and requires a configured gh — never probed here). The `optional`
-# group now holds THREE skills — kanban-github, sdd-learn and sdd-brainstorm (#104) —
-# so every `--without optional` count below moves by three, not by one.
+# group now holds FIVE skills — kanban-github, sdd-learn, sdd-brainstorm (#104),
+# kurama-report and systemic-issue-triage (#85, #86) — so every `--without optional`
+# count below moves by five, not by one.
 EXPECTED_SKILLS=(
     sdd-apply
     sdd-archive
@@ -87,6 +88,8 @@ EXPECTED_SKILLS=(
     skill-creator
     branch-pr
     issue-creation
+    kurama-report
+    systemic-issue-triage
 )
 
 # ============================================================================
@@ -335,7 +338,7 @@ test_claude_code_skill_count() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills for Claude Code"
+    assert_eq "28" "$count" "Expected exactly 28 skills for Claude Code"
 }
 
 # ============================================================================
@@ -351,7 +354,7 @@ test_opencode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills for OpenCode"
+    assert_eq "28" "$count" "Expected exactly 28 skills for OpenCode"
 }
 
 test_opencode_commands() {
@@ -385,7 +388,7 @@ test_codex_skill_count() {
     bash "$INSTALL_SCRIPT" --agent codex > /dev/null 2>&1
     local count
     count=$(find "$HOME/.codex/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills for Codex"
+    assert_eq "28" "$count" "Expected exactly 28 skills for Codex"
 }
 
 # ============================================================================
@@ -408,7 +411,7 @@ test_project_local_skill_count() {
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
     local count
     count=$(find "$project/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills for project-local"
+    assert_eq "28" "$count" "Expected exactly 28 skills for project-local"
 }
 
 # ============================================================================
@@ -430,7 +433,7 @@ test_custom_path_skill_count() {
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     local count
     count=$(find "$custom/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills for custom path"
+    assert_eq "28" "$count" "Expected exactly 28 skills for custom path"
 }
 
 # ============================================================================
@@ -453,7 +456,7 @@ test_all_global() {
 
 test_all_global_total_skill_count() {
     bash "$INSTALL_SCRIPT" --agent all-global > /dev/null 2>&1
-    # 5 targets x 26 skills = 130 SKILL.md files
+    # 5 targets x 28 skills = 140 SKILL.md files
     local total=0
     for dir in \
         "$HOME/.claude/skills" \
@@ -463,10 +466,10 @@ test_all_global_total_skill_count() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "26" "$count" "Expected 26 skills in $dir" || return 1
+        assert_eq "28" "$count" "Expected 28 skills in $dir" || return 1
         total=$((total + count))
     done
-    assert_eq "130" "$total" "Expected 130 total SKILL.md files across all targets"
+    assert_eq "140" "$total" "Expected 140 total SKILL.md files across all targets"
 }
 
 test_all_global_opencode_commands() {
@@ -488,7 +491,7 @@ test_idempotent_claude_code() {
     assert_all_skills_installed "$HOME/.claude/skills"
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills after double install"
+    assert_eq "28" "$count" "Expected exactly 28 skills after double install"
 }
 
 test_idempotent_opencode() {
@@ -497,7 +500,7 @@ test_idempotent_opencode() {
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
     local skill_count
     skill_count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$skill_count" "Expected exactly 26 skills after double install" || return 1
+    assert_eq "28" "$skill_count" "Expected exactly 28 skills after double install" || return 1
     local cmd_count
     cmd_count=$(find "$HOME/.config/opencode/commands" -name "sdd-*.md" | wc -l | tr -d ' ')
     assert_eq "9" "$cmd_count" "Expected exactly 9 commands after double install"
@@ -514,7 +517,7 @@ test_idempotent_all_global() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "26" "$count" "Expected 26 skills in $dir after double install" || return 1
+        assert_eq "28" "$count" "Expected 28 skills in $dir after double install" || return 1
     done
 }
 
@@ -581,8 +584,8 @@ test_output_shows_done_message() {
 test_output_shows_install_count() {
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "26 skills installed" || {
-        echo "Output missing '26 skills installed' message"
+    echo "$output" | grep -q "28 skills installed" || {
+        echo "Output missing '28 skills installed' message"
         return 1
     }
 }
@@ -749,7 +752,7 @@ test_setup_installs_default_skill_set() {
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "setup.sh should install the 26 default skills"
+    assert_eq "28" "$count" "setup.sh should install the 28 default skills"
 }
 
 test_setup_includes_tdd() {
@@ -1098,8 +1101,8 @@ test_default_install_includes_optional_groups() {
 }
 
 test_without_optional_excludes_go_testing() {
-    # The optional group holds the kanban-github module; go-testing moved to the opt-in
-    # `lang` group, so --without optional drops one skill, landing 23.
+    # The optional group holds FIVE skills now; go-testing moved to the opt-in `lang`
+    # group, so --without optional drops those five, landing 23.
     bash "$INSTALL_SCRIPT" --agent claude-code --without optional > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/kanban-github" ]; then
@@ -1110,10 +1113,11 @@ test_without_optional_excludes_go_testing() {
         echo "kanban-github should be excluded by --without optional"
         return 1
     fi
-    # The `optional` group holds THREE skills now (#73 added sdd-learn, #104 added
-    # sdd-brainstorm). Naming all three is what keeps the total below honest: drop
-    # only some of them while another group silently gains a skill and the arithmetic
-    # still lands on the same number.
+    # The `optional` group holds FIVE skills now (#73 added sdd-learn, #104 added
+    # sdd-brainstorm, #85 added kurama-report, #86 added systemic-issue-triage).
+    # Naming all five is what keeps the total below honest: drop only some of them
+    # while another group silently gains a skill and the arithmetic still lands on
+    # the same number.
     if [ -d "$base/sdd-learn" ]; then
         echo "sdd-learn should be excluded by --without optional"
         return 1
@@ -1122,15 +1126,23 @@ test_without_optional_excludes_go_testing() {
         echo "sdd-brainstorm should be excluded by --without optional"
         return 1
     fi
+    if [ -d "$base/kurama-report" ]; then
+        echo "kurama-report should be excluded by --without optional"
+        return 1
+    fi
+    if [ -d "$base/systemic-issue-triage" ]; then
+        echo "systemic-issue-triage should be excluded by --without optional"
+        return 1
+    fi
     assert_dir_exists "$base/judgment-day" || return 1   # quality group still on
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    # Expressed against EXPECTED_SKILLS, not the literal 23: 25 - 2 and 26 - 3 are both
-    # 23, so a hardcoded 23 would have passed unchanged on the pre-#104 tree and proved
-    # nothing about the third skill leaving the group.
-    assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 3 ))" "$count" \
-        "Expected the default set minus the optional group's THREE skills (kanban-github, sdd-learn, sdd-brainstorm)"
+    # Expressed against EXPECTED_SKILLS, not the literal 23: 26 - 3 and 28 - 5 are both
+    # 23, so a hardcoded 23 would have passed unchanged on the pre-#85/#86 tree and
+    # proved nothing about the two new skills leaving the group.
+    assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 5 ))" "$count" \
+        "Expected the default set minus the optional group's FIVE skills (kanban-github, sdd-learn, sdd-brainstorm, kurama-report, systemic-issue-triage)"
 }
 
 test_without_quality_excludes_judgment_day() {
@@ -1143,7 +1155,7 @@ test_without_quality_excludes_judgment_day() {
     assert_dir_exists "$base/kanban-github" || return 1         # optional group still on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected 25 skills with --without quality (26 default - judgment-day)"
+    assert_eq "27" "$count" "Expected 27 skills with --without quality (28 default - judgment-day)"
 }
 
 test_without_both_groups() {
@@ -1153,12 +1165,14 @@ test_without_both_groups() {
     if [ -d "$base/kanban-github" ]; then echo "kanban-github should be excluded"; return 1; fi
     if [ -d "$base/sdd-learn" ]; then echo "sdd-learn should be excluded"; return 1; fi
     if [ -d "$base/sdd-brainstorm" ]; then echo "sdd-brainstorm should be excluded"; return 1; fi
+    if [ -d "$base/kurama-report" ]; then echo "kurama-report should be excluded"; return 1; fi
+    if [ -d "$base/systemic-issue-triage" ]; then echo "systemic-issue-triage should be excluded"; return 1; fi
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    # Same reason as --without optional above: 25 - 3 and 26 - 4 are both 22, so the
+    # Same reason as --without optional above: 26 - 4 and 28 - 6 are both 22, so the
     # literal would survive the change untouched.
-    assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 4 ))" "$count" \
-        "Expected the default set minus judgment-day and the optional group's three skills"
+    assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 6 ))" "$count" \
+        "Expected the default set minus judgment-day and the optional group's five skills"
 }
 
 test_reject_without_required_group() {
@@ -1175,7 +1189,7 @@ test_reject_without_required_group() {
 
 test_default_install_includes_tdd() {
     # The tdd group is now default-on: a plain install ships skills/tdd as part of
-    # the 26-skill default set. Installing the module does NOT activate TDD —
+    # the 28-skill default set. Installing the module does NOT activate TDD —
     # activation stays opt-in per project.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local base="$HOME/.claude/skills"
@@ -1184,12 +1198,12 @@ test_default_install_includes_tdd() {
     assert_file_not_empty "$base/tdd/SKILL.md" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Default install must include tdd (26 skills)"
+    assert_eq "28" "$count" "Default install must include tdd (28 skills)"
 }
 
 test_without_tdd_excludes_tdd() {
     # --without tdd opts the module out: skills/tdd is dropped, landing the
-    # remaining 24 default skills. The other default-on groups stay on.
+    # remaining 27 default skills. The other default-on groups stay on.
     bash "$INSTALL_SCRIPT" --agent claude-code --without tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/tdd" ]; then
@@ -1201,7 +1215,7 @@ test_without_tdd_excludes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected 25 skills with --without tdd"
+    assert_eq "27" "$count" "Expected 27 skills with --without tdd"
 }
 
 test_lang_group_is_opt_in() {
@@ -1220,12 +1234,12 @@ test_lang_group_is_opt_in() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "27" "$count" "Expected 27 skills with --with lang (26 default + go-testing)"
+    assert_eq "29" "$count" "Expected 29 skills with --with lang (28 default + go-testing)"
 }
 
 test_with_tdd_includes_tdd() {
     # tdd is default-on, so --with tdd is idempotent: skills/tdd ships and the
-    # count stays at the 26-skill default set.
+    # count stays at the 28-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --with tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     assert_dir_exists "$base/tdd" || return 1
@@ -1237,7 +1251,7 @@ test_with_tdd_includes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected 26 skills with --with tdd (default set already includes tdd)"
+    assert_eq "28" "$count" "Expected 28 skills with --with tdd (default set already includes tdd)"
 }
 
 test_with_tdd_uninstall_round_trip() {
@@ -1280,7 +1294,7 @@ test_omp_skill_count() {
     bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
     local count
     count=$(find "$HOME/.omp/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills for omp"
+    assert_eq "28" "$count" "Expected exactly 28 skills for omp"
 }
 
 test_omp_writes_install_manifest() {
@@ -1412,7 +1426,7 @@ test_pi_skill_count() {
     bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
     local count
     count=$(find "$HOME/.pi/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected exactly 26 skills for Pi"
+    assert_eq "28" "$count" "Expected exactly 28 skills for Pi"
 }
 
 test_pi_writes_install_manifest() {
@@ -1690,7 +1704,7 @@ test_review_lenses_installed_by_default() {
 
 test_without_review_excludes_lenses() {
     # The review group opts out like quality/optional: --without review drops all
-    # five lenses and lands the remaining 20 default skills.
+    # five lenses and lands the remaining 23 default skills.
     bash "$INSTALL_SCRIPT" --agent claude-code --without review > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     local lens
@@ -1704,7 +1718,7 @@ test_without_review_excludes_lenses() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "21" "$count" "Expected 21 skills with --without review (26 default - 5 lenses)"
+    assert_eq "23" "$count" "Expected 23 skills with --without review (28 default - 5 lenses)"
 }
 
 # ============================================================================
@@ -5258,35 +5272,35 @@ run_test "Unknown option exits non-zero" test_invalid_option
 echo ""
 
 echo -e "${BOLD}Claude Code${NC}"
-run_test "Installs all 26 skills to ~/.claude/skills" test_install_claude_code
-run_test "Exactly 26 SKILL.md files" test_claude_code_skill_count
+run_test "Installs all 28 skills to ~/.claude/skills" test_install_claude_code
+run_test "Exactly 28 SKILL.md files" test_claude_code_skill_count
 echo ""
 
 echo -e "${BOLD}OpenCode${NC}"
-run_test "Installs all 26 skills to ~/.config/opencode/skills" test_install_opencode
-run_test "Exactly 26 SKILL.md files" test_opencode_skill_count
+run_test "Installs all 28 skills to ~/.config/opencode/skills" test_install_opencode
+run_test "Exactly 28 SKILL.md files" test_opencode_skill_count
 run_test "Installs 9 command files" test_opencode_commands
 echo ""
 
 echo -e "${BOLD}Codex${NC}"
-run_test "Installs all 26 skills to ~/.codex/skills" test_install_codex
-run_test "Exactly 26 SKILL.md files" test_codex_skill_count
+run_test "Installs all 28 skills to ~/.codex/skills" test_install_codex
+run_test "Exactly 28 SKILL.md files" test_codex_skill_count
 echo ""
 
 echo -e "${BOLD}Project-local${NC}"
-run_test "Installs all 26 skills to ./skills/" test_install_project_local
-run_test "Exactly 26 SKILL.md files" test_project_local_skill_count
+run_test "Installs all 28 skills to ./skills/" test_install_project_local
+run_test "Exactly 28 SKILL.md files" test_project_local_skill_count
 echo ""
 
 echo -e "${BOLD}Custom path${NC}"
 run_test "Installs to arbitrary custom path" test_custom_path
-run_test "Exactly 26 SKILL.md files" test_custom_path_skill_count
+run_test "Exactly 28 SKILL.md files" test_custom_path_skill_count
 run_test "Handles deeply nested custom path" test_nested_custom_path
 echo ""
 
 echo -e "${BOLD}All-global${NC}"
 run_test "Installs to all 5 global targets" test_all_global
-run_test "130 total SKILL.md files (5x26)" test_all_global_total_skill_count
+run_test "140 total SKILL.md files (5x28)" test_all_global_total_skill_count
 run_test "Also installs OpenCode commands" test_all_global_opencode_commands
 echo ""
 
@@ -5325,7 +5339,7 @@ run_test "Balanced marker updates in place + writes backup" test_setup_balanced_
 echo ""
 
 echo -e "${BOLD}setup.sh manifest-driven install + receipt${NC}"
-run_test "setup.sh installs the 26 default skills" test_setup_installs_default_skill_set
+run_test "setup.sh installs the 28 default skills" test_setup_installs_default_skill_set
 run_test "setup.sh includes the default tdd module" test_setup_includes_tdd
 run_test "setup.sh writes an install manifest (receipt)" test_setup_writes_install_manifest
 run_test "uninstall.sh cleans a setup.sh install" test_setup_uninstall_round_trip
@@ -5355,23 +5369,23 @@ run_test "--version prints the version" test_version_flag
 run_test "--version exits with code 0" test_version_exits_zero
 run_test "Install writes an install manifest" test_install_writes_install_manifest
 run_test "Default install includes optional groups" test_default_install_includes_optional_groups
-run_test "--without optional excludes kanban-github + sdd-learn (23 skills)" test_without_optional_excludes_go_testing
-run_test "--without quality excludes judgment-day (24 skills)" test_without_quality_excludes_judgment_day
+run_test "--without optional excludes the group's five skills (23 skills)" test_without_optional_excludes_go_testing
+run_test "--without quality excludes judgment-day (27 skills)" test_without_quality_excludes_judgment_day
 run_test "--without quality --without optional (22 skills)" test_without_both_groups
 run_test "--without sdd-core is rejected" test_reject_without_required_group
 echo ""
 
 echo -e "${BOLD}TDD module (default-on group)${NC}"
-run_test "Default install includes tdd (26 skills)" test_default_install_includes_tdd
-run_test "--without tdd excludes tdd (24 skills)" test_without_tdd_excludes_tdd
+run_test "Default install includes tdd (28 skills)" test_default_install_includes_tdd
+run_test "--without tdd excludes tdd (27 skills)" test_without_tdd_excludes_tdd
 run_test "lang group is opt-in (--with lang adds go-testing)" test_lang_group_is_opt_in
-run_test "--with tdd is idempotent (26 skills)" test_with_tdd_includes_tdd
+run_test "--with tdd is idempotent (28 skills)" test_with_tdd_includes_tdd
 run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_round_trip
 echo ""
 
 echo -e "${BOLD}Pi agent (P5 installer wiring)${NC}"
-run_test "install.sh --agent omp installs 26 skills" test_install_omp
-run_test "Exactly 26 SKILL.md files for omp" test_omp_skill_count
+run_test "install.sh --agent omp installs 28 skills" test_install_omp
+run_test "Exactly 28 SKILL.md files for omp" test_omp_skill_count
 run_test "omp install writes an install manifest" test_omp_writes_install_manifest
 run_test "omp honors PI_CODING_AGENT_DIR relocation" test_omp_honors_relocated_agent_base
 run_test "setup.sh --agent omp merges the orchestrator prompt" test_setup_omp_writes_orchestrator
@@ -5379,8 +5393,8 @@ run_test "omp installs its 17 native agents" test_omp_installs_native_agents
 run_test "omp agents follow the omp task-agent contract" test_omp_agents_use_the_omp_contract
 run_test "omp installs RULES.md sticky rules" test_omp_installs_sticky_rules
 run_test "omp install/uninstall round-trip is clean" test_omp_uninstall_round_trip
-run_test "install.sh --agent pi installs 26 skills" test_install_pi
-run_test "Exactly 26 SKILL.md files for Pi" test_pi_skill_count
+run_test "install.sh --agent pi installs 28 skills" test_install_pi
+run_test "Exactly 28 SKILL.md files for Pi" test_pi_skill_count
 run_test "Pi install writes an install manifest" test_pi_writes_install_manifest
 run_test "setup.sh --agent pi writes orchestrator to ~/.pi/agent/AGENTS.md" test_setup_pi_writes_orchestrator
 echo ""
@@ -5402,7 +5416,7 @@ echo ""
 
 echo -e "${BOLD}Review lens group (G1, default-on)${NC}"
 run_test "review lenses install by default" test_review_lenses_installed_by_default
-run_test "--without review excludes the 5 lenses (20 skills)" test_without_review_excludes_lenses
+run_test "--without review excludes the 5 lenses (23 skills)" test_without_review_excludes_lenses
 echo ""
 
 echo -e "${BOLD}Kanban module (Phase 9, optional group, default-on)${NC}"
@@ -7363,7 +7377,7 @@ test_g_setup_without_review_is_a_full_review_free_setup() {
     assert_dir_exists "$base/judgment-day" || return 1    # quality still on
     local count
     count=$(find "$base" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "21" "$count" "full setup --without review lands 21 skills" || return 1
+    assert_eq "23" "$count" "full setup --without review lands 23 skills" || return 1
     # A genuinely full setup: Claude Code hooks were still installed.
     assert_file_exists "$HOME/.claude/settings.json" || return 1
     return 0
@@ -7381,7 +7395,7 @@ test_g_setup_with_lang_adds_language_skills() {
     assert_dir_exists "$HOME/.claude/skills/go-testing" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "27" "$count" "setup.sh --with lang lands 27 skills" || return 1
+    assert_eq "29" "$count" "setup.sh --with lang lands 29 skills" || return 1
     return 0
 }
 
@@ -7403,7 +7417,7 @@ test_g_setup_reinstall_without_review_prunes() {
 # --- (b) install.sh wrapper maps each documented flag onto setup.sh --------------
 
 test_g_wrapper_agent_maps_to_full_setup() {
-    # install.sh --agent NAME runs the SAME full setup.sh install (26 skills) and
+    # install.sh --agent NAME runs the SAME full setup.sh install (28 skills) and
     # writes setup.sh's slug-tool receipt with the setup-only keys — proof the full
     # installer ran through the delegate, not install.sh's old skills-only path.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
@@ -7424,7 +7438,7 @@ test_g_wrapper_all_global_installs_five_unconditionally() {
     for d in "$HOME/.claude/skills" "$HOME/.config/opencode/skills" "$HOME/.codex/skills" \
              "$HOME/.pi/agent/skills" "$HOME/.omp/agent/skills"; do
         local c; c=$(find "$d" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-        assert_eq "26" "$c" "all-global must install 26 skills into $d" || return 1
+        assert_eq "28" "$c" "all-global must install 28 skills into $d" || return 1
     done
     return 0
 }
@@ -7435,7 +7449,7 @@ test_g_wrapper_forwards_group_flags() {
     [ -d "$HOME/.claude/skills/review-risk" ] && { echo "--without review not forwarded through the wrapper"; return 1; }
     local count
     count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "21" "$count" "wrapper --without review lands 21 skills" || return 1
+    assert_eq "23" "$count" "wrapper --without review lands 23 skills" || return 1
     return 0
 }
 
@@ -7523,7 +7537,7 @@ test_g_setup_missing_examples_fails_loud_before_write() {
 echo -e "${BOLD}UNIT-G (issue #38) — collapse install.sh into setup.sh${NC}"
 run_test "setup.sh --without review is a full review-free setup" test_g_setup_without_review_is_a_full_review_free_setup
 run_test "setup.sh --without sdd-core is rejected" test_g_setup_without_rejects_required_group
-run_test "setup.sh --with lang adds language skills (26)" test_g_setup_with_lang_adds_language_skills
+run_test "setup.sh --with lang adds language skills (29)" test_g_setup_with_lang_adds_language_skills
 run_test "setup.sh --without review re-install prunes stale review" test_g_setup_reinstall_without_review_prunes
 run_test "wrapper --agent maps to the full setup.sh install" test_g_wrapper_agent_maps_to_full_setup
 run_test "wrapper all-global installs all five (no detection)" test_g_wrapper_all_global_installs_five_unconditionally
@@ -8486,7 +8500,9 @@ echo ""
 #     default active set — so it installs by default, and every skill count in
 #     this file moved 24 -> 25 for it (120 -> 125 across the five global targets).
 #     #104's `sdd-brainstorm` joins the same group and moved them again, 25 -> 26
-#     (125 -> 130). The group now drops THREE skills under `--without optional`.
+#     (125 -> 130), and #85/#86's `kurama-report` + `systemic-issue-triage` a third
+#     time, 26 -> 28 (130 -> 140). The group now drops FIVE skills under
+#     `--without optional`.
 #
 # NOTE on the control run. A "byte-identical to before the feature" case invites
 # `git show main:examples/claude-code/CLAUDE.md` as its control, but
@@ -11849,6 +11865,436 @@ run_test "setup names a pre-existing workflow in the prompt" test_p_setup_names_
 run_test "no notice when Kurama owns the whole prompt" test_p_no_workflow_notice_when_kurama_owns_the_whole_prompt
 run_test "a fresh prompt file raises no notice" test_p_a_fresh_prompt_file_raises_no_notice
 run_test "sdd-init asks how the two workflows coexist" test_p_sdd_init_asks_how_the_two_workflows_coexist
+
+echo ""
+
+# ============================================================================
+# UNIT-V (issues #85, #86): the issue-skill split, and root-cause triage
+#
+# #85 split one skill that was doing two jobs. `skills/issue-creation` was
+# written FOR this repo and installed into EVERY other one: it named Kurama's
+# templates, Kurama's `status:needs-review` / `status:approved` gate and
+# Kurama's Discussions, then ran `gh issue create` with no `--repo` — so the
+# labels were rejected in the host repo and, read the other way, a report about
+# Kurama landed in the user's own backlog. Same defect class as the `{file:~}`
+# prompt path in #78: a form that was correct where it was written and wrong
+# where it executes.
+#
+# The split is only real if BOTH halves hold, and each half breaks silently:
+#
+#   * issue-creation must stop carrying the upstream job. A file that still
+#     names `myst4/kurama` or Kurama's gate labels ships this repo's house
+#     rules into every project that installs Kurama — which is the bug.
+#   * issue-creation must DISCOVER the host repo instead of assuming it.
+#     `gh issue create --label` fails the whole command on one unknown label,
+#     so an assumed taxonomy does not degrade — it loses the issue.
+#   * kurama-report must target `myst4/kurama` EXPLICITLY, search first, and
+#     stop for a human. It writes into a third-party repo from the user's
+#     account; a silent file is not a smaller bug than a wrong one.
+#   * kurama-report must never apply `status:approved`. That label is the
+#     maintainer's accept signal and the precondition CONTRIBUTING checks
+#     before a PR may open — a reporter that sets it approves its own issue.
+#   * the reproduction must carry nothing from the user's project. Advice to
+#     "be careful" is not a mechanism; the redaction rule is.
+#
+# #86 adds `systemic-issue-triage`: partition a batch by root cause BEFORE
+# writing code, so N issues sharing one cause get ONE fix. This repo's own
+# history is the argument — four consecutive waves of issue-by-issue backlog
+# closing, and thirty PRs of gates and guards. Two rules carry it and both are
+# the kind that get summarized away: the over-engineering test (a fix that adds
+# state, a flag or a gate is redesigned; the right fix usually deletes) and
+# audit-every-worker-report (Kurama delegates every phase, so what comes back
+# is a claim, not evidence).
+#
+# Neither new skill gets a slash-command line: they are reached by trigger
+# through the skill registry, like `sdd-brainstorm`. That is a prompt-budget
+# DECISION (omp had 35 B of headroom), so it needs a guard or the next person
+# "fixes" it.
+# ============================================================================
+
+V_ISSUE_SKILL="$REPO_DIR/skills/issue-creation/SKILL.md"
+V_REPORT_SKILL="$REPO_DIR/skills/kurama-report/SKILL.md"
+V_TRIAGE_SKILL="$REPO_DIR/skills/systemic-issue-triage/SKILL.md"
+
+# Assert skill $1 is registered the way every shipped skill must be: listed in
+# skills/manifest.json (which is what validate_skills.sh walks) and present in
+# the AGENTS.md index table. Both, because either alone is invisible — a skill
+# missing from the manifest is never installed, and one missing from AGENTS.md
+# is installed and unreachable.
+v_skill_is_registered() {
+    local name="$1"
+    grep -q "\"$name\"" "$MANIFEST_FILE" \
+        || { echo "  $name is not registered in skills/manifest.json — validate_skills.sh never sees it"; return 1; }
+    grep -qF "skills/$name/" "$REPO_DIR/AGENTS.md" \
+        || { echo "  $name is missing from the AGENTS.md skill table"; return 1; }
+    return 0
+}
+
+# Assert skill $1's frontmatter is well formed: a closed fence, a `name:` equal
+# to $1, and a `description:` that carries real text (a folded scalar with an
+# empty block satisfies a naive "description: is non-empty" check).
+v_skill_frontmatter_is_well_formed() {
+    local name="$1" src="$2" fm
+    skill_frontmatter_fence_closed "$src" \
+        || { echo "  skills/$name/SKILL.md: the frontmatter fence never closes"; return 1; }
+    fm="$(skill_frontmatter "$src")"
+    printf '%s\n' "$fm" | grep -qE "^name:[[:space:]]*${name}[[:space:]]*\$" \
+        || { echo "  skills/$name/SKILL.md: frontmatter 'name:' is not $name"; return 1; }
+    printf '%s\n' "$fm" | grep -qE '^description:[[:space:]]*[^[:space:]]' \
+        || { echo "  skills/$name/SKILL.md: frontmatter 'description:' is missing or empty"; return 1; }
+    if printf '%s\n' "$fm" | grep -qE '^description:[[:space:]]*[>|][-+0-9]*[[:space:]]*$'; then
+        printf '%s\n' "$fm" | grep -qE '^[[:space:]]+[^[:space:]]' \
+            || { echo "  skills/$name/SKILL.md: 'description:' folds into an empty block"; return 1; }
+    fi
+    return 0
+}
+
+test_v_issue_creation_no_longer_reports_upstream() {
+    # The negative half of the split. What would make this pass for the wrong
+    # reason: an EMPTY or deleted issue-creation matches none of the banned
+    # strings, so "it no longer says X" is a vacuous green over a gutted file.
+    # Three guards: a byte floor, and two positive controls proving the file is
+    # still the kanban entry point it was trimmed to be (the board section and
+    # the #109 branch rule both survive).
+    assert_file_exists "$V_ISSUE_SKILL" || return 1
+    assert_file_not_empty "$V_ISSUE_SKILL" 3000 || return 1
+
+    local flat
+    flat="$(flatten_file "$V_ISSUE_SKILL")"
+
+    # Positive controls: the file still does its own job.
+    assert_matches "$flat" 'kanban\.enabled' \
+        "issue-creation is still the board's entry point (control)" || return 1
+    assert_matches "$flat" 'this issue.{0,200}type/\{issue\}-\{slug\}' \
+        "the #109 branch rule survived the trim (control)" || return 1
+
+    # The upstream job is gone. Each of these is present on origin/main.
+    assert_not_matches "$flat" 'myst4/kurama' \
+        "the upstream repo as a filing target — every issue this skill files belongs to the host repo" || return 1
+    assert_not_matches "$flat" 'status:needs-review' \
+        "Kurama's own intake label, imposed on every host repo that never defined it" || return 1
+    assert_not_matches "$flat" 'status:approved' \
+        "Kurama's maintainer approval gate, shipped into other people's projects" || return 1
+    assert_not_matches "$flat" 'bug_report\.yml' \
+        "Kurama's own issue form, which setup.sh never installs into the host repo" || return 1
+
+    # And the routing pointer exists, so a Kurama failure has somewhere to go.
+    assert_matches "$flat" 'kurama-report' \
+        "the pointer that sends a Kurama failure to the skill that reports it upstream" || return 1
+    return 0
+}
+
+test_v_issue_creation_discovers_the_host_repo() {
+    # The positive half. What would make this pass for the wrong reason: the
+    # word "label" appears a dozen times in any issue skill, so a loose grep is
+    # green on the unsplit file too. Both PROBES are pinned as commands, the
+    # failure mode that makes them mandatory is pinned as a sentence, and the
+    # degrade rule is pinned by the action it prescribes — a skill that
+    # discovers labels and then sends an unknown one anyway has discovered
+    # nothing.
+    local flat
+    flat="$(flatten_file "$V_ISSUE_SKILL")"
+
+    assert_matches "$flat" 'gh label list' \
+        "the label probe — the host repo's taxonomy is read, not assumed" || return 1
+    assert_matches "$flat" 'contents/\.github/ISSUE_TEMPLATE' \
+        "the template probe — the host repo's issue forms are read, not assumed" || return 1
+    assert_matches "$flat" 'fails the whole command when even one named label does not exist' \
+        "why the probes are mandatory: an unknown label loses the issue, it does not lose the label" || return 1
+    assert_matches "$flat" 'Never create a label to satisfy a command' \
+        "the degrade rule: drop the label, never invent the taxonomy" || return 1
+    assert_matches "$flat" 'No forms.{0,200}generic sections' \
+        "the no-template branch — a repo with no issue forms still gets a usable issue" || return 1
+    return 0
+}
+
+test_v_kurama_report_targets_upstream_and_stops_for_a_human() {
+    # kurama-report's two structural properties. What would make this pass for
+    # the wrong reason: a skill that says "ask the user" somewhere in its prose
+    # while its example command files unconditionally. So the gate is pinned by
+    # its BLOCKING clause, and the auto-mode carve-out is pinned separately —
+    # an `execution_mode: auto` run skipping the gate is the exact regression,
+    # and it is the one a prose-level "asks first" would not prevent.
+    assert_file_exists "$V_REPORT_SKILL" || return 1
+    assert_file_not_empty "$V_REPORT_SKILL" 4000 || return 1
+
+    local flat
+    flat="$(flatten_file "$V_REPORT_SKILL")"
+
+    assert_matches "$flat" 'gh issue create --repo myst4/kurama' \
+        "the filing command names the upstream repo EXPLICITLY — no --repo means the user's own backlog" || return 1
+    assert_matches "$flat" 'gh issue list --repo myst4/kurama.{0,120}--search' \
+        "search upstream before filing — every user hitting one harness bug files the same issue" || return 1
+    assert_matches "$flat" 'Nothing is created before an explicit yes' \
+        "the approval gate as a blocking clause, not as advice" || return 1
+    assert_matches "$flat" 'execution_mode: auto.{0,20}does not apply' \
+        "auto mode does not authorize a write into a third-party repository" || return 1
+    assert_matches "$flat" '(Report the URL|report the URL).{0,120}user' \
+        "the filed issue's URL goes back to the user — a report they cannot find did not happen" || return 1
+
+    # Gate 1 exists: the skill decides whose failure it is before collecting anything.
+    local class
+    for class in 'Installer' 'Hook' 'Skill contract' 'Phase envelope'; do
+        assert_matches "$flat" "$class" \
+            "the ownership table's '$class' row — how a Kurama failure is told apart from the project's" || return 1
+    done
+    assert_matches "$flat" 'If it is not Kurama.{0,120}issue-creation' \
+        "the not-ours branch routes back to the host-repo skill instead of filing anyway" || return 1
+    return 0
+}
+
+test_v_kurama_report_never_self_approves() {
+    # What would make this pass for the wrong reason: a file-wide
+    # `assert_not_matches status:approved` is INVERTED here — the skill must
+    # discuss the label in order to forbid it, so the file-wide check would fail
+    # on the very sentence that closes the hole. The actual `--label` arguments
+    # are extracted and checked instead, and the extraction is floor-checked so
+    # a renamed flag cannot make "no bad label found" vacuously true.
+    local labels count=0 arg
+    labels="$(grep -oE -- '--label "[^"]*"' "$V_REPORT_SKILL")"
+    while IFS= read -r arg; do
+        [ -n "$arg" ] || continue
+        count=$((count + 1))
+        case "$arg" in
+            *status:approved*)
+                echo "  kurama-report applies the maintainer's own approval label: $arg"
+                return 1
+                ;;
+        esac
+    done <<EOF
+$labels
+EOF
+    if [ "$count" -lt 1 ]; then
+        echo "  no --label argument found in kurama-report — the extractor or the skill changed shape,"
+        echo "  and 'it never sets status:approved' would be vacuously true"
+        return 1
+    fi
+    case "$labels" in
+        *status:needs-review*) ;;
+        *) echo "  kurama-report files without status:needs-review — the intake label the maintainer triages on"; return 1 ;;
+    esac
+    case "$labels" in
+        *type:bug*) ;;
+        *) echo "  kurama-report files without type:bug — the upstream repo's own bug taxonomy"; return 1 ;;
+    esac
+
+    # The rule is also stated, so the next editor knows the omission is deliberate.
+    assert_matches "$(flatten_file "$V_REPORT_SKILL")" 'never set .status:approved' \
+        "the prohibition written down where a future editor will read it" || return 1
+    return 0
+}
+
+test_v_kurama_report_sanitizes_the_reproduction() {
+    # What would make this pass for the wrong reason: "do not include sensitive
+    # information" satisfies any loose grep about privacy and leaks everything.
+    # Each forbidden CLASS is pinned by its own literal, and the MECHANISM is
+    # pinned separately — advice without a redaction rule is what leaks, and
+    # advice without a default direction leaks on every ambiguous fragment.
+    local flat
+    flat="$(flatten_file "$V_REPORT_SKILL")"
+
+    assert_matches "$flat" '\.kurama-install-manifest\.json' \
+        "the receipt is the source of the version/commit, not a guess" || return 1
+    assert_matches "$flat" 'version.{0,40}commit.{0,200}scope' \
+        "the four receipt fields that travel" || return 1
+
+    assert_matches "$flat" 'path.{0,40}outside the Kurama install' \
+        "banned: any path outside Kurama itself" || return 1
+    assert_matches "$flat" 'Source code, specs, or diffs from the user' \
+        "banned: the user's project source" || return 1
+    assert_matches "$flat" 'Tokens, keys' \
+        "banned: secrets and auth material" || return 1
+    assert_matches "$flat" 'Whole log files' \
+        "banned: dumping logs whose contents nobody read" || return 1
+
+    assert_matches "$flat" 'repo root becomes .<repo>.' \
+        "the redaction is MECHANICAL — a named substitution, not a judgment call" || return 1
+    assert_matches "$flat" 'belongs to the project: leave' \
+        "the default direction on an ambiguous fragment: leave it out" || return 1
+    return 0
+}
+
+test_v_triage_carries_the_over_engineering_test() {
+    # #86's load-bearing rule. What would make this pass for the wrong reason: a
+    # heading that says "over-engineering test" with nothing testable under it.
+    # All five triggers are pinned individually, plus the clause that makes a
+    # single yes REJECT the design and the clause naming what a correct fix
+    # usually does — without those two the five questions are a checklist you
+    # can answer and then proceed anyway.
+    assert_file_exists "$V_TRIAGE_SKILL" || return 1
+    assert_file_not_empty "$V_TRIAGE_SKILL" 4000 || return 1
+
+    local flat trigger
+    flat="$(flatten_file "$V_TRIAGE_SKILL")"
+
+    assert_matches "$flat" 'over-engineering test' \
+        "the test is named, so a reader can be pointed at it" || return 1
+    for trigger in 'state' 'flag' 'gate' 'verb'; do
+        assert_matches "$flat" "new .{0,20}$trigger" \
+            "the over-engineering trigger: a new $trigger" || return 1
+    done
+    # The fifth trigger is not phrased as "a new X" and must not be pattern-matched
+    # as one: the thing it forbids is a SECOND copy of a fact that already exists,
+    # which is the one of the five that reads as harmless.
+    assert_matches "$flat" 'second representation.{0,4}of a fact' \
+        "the over-engineering trigger: a second representation of an existing truth" || return 1
+    assert_matches "$flat" 'Any yes rejects the design' \
+        "one yes is enough to send the design back — otherwise the test is advisory" || return 1
+    assert_matches "$flat" 'correct fix usually' \
+        "what a fix that found the cause looks like: it deletes" || return 1
+    return 0
+}
+
+test_v_triage_audits_every_worker_report() {
+    # The rule ported from the sibling skill, and the one that matters more here
+    # than upstream: Kurama delegates EVERY phase to a sub-agent whose
+    # transcript the orchestrator never sees.
+    #
+    # What would make this pass for the wrong reason: "audit worker reports" as
+    # a slogan. The three executable checks are pinned individually — re-run the
+    # verification, read the diff, break the new guard — because a slogan with
+    # no verb produces exactly the behavior it warns against.
+    local flat
+    flat="$(flatten_file "$V_TRIAGE_SKILL")"
+
+    assert_matches "$flat" 'claim.{0,200}not evidence|is a .{0,20}claim' \
+        "a self-report is a claim, not evidence" || return 1
+    assert_matches "$flat" 'Re-run its verification yourself' \
+        "check 1: run the worker's own verification command" || return 1
+    assert_matches "$flat" 'Read the diff it produced' \
+        "check 2: read the diff, not the summary of the diff" || return 1
+    assert_matches "$flat" 'Break its new guard on purpose' \
+        "check 3: a guard that does not fail on the planted shape is not a guard" || return 1
+    assert_matches "$flat" 'Re-derive the numbers' \
+        "check 4: counts and totals are claims too" || return 1
+    return 0
+}
+
+test_v_triage_groups_by_root_and_ranks_by_removal() {
+    # The partition itself, and the ladder that orders the fixes. What would
+    # make this pass for the wrong reason: a class table with no one-fix-per-
+    # root rule is just a labelling exercise — the N-patches outcome survives
+    # it untouched. So the rule is pinned alongside the table, and the ladder is
+    # pinned by its top and bottom rungs (delete first, new surface last).
+    local flat class rung
+    flat="$(flatten_file "$V_TRIAGE_SKILL")"
+
+    for class in 'Already resolved' 'Shares a root' 'New root' 'Not a defect' 'Unreproducible'; do
+        assert_matches "$flat" "$class" \
+            "root class: $class" || return 1
+    done
+    assert_matches "$flat" 'N issues never justify N patches' \
+        "the rule the table exists to serve: one root, one fix" || return 1
+    assert_matches "$flat" 'mechanism.{0,40}is a hypothesis' \
+        "the stated mechanism is a hypothesis; only the symptom is evidence" || return 1
+
+    for rung in 'Delete the mechanism' 'Relax an over-strict rule' 'Add a static guard'; do
+        assert_matches "$flat" "$rung" \
+            "solution ladder rung: $rung" || return 1
+    done
+    assert_matches "$flat" '(flag, a state, a gate|Last resort)' \
+        "new runtime surface is the LAST rung, and needs a written reason" || return 1
+    assert_matches "$flat" 'one .sdd-new. cycle per root' \
+        "the handoff: one cycle per root, never one per issue" || return 1
+    return 0
+}
+
+test_v_both_skills_are_reachable_by_trigger_with_no_command_line() {
+    # The routing decision, both halves. A skill nobody can invoke is installed
+    # and dead; a slash-command line in five prompts costs bytes this repo does
+    # not have (omp ships with 35 B of headroom), so both are reached by trigger
+    # through the skill registry, exactly like sdd-brainstorm.
+    #
+    # What would make this pass for the wrong reason: a missing or truncated
+    # prompt matches nothing, so "no /kurama-report anywhere" reads as a pass
+    # over an empty file. Two guards, the same pair #104 used: every prompt is
+    # size-floored, and `/sdd-learn` is asserted PRESENT as a positive control —
+    # it is an optional-group skill that DOES carry a command line, so the grep
+    # provably finds one when there is one.
+    local f flat trig fm_flat
+
+    for f in "$REPO_DIR/examples/claude-code/CLAUDE.md" \
+             "$REPO_DIR/examples/pi/AGENTS.md" \
+             "$REPO_DIR/examples/codex/agents.md" \
+             "$REPO_DIR/examples/opencode/AGENTS.md" \
+             "$REPO_DIR/examples/omp/AGENTS.md"; do
+        assert_file_exists "$f" || return 1
+        assert_file_not_empty "$f" 15000 || return 1
+        flat="$(flatten_file "$f")"
+        assert_matches "$flat" '/sdd-learn' \
+            "${f##*/examples/}: the /sdd-learn command line (control for the two bans below)" || return 1
+        assert_not_matches "$flat" '/kurama-report' \
+            "${f##*/examples/}: a /kurama-report command line — the prompt budget has no room for one" || return 1
+        assert_not_matches "$flat" '/systemic-issue-triage' \
+            "${f##*/examples/}: a /systemic-issue-triage command line — same budget decision" || return 1
+    done
+
+    # Reached by trigger instead, which means the DESCRIPTION carries the phrases
+    # a user actually says. Without them the skill is installed and unreachable.
+    fm_flat="$(printf '%s\n' "$(skill_frontmatter "$V_TRIAGE_SKILL")" | tr '\n' ' ')"
+    for trig in 'triage these issues' 'clasificá estos issues' 'root cause' 'sdd-new'; do
+        case "$fm_flat" in
+            *"$trig"*) ;;
+            *) echo "  systemic-issue-triage: the description is missing the \"$trig\" trigger"; return 1 ;;
+        esac
+    done
+
+    fm_flat="$(printf '%s\n' "$(skill_frontmatter "$V_REPORT_SKILL")" | tr '\n' ' ')"
+    for trig in 'report this to kurama' 'reportá esto a kurama' 'the installer failed' 'issue-creation'; do
+        case "$fm_flat" in
+            *"$trig"*) ;;
+            *) echo "  kurama-report: the description is missing the \"$trig\" trigger"; return 1 ;;
+        esac
+    done
+    return 0
+}
+
+test_v_both_skills_are_well_formed_registered_and_default_on() {
+    # Installed is not the same as loadable, and loadable is not the same as
+    # reached. validate_skills.sh is the shipped gate for the first, so it is
+    # RUN here rather than reimplemented — but running it proves nothing about
+    # either new skill unless both are registered in the manifest it walks,
+    # which is asserted first.
+    #
+    # What would make this pass for the wrong reason: asserting the directories
+    # exist, which an empty leftover directory satisfies. Both files are byte-
+    # floored and the total is pinned to EXPECTED_SKILLS, so adding a skill
+    # without moving the counts cannot slip through.
+    v_skill_is_registered "kurama-report" || return 1
+    v_skill_is_registered "systemic-issue-triage" || return 1
+    v_skill_frontmatter_is_well_formed "kurama-report" "$V_REPORT_SKILL" || return 1
+    v_skill_frontmatter_is_well_formed "systemic-issue-triage" "$V_TRIAGE_SKILL" || return 1
+
+    # Both join the `optional` group, which is in setup.sh's default active set,
+    # so a plain install ships them with no flag.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local base="$HOME/.claude/skills"
+    assert_file_not_empty "$base/kurama-report/SKILL.md" 4000 || return 1
+    assert_file_not_empty "$base/systemic-issue-triage/SKILL.md" 4000 || return 1
+    assert_eq "${#EXPECTED_SKILLS[@]}" "$(count_skill_files "$base")" \
+        "the default set must be exactly the EXPECTED_SKILLS list, both new skills included" || return 1
+
+    local output status=0
+    output=$(bash "$VALIDATE_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "validate_skills.sh exited $status with the two new skills registered:"
+        printf '%s\n' "$output" | grep -a 'FAIL' | head -5
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-V (issues #85, #86): the issue-skill split + root-cause triage${NC}"
+run_test "issue-creation no longer reports Kurama's failures upstream" test_v_issue_creation_no_longer_reports_upstream
+run_test "issue-creation discovers the host repo's templates and labels" test_v_issue_creation_discovers_the_host_repo
+run_test "kurama-report targets myst4/kurama and stops for a human" test_v_kurama_report_targets_upstream_and_stops_for_a_human
+run_test "kurama-report never applies status:approved" test_v_kurama_report_never_self_approves
+run_test "kurama-report's reproduction carries nothing of the user's" test_v_kurama_report_sanitizes_the_reproduction
+run_test "systemic-issue-triage carries the over-engineering test" test_v_triage_carries_the_over_engineering_test
+run_test "systemic-issue-triage audits every worker's report" test_v_triage_audits_every_worker_report
+run_test "systemic-issue-triage groups by root and ranks by removal" test_v_triage_groups_by_root_and_ranks_by_removal
+run_test "no command line for either skill; both reached by trigger" test_v_both_skills_are_reachable_by_trigger_with_no_command_line
+run_test "both are well-formed, registered and install by default" test_v_both_skills_are_well_formed_registered_and_default_on
 
 echo ""
 

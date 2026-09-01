@@ -1,238 +1,134 @@
 ---
 name: issue-creation
 description: >
-  Issue creation workflow for Kurama following the issue-first enforcement system.
-  Trigger: When creating a GitHub issue, reporting a bug, or requesting a feature.
-license: Apache-2.0
+  File a GitHub issue in the repository you are working in — the entry point of the
+  kanban board and the first step of the issue-first flow. Discovers the host repo's
+  own templates and labels before it writes a command, and degrades cleanly when the
+  repo has neither.
+  Trigger: When creating a GitHub issue, reporting a bug in THIS project, requesting a
+  feature, or opening a card on the board.
+  NOT for reporting a failure in Kurama itself — that is `skills/kurama-report`.
+license: MIT
 metadata:
   author: gentleman-programming
   version: "1.0"
 ---
 
-## When to Use
+## Scope — which repository this skill writes to
 
-Use this skill when:
-- Creating a GitHub issue (bug report or feature request)
-- Helping a contributor file an issue
-- Triaging or approving issues as a maintainer
+This skill files issues in **the repository you are standing in**. It never passes
+`--repo`: `gh` resolves the command against the current checkout's remote, and that is
+exactly the intent.
 
----
+| The failure is in… | Skill |
+|---|---|
+| The project you are working on — its code, its build, its tests | **this skill** |
+| Kurama itself — the installer, a hook, a phase envelope, a skill that contradicts itself | [`skills/kurama-report`](../kurama-report/SKILL.md) |
 
-## Critical Rules
+Getting this wrong is not cosmetic. A Kurama defect filed here lands in the team's own
+backlog, where nobody can fix it; a project defect filed upstream leaks the project's
+details into a public repo. Classify **before** you compose anything.
 
-1. **Blank issues are disabled** — MUST use a template (bug report or feature request)
-2. **Every issue gets `status:needs-review` automatically** on creation
-3. **A maintainer MUST add `status:approved`** before any PR can be opened
-4. **Questions go to [Discussions](https://github.com/myst4/kurama/discussions)**, not issues
+> Contributing to Kurama itself? Kurama's own issue-first rules — its approval gate and
+> its label taxonomy — live in [`CONTRIBUTING.md`](../../CONTRIBUTING.md). They are that
+> repository's house rules; this skill never ships them into the project you installed
+> Kurama into.
 
 ---
 
 ## Workflow
 
 ```
-1. Search existing issues for duplicates
-2. Choose the correct template (Bug Report or Feature Request)
-3. Fill in ALL required fields
-4. Check pre-flight checkboxes
-5. Submit → issue gets status:needs-review automatically
-6. If kanban.enabled → add the issue to the project (Backlog) and assign it (`@me` by default, or the `kanban.user` override) (see Kanban Integration)
-7. Wait for maintainer to add status:approved
-8. Only then open a PR linking this issue — branch it as `type/{issue}-{slug}`, carrying THIS issue's number (see `skills/branch-pr` → Branch Naming)
+1. Search the host repo for a duplicate
+2. Discover what the host repo actually has (templates, labels)
+3. Compose the issue against what it has
+4. Create it with a command the repo will accept
+5. If kanban.enabled → add to the board (Backlog) and assign
+6. The branch that follows carries this issue's number: type/{issue}-{slug}
 ```
 
 ---
 
-## Issue Templates
-
-### Bug Report
-
-Template: `.github/ISSUE_TEMPLATE/bug_report.yml`
-Auto-labels: `bug`, `status:needs-review`
-
-#### Required Fields
-
-| Field | Description |
-|-------|-------------|
-| **Pre-flight Checks** | Checkboxes: no duplicate + understands approval workflow |
-| **Bug Description** | Clear description of the bug |
-| **Steps to Reproduce** | Numbered steps to reproduce |
-| **Expected Behavior** | What should have happened |
-| **Actual Behavior** | What happened instead (include errors/logs) |
-| **Operating System** | Dropdown: macOS, Linux variants, Windows, WSL |
-| **Agent / Client** | Dropdown: Claude Code, OpenCode, Codex, Pi, omp, Other |
-| **Shell** | Dropdown: bash, zsh, fish, Other |
-
-#### Optional Fields
-
-| Field | Description |
-|-------|-------------|
-| **Relevant Logs** | Log output (auto-formatted as code block) |
-| **Additional Context** | Screenshots, workarounds, extra info |
-
-#### Example — Bug Report via CLI
-
-`--template` and `--body`/`--body-file` are mutually exclusive in `gh` (the CLI rejects the combination outright), and `--template` matches the form's `name:` field — `"Bug Report"`, not the filename `bug_report.yml`. Bypassing the interactive template form with `--body` also bypasses its auto-labels, so add them explicitly with `--label`:
+## 1. Search first
 
 ```bash
-gh issue create \
-  --title "fix(scripts): setup.sh fails on zsh with glob error" \
-  --label "bug,status:needs-review" \
-  --body "
-### Pre-flight Checks
-- [x] I have searched existing issues and this is not a duplicate
-- [x] I understand this issue needs status:approved before a PR can be opened
+gh issue list --search "keyword" --state all --limit 20
+```
 
-### Bug Description
-Running setup.sh on zsh throws a glob error when no matching files exist.
+A duplicate is a comment on the existing issue, not a new one. Say which issue you
+matched and why before you decide it is not a duplicate.
 
-### Steps to Reproduce
-1. Clone the repo
-2. Run \`./scripts/setup.sh\` in zsh
-3. See error: \`zsh: no matches found: skills/*\`
+---
 
-### Expected Behavior
-The script should handle missing glob matches gracefully.
+## 2. Discover the host repo (do this before writing any `gh` command)
 
-### Actual Behavior
-Script crashes with glob error.
+Nothing about this repository is assumed. Two probes, both read-only:
 
-### Operating System
-macOS
+```bash
+# Issue forms this repo ships (empty or an error = it has none)
+gh api "repos/{owner}/{repo}/contents/.github/ISSUE_TEMPLATE" --jq '.[].name' 2>/dev/null
 
-### Agent / Client
-Claude Code
+# Labels this repo actually defines
+gh label list --limit 200 2>/dev/null | awk -F'\t' '{ print $1 }'
+```
 
-### Shell
-zsh
+`{owner}/{repo}` are `gh`'s own placeholders — it substitutes the current repo, so the
+line is copy-pasteable as written. In a checkout you may read the directory directly
+instead of the API call.
 
-### Relevant Logs
-\`\`\`
-zsh: no matches found: skills/*
-\`\`\`
+**Why this is mandatory:** `gh issue create --label` fails the whole command when even
+one named label does not exist in the repo — you do not get an issue with fewer labels,
+you get no issue at all. And `--template` matches an issue form's `name:` field, so it
+fails on a repo that ships no forms. Both are silent-until-you-run-it failures that a
+copied command from another project reproduces every time.
+
+---
+
+## 3. Degrade cleanly
+
+| What the probes found | What to run |
+|---|---|
+| Forms present, and you can prompt the user | `gh issue create --template "<the form's name: field>" --title "..."` — it prompts for the remaining fields |
+| Forms present, non-interactive run | `--body` with the form's own headings as `###` sections, plus `--label` for the labels the form would have auto-applied (`--template` and `--body` are mutually exclusive in `gh`, and skipping the form also skips its auto-labels) |
+| No forms | `--body` with the generic sections below |
+| A label you wanted is absent | Drop it. Never create a label to satisfy a command, and never guess at a taxonomy the repo does not use |
+| No labels at all | File with no `--label` — a labelled issue is a nicety, a filed issue is the point |
+
+### Generic body (repo with no issue forms)
+
+```bash
+gh issue create --title "fix(scope): one-line summary" --body "
+## Summary
+What is broken, in one or two sentences.
+
+## Steps to Reproduce
+1. …
+2. …
+
+## Expected
+What should have happened.
+
+## Actual
+What happened instead, including the exact error text.
+
+## Environment
+OS, runtime/toolchain version, and anything else needed to reproduce.
 "
 ```
 
----
-
-### Feature Request
-
-Template: `.github/ISSUE_TEMPLATE/feature_request.yml`
-Auto-labels: `enhancement`, `status:needs-review`
-
-#### Required Fields
-
-| Field | Description |
-|-------|-------------|
-| **Pre-flight Checks** | Checkboxes: no duplicate + understands approval workflow |
-| **Problem Description** | The pain point this feature solves |
-| **Proposed Solution** | How it should work from the user's perspective |
-| **Affected Area** | Dropdown: Scripts, Skills, Examples, Documentation, CI/Workflows, Other |
-
-#### Optional Fields
-
-| Field | Description |
-|-------|-------------|
-| **Alternatives Considered** | Other approaches or workarounds |
-| **Additional Context** | Mockups, examples, references |
-
-#### Example — Feature Request via CLI
-
-```bash
-gh issue create \
-  --title "feat(scripts): add Codex support to setup.sh" \
-  --label "enhancement,status:needs-review" \
-  --body "
-### Pre-flight Checks
-- [x] I have searched existing issues and this is not a duplicate
-- [x] I understand this issue needs status:approved before a PR can be opened
-
-### Problem Description
-The setup script only configures Claude Code and OpenCode. Codex users have to manually copy skills.
-
-### Proposed Solution
-Add a Codex option to setup.sh that links skills to the .codex/ directory.
-
-Example:
-\`\`\`bash
-./scripts/setup.sh --agent codex
-\`\`\`
-
-### Affected Area
-Scripts (setup, installation)
-
-### Alternatives Considered
-Manually symlinking, but that defeats the purpose of the setup script.
-"
-```
+Title convention: **conventional-commit prefix + scope + imperative summary**
+(`fix(auth): session cookie is dropped on redirect`). It costs nothing, and it makes the
+issue title reusable as the commit subject and the PR title.
 
 ---
 
-## Label System
+## 4. After it exists
 
-### Applied Automatically on Issue Creation
-
-| Template | Labels added |
-|----------|-------------|
-| Bug Report | `bug`, `status:needs-review` |
-| Feature Request | `enhancement`, `status:needs-review` |
-
-### Applied by Maintainers
-
-| Label | When to apply |
-|-------|--------------|
-| `status:approved` | Issue accepted for implementation — PRs can now be opened |
-| `priority:high` | Critical bug or urgent feature |
-| `priority:medium` | Important but not blocking |
-| `priority:low` | Nice to have |
-
----
-
-## Maintainer Approval Workflow
-
-```
-1. New issue arrives with status:needs-review
-2. Review the issue — is it valid, clear, and in scope?
-3. If YES → add status:approved label
-4. If NO → comment with reason, close if needed
-5. Contributor can now open a PR linking this issue
-```
-
----
-
-## Decision Tree
-
-```
-Is it a bug?                    → Use Bug Report template
-Is it a new feature/improvement? → Use Feature Request template
-Is it a question?               → Use Discussions, NOT issues
-Is it a duplicate?              → Link to existing issue, close
-```
-
----
-
-## Commands
-
-```bash
-# Search existing issues before creating
-gh issue list --search "keyword"
-
-# Create bug report (interactive — --template matches the form's name, not the filename;
-# it prompts for the remaining fields since --body/--body-file cannot combine with --template)
-gh issue create --template "Bug Report" --title "fix(scope): description"
-
-# Create feature request (interactive, same rule)
-gh issue create --template "Feature Request" --title "feat(scope): description"
-
-# Create bug report (non-interactive — see the "Bug Report via CLI" example above for the
-# full --body block; auto-labels must be added explicitly with --label since --template is skipped)
-gh issue create --title "fix(scope): description" --label "bug,status:needs-review" --body "..."
-
-# Maintainer: approve an issue
-gh issue edit <number> --add-label "status:approved"
-
-# Maintainer: add priority
-gh issue edit <number> --add-label "priority:high"
-```
+- Report the issue URL back. That URL is the handle every later step uses.
+- The branch that follows carries **this issue's** number: `type/{issue}-{slug}` —
+  see [`skills/branch-pr`](../branch-pr/SKILL.md) → *Branch Naming*.
+- The PR that follows links it (`Closes #N`, or `Refs #N` when the base is not the
+  default branch).
 
 ---
 
@@ -263,3 +159,14 @@ gh issue edit {issue-number} --add-assignee {user-or-@me}
 - The card enters the board at **Backlog** (the board's initial Status). If a board has no
   "set Status on add" workflow, the explicit Backlog set is the `kanban-github` skill's *issue
   created* transition, not part of this two-command step.
+
+---
+
+## Failure Semantics
+
+| Situation | Behavior |
+|---|---|
+| `gh` missing or unauthenticated | Print the composed title and body for the user to paste, name the fix (`gh auth login`), and STOP — do not silently skip the issue |
+| `gh issue create` rejects a label | Re-run without that label; report which label the repo does not define |
+| Repository has issues disabled | Report it and stop. There is nothing to degrade to |
+| Board command fails | WARNING, continue — the issue exists and that is what matters |
