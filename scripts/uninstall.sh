@@ -125,7 +125,12 @@ remove_hooks_from_settings() {
     ' "$settings_file") || { print_warn "failed to clean $settings_file"; UNINSTALL_FAILED=1; return 0; }
 
     local tmp
-    tmp="$(mktemp "${settings_file}.XXXXXX")"
+    # Guarded like every other mktemp in this file (#65). Unguarded, a failure
+    # here is a bare command substitution under errexit: the whole run aborts on
+    # the spot, mid-uninstall, with mktemp's own stderr as the only explanation —
+    # louder than the old silent `return 0`, but it also abandons every target
+    # queued behind this one instead of flagging and moving on.
+    tmp="$(mktemp "${settings_file}.XXXXXX")" || { print_warn "mktemp failed for $settings_file"; UNINSTALL_FAILED=1; return 0; }
     cp -p "$settings_file" "${settings_file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
     printf '%s\n' "$cleaned" > "$tmp"
     mv "$tmp" "$settings_file"
@@ -165,8 +170,17 @@ remove_engram_from_config() {
             ;;
         *)
             if ! command -v jq >/dev/null 2>&1; then
+                # Textual probe before the verdict (#65). A recorded config is
+                # normally caught by remove_target's pre-flight, but this function
+                # is also reachable for paths no receipt lists, where a bare
+                # `return 0` reported a clean uninstall over a config still
+                # carrying Kurama's MCP entry. Flag only when the entry is really
+                # in there: a config holding nothing of ours has nothing to strip
+                # and must not fail an unrelated uninstall.
+                grep -qF '"engram"' "$file" 2>/dev/null || return 0
                 print_warn "jq not found — cannot strip the Engram MCP server from $file"
                 print_info "Manually remove the \"engram\" entry under mcpServers / mcp / servers"
+                UNINSTALL_FAILED=1
                 return 0
             fi
             local cleaned tmp
@@ -307,13 +321,29 @@ remove_kurama_agents_from_opencode_config() {
     local file="$1"
     [ -f "$file" ] || return 0
 
+    # Textual probe first (#65): it separates a config this run FAILED to clean
+    # from one that never had anything of ours in it. Both used to take the same
+    # silent `return 0`, which is right for the second and wrong for the first —
+    # the sweep below reaches this function for a path no receipt records, so
+    # remove_target's pre-flight cannot answer for it.
+    local carries_ours=0
+    if grep -q '"sdd-' "$file" 2>/dev/null || grep -qF '"kurama-orchestrator"' "$file" 2>/dev/null; then
+        carries_ours=1
+    fi
+
     if ! command -v jq >/dev/null 2>&1; then
+        [ "$carries_ours" -eq 1 ] || return 0
         print_warn "jq not found — cannot strip the Kurama agents from $file"
         print_info "Manually remove the \"sdd-*\" agents (and \"kurama-orchestrator\") under .agent"
+        $DRY_RUN || UNINSTALL_FAILED=1
         return 0
     fi
     if ! jq -e . "$file" >/dev/null 2>&1; then
         print_warn "$file is not valid JSON — leaving it untouched"
+        if [ "$carries_ours" -eq 1 ]; then
+            print_info "Its Kurama agents (\"sdd-*\" / \"kurama-orchestrator\") are still registered there"
+            $DRY_RUN || UNINSTALL_FAILED=1
+        fi
         return 0
     fi
 
@@ -361,6 +391,39 @@ sweep_legacy_opencode_artifacts() {
     [ "$scope" = "project" ] && return 0
 
     local base="$HOME/.config/opencode"
+    local oc_config="$base/opencode.json"
+
+    # Pre-flight, mirroring remove_target's own two-stage guard (#65). This sweep
+    # deletes the nine legacy /sdd-* command files and then hands opencode.json to
+    # the surgical strip — but a pre-#22 receipt is the only kind that reaches this
+    # sweep with anything to remove, and it records NO opencode.json, so the
+    # pre-flight in remove_target (which walks opencode_configs[]) cannot cover
+    # this path. Without jq, or over a config that no longer parses, the strip
+    # cannot run: the commands went, the agents they route to stayed registered,
+    # and the run still exited 0 — partial removal under a clean summary.
+    # The textual probe is what scopes the refusal: a config holding nothing of
+    # ours has nothing to strip and must never block an unrelated uninstall.
+    if [ -f "$oc_config" ] \
+        && { grep -q '"sdd-' "$oc_config" 2>/dev/null || grep -qF '"kurama-orchestrator"' "$oc_config" 2>/dev/null; } \
+        && ! { command -v jq >/dev/null 2>&1 && jq -e . "$oc_config" >/dev/null 2>&1; }; then
+        local sweep_why="jq not found"
+        command -v jq >/dev/null 2>&1 && sweep_why="opencode.json is not valid JSON"
+        if $DRY_RUN; then
+            print_warn "$sweep_why — a real run would REFUSE the legacy OpenCode sweep"
+            print_info "the Kurama sdd-* agents cannot be stripped from $oc_config"
+        else
+            print_error "$sweep_why — cannot strip the Kurama agents from $oc_config"
+            print_info "The unrecorded legacy OpenCode artifacts were left in place: deleting the"
+            print_info "/sdd-* command files while that config still declares the agents they route"
+            print_info "to leaves OpenCode with commands pointing at agents that no longer exist."
+            print_info "Install jq / repair the JSON and re-run, or remove by hand first:"
+            print_info "  the \"sdd-*\" agents (and \"kurama-orchestrator\") under .agent in:"
+            print_info "    $oc_config"
+            UNINSTALL_FAILED=1
+            return 0
+        fi
+    fi
+
     local f
     for f in "$base"/commands/sdd-*.md; do
         [ -f "$f" ] || continue
@@ -397,7 +460,7 @@ sweep_legacy_opencode_artifacts() {
 
     # opencode.json: same surgical strip as the recorded path, and a no-op when
     # the recorded pass already ran.
-    remove_kurama_agents_from_opencode_config "$base/opencode.json"
+    remove_kurama_agents_from_opencode_config "$oc_config"
 }
 
 # O3: offer to revert the Pi packages Kurama installed (recorded in the receipt).
@@ -485,6 +548,36 @@ path_within_root() {
         "$root"/*) return 0 ;;
         *)         return 1 ;;
     esac
+}
+
+# True when a recorded MERGED-CONFIG entry must be refused (#65).
+#
+# The filter above bounds files[], the array uninstall drives `rm` from. The other
+# recorded arrays — prompts[], engram_mcp[], opencode_configs[], tui_plugins[],
+# gitignore[] — were never filtered at all: each handler resolves an absolute
+# entry as-is and a relative one against the receipt dir, wherever that lands.
+# Those handlers do not delete a recorded path; they strip a marker block or a jq
+# key out of a file Kurama merged into, and every one is gated on first finding
+# something of ours in there. That bounds the damage but does not make an
+# out-of-tree entry legitimate: in PROJECT scope the receipt lives inside the
+# target repo, so its contents are supplied by whoever wrote that repo, and a
+# crafted entry aimed a strip — and the `.bak` copy that precedes it — at any
+# readable path on the box.
+#
+# Every entry a project install legitimately records is relative and inside the
+# repo, so anything else there is refused. GLOBAL scope keeps honoring absolute
+# entries: setup.sh records ~/.claude.json that way and it sits outside the
+# containment root by construction (the root is ~/.claude, the file is its
+# sibling), so applying the bound there would break a healthy uninstall.
+config_entry_out_of_tree() {
+    local entry="$1" dir_abs="$2" root_abs="$3" escope="$4" abs
+    [ "$escope" = "project" ] || return 1
+    case "$entry" in
+        /*) abs="$(normalize_abs_path "$entry")" ;;
+        *)  abs="$(normalize_abs_path "$dir_abs/$entry")" ;;
+    esac
+    path_within_root "$root_abs" "$abs" && return 1
+    return 0
 }
 
 # The tree every recorded path must stay inside, for a receipt in $1 with scope $2.
@@ -886,6 +979,11 @@ EOF
     # read above, where the jq-less case is caught before anything is removed.
     while IFS= read -r sfile; do
         [ -n "$sfile" ] || continue
+        if config_entry_out_of_tree "$sfile" "$dir_abs" "$root_abs" "$effective_scope"; then
+            print_warn "$label: refusing recorded settings entry that resolves outside $root_abs: $sfile"
+            UNINSTALL_FAILED=1
+            continue
+        fi
         remove_hooks_from_settings "$dir/$sfile"
     done <<EOF
 $settings
@@ -898,6 +996,11 @@ EOF
     engram_files="$(manifest_json_array "$manifest" "engram_mcp")"
     while IFS= read -r efile; do
         [ -n "$efile" ] || continue
+        if config_entry_out_of_tree "$efile" "$dir_abs" "$root_abs" "$effective_scope"; then
+            print_warn "$label: refusing recorded engram config that resolves outside $root_abs: $efile"
+            UNINSTALL_FAILED=1
+            continue
+        fi
         case "$efile" in
             /*) remove_engram_from_config "$efile" ;;
             *)  remove_engram_from_config "$dir/$efile" ;;
@@ -913,6 +1016,11 @@ EOF
     prompts="$(manifest_json_array "$manifest" "prompts")"
     while IFS= read -r pfile; do
         [ -n "$pfile" ] || continue
+        if config_entry_out_of_tree "$pfile" "$dir_abs" "$root_abs" "$effective_scope"; then
+            print_warn "$label: refusing recorded prompt that resolves outside $root_abs: $pfile"
+            UNINSTALL_FAILED=1
+            continue
+        fi
         case "$pfile" in
             /*) strip_markers_from_prompt "$pfile" ;;
             *)  strip_markers_from_prompt "$dir/$pfile" ;;
@@ -928,6 +1036,11 @@ EOF
     gitignores="$(manifest_gitignore "$manifest")"
     while IFS= read -r gfile; do
         [ -n "$gfile" ] || continue
+        if config_entry_out_of_tree "$gfile" "$dir_abs" "$root_abs" "$effective_scope"; then
+            print_warn "$label: refusing recorded .gitignore that resolves outside $root_abs: $gfile"
+            UNINSTALL_FAILED=1
+            continue
+        fi
         case "$gfile" in
             /*) strip_gitignore_block "$gfile" ;;
             *)  strip_gitignore_block "$dir/$gfile" ;;
@@ -942,6 +1055,11 @@ EOF
     tui_files="$(manifest_json_array "$manifest" "tui_plugins")"
     while IFS= read -r tfile; do
         [ -n "$tfile" ] || continue
+        if config_entry_out_of_tree "$tfile" "$dir_abs" "$root_abs" "$effective_scope"; then
+            print_warn "$label: refusing recorded tui.json that resolves outside $root_abs: $tfile"
+            UNINSTALL_FAILED=1
+            continue
+        fi
         case "$tfile" in
             /*) remove_tui_plugin_from_config "$tfile" ;;
             *)  remove_tui_plugin_from_config "$dir/$tfile" ;;
@@ -956,6 +1074,11 @@ EOF
     opencode_configs="$(manifest_json_array "$manifest" "opencode_configs")"
     while IFS= read -r ofile; do
         [ -n "$ofile" ] || continue
+        if config_entry_out_of_tree "$ofile" "$dir_abs" "$root_abs" "$effective_scope"; then
+            print_warn "$label: refusing recorded opencode.json that resolves outside $root_abs: $ofile"
+            UNINSTALL_FAILED=1
+            continue
+        fi
         case "$ofile" in
             /*) remove_kurama_agents_from_opencode_config "$ofile" ;;
             *)  remove_kurama_agents_from_opencode_config "$dir/$ofile" ;;
@@ -981,7 +1104,13 @@ EOF
     # into fixed $HOME/.config/opencode paths and only early-returns on
     # "project", so a project receipt spoofing "global" would have swept the
     # user's global OpenCode install from a project uninstall.
-    if manifest_tools "$manifest" | grep -Fxq -- opencode; then
+    # Herestring, not a pipe (#65/#110). `producer | grep -q` makes grep exit on
+    # its first match while the producer is still writing, and the EPIPE/SIGPIPE
+    # that follows becomes the PIPELINE's status under `set -o pipefail` — so a
+    # list that DOES record opencode reads as one that does not, and the legacy
+    # sweep silently never runs. Measured at 40/40 wrong verdicts once the list
+    # outgrows the pipe buffer, 0/40 with the herestring.
+    if grep -Fxq -- opencode <<<"$(manifest_tools "$manifest")"; then
         sweep_legacy_opencode_artifacts "$effective_scope"
         removed=$((removed + LEGACY_SWEEP_REMOVED))
     fi
@@ -1050,6 +1179,10 @@ show_help() {
     echo "The recorded settings.json hooks block, the Engram MCP registration, and the"
     echo "orchestrator BEGIN:kurama block are stripped surgically; other keys/content stay."
     echo ""
+    echo "--path and --agent are mutually exclusive: --path names the target directory"
+    echo "outright, --agent looks one up by harness. Passing both is rejected rather than"
+    echo "silently honouring the path."
+    echo ""
     echo "A project install writes ONE receipt in the repo root, shared by every harness"
     echo "installed there, so '--scope project' uninstall is all-or-nothing: --agent is"
     echo "rejected there rather than silently removing every harness."
@@ -1103,6 +1236,22 @@ if [[ "$SCOPE" == "project" && -n "$AGENT" ]]; then
     print_info "To remove every Kurama install from the repo, drop --agent:"
     print_info "  uninstall.sh --scope project --path ${CUSTOM_PATH:-<repo>}"
     print_info "Add --dry-run to that first to see exactly what it would remove."
+    exit 1
+fi
+
+# #65: --path names the target directly, so --agent has nothing left to select —
+# the dispatch below reaches the --path branch first and the agent was dropped in
+# silence. That is the drop-vs-refuse class #40 closed for setup.sh's hand-off
+# (setup.sh refuses --path outside project scope for the same reason), and the
+# two flags disagreeing is exactly when a user needs to be told: `--path
+# ~/.claude/skills --agent codex` reads as "remove codex" and removed whatever
+# the path held. Say which one to drop instead of guessing.
+if [[ -n "$CUSTOM_PATH" && -n "$AGENT" && "$SCOPE" != "project" ]]; then
+    print_error "--path and --agent cannot be combined"
+    print_info "--path names the target directory outright; --agent looks one up by harness."
+    print_info "Use one or the other:"
+    print_info "  uninstall.sh --agent $AGENT"
+    print_info "  uninstall.sh --path $CUSTOM_PATH"
     exit 1
 fi
 

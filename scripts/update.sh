@@ -208,19 +208,31 @@ prune_stale_agent_backups() {
     local dir="$1" recorded="$2"
     [ -d "$dir" ] || return 0
     [ -n "$recorded" ] || return 0
-    local pruned=0 orig baks keep bk
+    local pruned=0 orig keep bk
     while IFS= read -r orig; do
         [ -n "$orig" ] || continue
-        baks="$(find "$dir" -maxdepth 1 -type f -name "$orig.bak.*" 2>/dev/null | sort)"
-        [ -n "$baks" ] || continue
-        keep="$(printf '%s\n' "$baks" | awk 'NF{last=$0} END{print last}')"
-        while IFS= read -r bk; do
-            [ -n "$bk" ] || continue
+        # A QUOTED literal prefix plus one wildcard — never `find -name
+        # "$orig.bak.*"`. $orig is receipt data and find's -name takes a PATTERN,
+        # so a glob metacharacter in a recorded agent filename (`?`, `*`, `[`)
+        # silently widened the match to OTHER files' backups — and this runs in
+        # ~/.claude/agents, a directory shared with the user's own agents and
+        # their own hand-made backups, which is precisely what $recorded exists to
+        # keep this function away from. Quoting makes the shell read the basename
+        # literally and leaves exactly one glob: the timestamp. (#65)
+        #
+        # The glob expands in sorted order and the timestamp is fixed-width and
+        # zero-padded, so the last match is the newest — the one to keep.
+        keep=""
+        for bk in "$dir/$orig".bak.*; do
+            [ -f "$bk" ] || continue
+            keep="$bk"
+        done
+        [ -n "$keep" ] || continue
+        for bk in "$dir/$orig".bak.*; do
+            [ -f "$bk" ] || continue
             [ "$bk" = "$keep" ] && continue
             rm -f "$bk" && pruned=$((pruned + 1))
-        done <<BAKS
-$baks
-BAKS
+        done
     done <<ORIGS
 $recorded
 ORIGS
@@ -410,6 +422,30 @@ EOF
         fi
         if [ "$unresolved" -gt 0 ] && [ "$comparable" -gt 0 ]; then
             info "$unresolved recorded file(s) skipped — no repo source to compare against"
+        fi
+
+        # #65: files[] is not the whole install. Kurama also MERGES into files it
+        # does not own — the orchestrator block in prompts[], the hooks block in
+        # settings[], the sdd-* agents in opencode_configs[], the MCP entry in
+        # engram_mcp[], the logo in tui_plugins[], the machine-local block in
+        # gitignore[] — and the real update re-merges every one of them. None is
+        # byte-comparable against a repo source (the FILE is the user's; only the
+        # block inside it is ours), so this preview genuinely cannot report drift
+        # for them. What it must not do is stay silent: a headline counted over
+        # files[] alone read as the whole blast radius, and for an OpenCode
+        # install — where the agent block lives in opencode.json, is not in
+        # files[] at all, and is the surface #22 was about — that was a confident
+        # wrong answer to the one question --dry-run is asked.
+        local merged=0 mkey mcount
+        for mkey in settings prompts opencode_configs engram_mcp tui_plugins; do
+            mcount="$(manifest_json_array "$manifest" "$mkey" | awk 'NF' | wc -l | tr -d ' ')"
+            merged=$((merged + mcount))
+        done
+        mcount="$(manifest_gitignore "$manifest" | awk 'NF' | wc -l | tr -d ' ')"
+        merged=$((merged + mcount))
+        if [ "$merged" -gt 0 ]; then
+            info "$merged merged file(s) also recorded — the real update re-merges Kurama's block"
+            info "into each of them. They are not byte-comparable, so no drift is reported here."
         fi
         return 0
     fi

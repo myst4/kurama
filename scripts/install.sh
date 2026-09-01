@@ -104,6 +104,25 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# #65: --path is meaningful for exactly ONE mapping, `--agent custom` — the only
+# target this wrapper does not resolve for itself (the five global harnesses
+# resolve by harness, project-local by $PWD). Passed with anything else it was
+# parsed, dropped, and never mentioned again: `install.sh --path ~/work/repo`
+# with no --agent forwarded a bare setup.sh, which opened the interactive
+# front-end against a target the user never named. That is the drop-vs-refuse
+# class #40 closed for setup.sh's own hand-off, and setup.sh answers the mirror
+# case the same way ("--path requires --scope project").
+if [ -n "$CUSTOM_PATH" ] && [ "$AGENT" != "custom" ]; then
+    if [ -z "$AGENT" ]; then
+        echo "--path requires --agent custom (a bare install.sh opens the interactive installer and would ignore it)"
+    else
+        echo "--path requires --agent custom (--agent $AGENT resolves its own target)"
+    fi
+    echo ""
+    show_help
+    exit 1
+fi
+
 # A partial clone missing the real installer must fail loud, never silently
 # succeed at doing nothing.
 if [ ! -f "$SETUP_SCRIPT" ]; then

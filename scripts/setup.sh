@@ -866,7 +866,13 @@ prune_stale_skills() {
         case "$entry" in */SKILL.md) ;; *) continue ;; esac
         abs="$RECEIPT_DIR/$entry"
         case "$abs" in "$target_dir"/*) ;; *) continue ;; esac
-        if printf '%s\n' "$installed" | grep -qxF -- "$entry"; then continue; fi
+        # Herestring, not a pipe (#65/#110). `printf … | grep -q` makes grep exit
+        # on its first match while printf is still writing, and under
+        # `set -o pipefail` the resulting SIGPIPE becomes the PIPELINE's status —
+        # so a skill that IS in the just-installed list reads as absent, the
+        # `continue` is skipped, and the `rm -f` below deletes it as stale. The
+        # only site of the four where the wrong verdict costs a file.
+        if grep -qxF -- "$entry" <<<"$installed"; then continue; fi
         [ -e "$abs" ] || continue
         rm -f "$abs"
         rmdir "$(dirname "$abs")" 2>/dev/null || true

@@ -314,8 +314,10 @@ The **deterministic hook mechanics** are already pinned by `scripts/install_test
   verdict, passing a `PASS`, blocking a **stale content-binding** receipt, and the
   `KURAMA_ARCHIVE_OVERRIDE=1` bypass — see the `test_archive_gate_*` cases.
 - `orchestrator-write-guard.sh` allowing writes with no active cycle, blocking repo
-  code mid-cycle, exempting `openspec/`/`.kurama/`, standing down after archive, and
-  still blocking without `jq` — see the `test_write_guard_*` cases.
+  code mid-cycle, exempting `openspec/`/`.kurama/`, and standing down after archive —
+  see the `test_write_guard_*` cases. That both hooks still decide the same way
+  **without `jq`** is a separate case over its own jq-less PATH farm:
+  `test_nojq_hooks_decide_the_same_way_without_jq`.
 
 What the suite **cannot** reach are the two gates that live inside the SDD *skills*
 and only fire in a live cycle. Verify these by hand (Pass B is easiest to inspect on
