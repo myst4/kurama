@@ -4,6 +4,116 @@ This file keeps the **current (6.x)** and **previous (5.x)** release series. For
 everything before 5.0.0, read the full history from the tags: `git log` (each
 release is a tagged commit) or the [GitHub Releases page](https://github.com/myst4/kurama/releases).
 
+## 6.2.0 — 2026-09-01
+
+Minor: additive features and a batch of verified fixes; no breaking change. Eighteen issues closed
+by a team of agents in isolated worktrees, one PR per issue group, every new test mutation-checked.
+
+### What ships
+
+- **#104 (PR #108) — brainstorm gate + `sdd-brainstorm`.** `sdd-new` step 1.5 reads the issue
+  body, classifies vague/clear out loud with the reason, asks once with a recommendation; step
+  2.5 stops to pick the approach. New optional-group skill `sdd-brainstorm` (inline in the
+  orchestrator, no slash command): explore-before-ask, decision ledger
+  `resolved/open/contradicted/deferred`, 3–4 questions as the norm with 7 as the round cap,
+  approval-gated *Decisions* comment on the originating issue. `sdd-propose` maps the ledger and
+  writes unresolved success criteria as `assumed:`. `sdd-ff` announces the gate it skips. The
+  misplaced brainstorming pairing removed from `sdd-explore`/`sdd-propose`/companion docs.
+  +62 B on the prompt (omp 35 B headroom).
+- **#99 (PR #110) — flaky `assert_matches`.** `printf | grep -q` SIGPIPE above the pipe buffer
+  (16 KB macOS); seven helpers moved to herestrings, one of them a live bug
+  (`skill_frontmatter_fence_closed` misreporting closed fences on large skills). 39/40 → 0/40.
+- **#94 #95 #96 (+#93 reframed) (PR #113) — hooks.** Write-guard canonicalizes target and root
+  (lexical `.`/`..` then `cd -P`/`pwd -P` on the longest existing prefix) — `.kurama/../x` no
+  longer escapes; archive-gate keys on the launch identity (`skill`/`subagent_type`/
+  `description`), never on prompt text; `compute_tree_hash` uses `mktemp -d` (CWE-377 — the
+  real damage was archiving a stale receipt with exit 0). #93's spoof premise disproved; a real
+  nested-object jq/no-jq divergence on `file_path` fixed instead.
+
+  Project-scope installs write a marker-managed `# BEGIN:kurama`/`# END:kurama` block into the
+  repo's `.gitignore` (`.kurama/`, the receipt, `*.bak.[0-9]*`, `.claude/settings.local.json`,
+  `.atl/` when Pi is installed; never `openspec/` or `MEMORY.md`), recorded in the receipt under
+  `gitignore[]`, removed by `uninstall`, ensured by `update`. `doctor` fails on a tracked
+  machine-local file and warns on a missing block or an installed-but-never-initialized project.
+  Root cause of the absolute Engram path fixed: `engram_command` now resolves the Homebrew
+  symlink and writes the bare `engram`, so `.mcp.json`/`opencode.json` are shareable. `setup.sh`
+  prints a notice when it merges beside a pre-existing workflow (file, what it found, where the
+  block landed, whose instructions win); `sdd-init` asks once how the two coexist.
+- **#109 (PR #114) — branch names carry the issue number.** When a GitHub issue is in play the
+  branch is `type/{issue}-{slug}` (`fix/81-recaptcha-otp-resend`); the chain form is
+  `type/{issue}-{slug}` per unit, `type/{issue}-{n}-{slug}` only when one issue ships a chain;
+  no issue → `type/{slug}` unchanged. Regex unchanged. `kanban-github` and `issue-creation`
+  reference the rule; CONTRIBUTING states the issue-linked form as the norm for this repo.
+- **#88 (PR #116) — Work Unit Evidence, always on.** `sdd-apply` records, per completed batch,
+  the exact test command and result (or `N/A` with a reason), the harness/runtime check, and the
+  rollback boundary (never `N/A`). `sdd-verify` Step 2a audits it in every mode: missing block or
+  claimed pass without a command → WARNING, CRITICAL when the unit touched code; a recorded
+  failing result under a checked box → CRITICAL. The TDD module stays opt-in on top; internal
+  todos are not completion evidence.
+- **#87 #100 (PR #112) — Key Learnings + reaping.** Every phase envelope may close with
+  `## Key Learnings` (1–5 items, omitted when empty, no secrets or machine paths) feeding Engram
+  passively and `sdd-learn` for the team's `MEMORY.md`. The delegation contract gains Step 5: a
+  delegation is complete only when the agent is shut down; the one exception — a named intent to
+  message that agent again. No hook, by policy and because a SessionEnd hook cannot reach
+  in-process teammates.
+- **#89 (PR #115) — `lint-spec.sh`.** Mechanical delta-spec validator at
+  `skills/_shared/lint-spec.sh` (bash 3.2, no jq): canonical sections, RFC 2119, GIVEN/WHEN/THEN,
+  scenario IDs, the MODIFIED whole-block rule against `openspec/specs/**` naming the scenarios
+  that would be lost, RENAMED both names, REMOVED reason (ERROR, per the convention's MUST),
+  placeholders. Wired as self-check in `sdd-spec`, gate in `sdd-verify`, refusal in
+  `sdd-archive`; loud when missing. Runtime install of `_shared/*.sh` lands with #106.
+- **#85 #86 (PR #118) — `issue-creation` split; `kurama-report`; `systemic-issue-triage`.**
+  `issue-creation` keeps its name and one job — filing issues in the repo you stand in, as the
+  kanban entry point — and now discovers the host repo's labels and templates instead of
+  assuming them (one unknown label makes `gh issue create` reject the whole issue). New
+  `kurama-report` (optional group) files Kurama's own failures upstream: five gates — whose
+  failure it is, search first, sanitize at collection time, **block for a human even in
+  `auto`**, file with the upstream form's labels and never `status:approved`. New
+  `systemic-issue-triage` (optional group): classify a batch of issues by root cause, one fix per
+  root, the over-engineering test (a fix that adds state, a flag or a gate is redesigned; the
+  correct fix usually deletes), audit every worker's report. Skill set 26 → 28.
+- **#106 (PR #119) — the skill registry is a script.** `skills/_shared/build-skill-registry.sh`
+  (bash 3.2, one `awk` per scan root) replaces the model-driven scan: **12–13 minutes → 0.23 s**
+  for 108 skills, 45 KB → 4.8 KB. Index only — the Compact Rules surface is gone. Runs at
+  `setup`, `update`, `sdd-init` Step 4 and on demand via `skill-registry`; no model fallback —
+  a missing script is a `doctor` finding. The clone never indexes itself. `install_skills` now
+  copies `_shared/*.sh` too (exec bit, receipt-registered), which is what installs `lint-spec.sh`.
+  `doctor`'s installed-but-uninitialized check no longer accepts `skill-registry.md` as proof of
+  `sdd-init`, since `setup` writes it now.
+- **#90 (PR #117) — enforcement tiers, stated and extended.** Verified per harness against
+  installed code: Claude Code (`PreToolUse`) and **OpenCode** now enforce both gates — a thin
+  plugin (`examples/opencode/plugins/kurama-sdd-gates.ts`) throws in `tool.execute.before` /
+  `command.execute.before` and runs the same two bash scripts, so the decision logic exists once.
+  Pi and omp have a veto primitive but no agent identity in the event, so the gates stay advisory
+  there with the reason written down; Codex has no pre-tool hook. Tier table in README,
+  `docs/hooks.md`, `docs/installation.md`. Installed by `setup.sh` for OpenCode, receipt-tracked.
+- **#65 (PR #120) — the deferred backlog, worked through.** Eleven fixes, each reproduced on
+  main first: the legacy OpenCode command sweep now probes before deleting (it was removing nine
+  commands and leaving `opencode.json` routing to them); receipt containment now bounds all six
+  merged-config arrays in project scope, not just `files[]` (a crafted entry could make `jq`
+  rewrite a JSON file outside the repo); the backup glob no longer over-matches on metacharacters;
+  `receipt_schema()` agrees between jq and awk; `--path`/`--agent` combinations refuse instead of
+  silently dropping; the one unguarded `mktemp`; `--dry-run` reports merged-file drift; the four
+  `printf | grep -q` SIGPIPE sites in shipped scripts; six doc corrections. Five items were
+  already fixed by earlier PRs (evidence recorded), six deferred with reasons — the symlinked
+  `~/.claude/skills` uninstall (0 of 60 files removed) gets its own issue.
+- **#107 (PR #121) — no gentle-ai references in code or docs.** `metadata.author` is `kurama`
+  in every skill; the prompt marker is `kurama:sdd-model-assignments`; the README's origin
+  section is gone in favour of *MIT — see LICENSE*. Kept on purpose: the `LICENSE` notice
+  (Kurama is an MIT fork and that line is the licence's one condition), the third-party package
+  identifiers `gentle-engram` and `gentle-pi`, Engram's GitHub URLs, and this changelog's history.
+  A suite case keeps the tree that way against an explicit allowlist.
+
+### Process note
+
+Eighteen issues closed by twelve agents in isolated worktrees, one PR per issue group,
+every PR rebased onto a moving `main` and merged only on 10/10 CI. Two mechanics made it
+work and are worth keeping: each PR's test section got its **own letter and its own insertion
+anchor** in `install_test.sh`, so parallel merges stopped conflicting; and every new test was
+**mutation-checked** against the previous tree before it counted. The prompt budget was the one
+hard wall — `omp` closes this release with 35 bytes of headroom, and #107's marker rename gives
+a few back.
+
 ## 6.1.2 — 2026-08-30
 
 Patch: one change merged after `v6.1.1` was tagged, so the tag and `main` had diverged — an
