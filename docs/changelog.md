@@ -4,6 +4,28 @@ This file keeps the **current (6.x)** and **previous (5.x)** release series. For
 everything before 5.0.0, read the full history from the tags: `git log` (each
 release is a tagged commit) or the [GitHub Releases page](https://github.com/myst4/kurama/releases).
 
+## 6.2.1 — 2026-09-01
+
+Patch: one opt-in skill removed, three skills rewritten as Kurama's own, and the last licence
+inconsistency closed. No default-install behaviour changes.
+
+- **`go-testing` is gone, and the `lang` group with it.** It was gentle-ai's own Go + Bubbletea
+  testing conventions, inherited in the March parity syncs — 80% upstream text, zero Kurama users,
+  and at odds with the project's own rule that a default install ships no language-specific
+  knowledge. `--with lang` no longer exists; the removal is pinned in the *Deliberate removals
+  stay removed* CI list so no future sync can bring it back. On-disk skills 29 → 28; the default
+  set stays 28.
+- **`skill-creator` rewritten from a blank page** as a Kurama-specific meta-skill: frontmatter
+  and `Trigger:` (the registry indexes by it), group and manifest registration, the `AGENTS.md`
+  row, `validate_skills.sh`, mutation-checked tests with the section-letter convention, the
+  no-slash-command rule (prompt budget), executor vs orchestrator skills, the four `_shared`
+  contracts, the Language Domain Contract. The previous file was 158 lines of upstream text with
+  7 lines changed — and, since #121, signed `author: kurama`. No sentence of it survives.
+- **`branch-pr` and `judgment-day`**: the paragraphs still identical to their import were
+  rewritten in Kurama's voice without changing a rule, number, regex, command or heading; every
+  existing test passes unchanged. All three skills now carry `license: MIT` like the other 25;
+  a suite case keeps `skills/` free of any other licence tag.
+
 ## 6.2.0 — 2026-09-01
 
 Minor: additive features and a batch of verified fixes; no breaking change. Eighteen issues closed
