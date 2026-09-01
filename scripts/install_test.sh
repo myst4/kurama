@@ -9512,6 +9512,483 @@ run_test "sdd-learn is a well-formed, registered skill" test_l_sdd_learn_is_a_we
 
 
 # ============================================================================
+# UNIT-W (issue #65): the deferred backlog
+#
+# The items #65 tracked have nothing in common but provenance — each was measured
+# during an earlier wave, judged non-blocking, and parked. What they DO share is
+# a shape: a wrong outcome that still exits 0. A sweep that deletes nine files
+# and leaves the config pointing at them. A flag parsed and dropped. A receipt
+# entry that reaches a file outside the tree it was allowed to touch. A
+# `find -name` pattern matching files the receipt never named. A receipt field
+# that means one thing with jq installed and another without. And a
+# `producer | grep -q` whose SIGPIPE is read as "no match".
+#
+# Several boxes on that list were already closed by #110/#111/#113 and are
+# recorded as such in the issue rather than re-fixed here.
+# ============================================================================
+
+test_w_legacy_opencode_sweep_refuses_instead_of_half_removing() {
+    # A pre-#22 OpenCode receipt records NONE of what setup_opencode wrote, so
+    # #71's pre-flight — which walks opencode_configs[] and engram_mcp[] — cannot
+    # see ~/.config/opencode/opencode.json at all. That receipt is also the ONLY
+    # kind that reaches this sweep with anything to remove. So the sweep deleted
+    # the nine legacy /sdd-* command files and then handed the config to a strip
+    # that cannot run without jq (or over a config that no longer parses): the
+    # commands went, the agents they route to stayed registered, and the run
+    # printed "Done." and exited 0.
+    command -v jq > /dev/null 2>&1 || { echo "jq is required for this test"; return 1; }
+    local base="$HOME/.config/opencode"
+    mkdir -p "$base/commands" "$base/skills"
+
+    cat > "$base/skills/.kurama-install-manifest.json" <<'JSON'
+{
+  "receiptSchema": 1,
+  "tool": "opencode",
+  "tools": ["opencode"],
+  "scope": "global",
+  "version": "6.1.2",
+  "files": [],
+  "settings": [],
+  "prompts": [],
+  "engram_mcp": [],
+  "opencode_configs": [],
+  "tui_plugins": []
+}
+JSON
+
+    local p
+    for p in propose spec design tasks apply verify archive init explore; do
+        printf 'agent: sdd-%s\n' "$p" > "$base/commands/sdd-$p.md"
+    done
+
+    # Corrupted the way UNIT-I and UNIT-K corrupt their twins: trailing garbage
+    # after a valid object, so Kurama's keys stay textually present for a probe to
+    # find while jq can no longer parse the file.
+    cat > "$base/opencode.json" <<'JSON'
+{
+  "agent": {
+    "sdd-apply": { "model": "x/y" },
+    "kurama-orchestrator": { "model": "x/y" },
+    "my-own-agent": { "model": "x/y" }
+  }
+}
+]]]NOT JSON
+JSON
+    if jq -e . "$base/opencode.json" > /dev/null 2>&1; then
+        echo "opencode.json is still valid JSON — the corruption did not take"; return 1
+    fi
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "uninstall exited 0 after a sweep it could not finish; it said:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    fi
+    assert_eq "9" "$(count_matching_files "$base/commands" 'sdd-*.md')" \
+        "the sweep must remove nothing while the config it would orphan cannot be cleaned" || return 1
+    grep -qF '"sdd-apply"' "$base/opencode.json" || {
+        echo "opencode.json lost the agents the sweep was refusing to orphan"; return 1; }
+    printf '%s\n' "$output" | grep -qF 'opencode.json' || {
+        echo "the refusal never names the config it could not clean:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    }
+    return 0
+}
+
+test_w_uninstall_rejects_path_together_with_agent() {
+    # The dispatch reached the --path branch before the --agent one, so
+    # `--path ~/.claude/skills --agent codex` read as "remove codex" and removed
+    # whatever the path held, silently. Drop-vs-refuse, the class #40 closed for
+    # setup.sh's hand-off (setup.sh refuses --path outside project scope for the
+    # same reason).
+    mkdir -p "$HOME/some-dir"
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --path "$HOME/some-dir" --agent codex --dry-run 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "--path with --agent was accepted; --agent was dropped in silence:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'cannot be combined' || {
+        echo "the refusal never says which flag to drop:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+
+    # The project-scope refusal is a DIFFERENT one (#33) with its own remedy, and
+    # the new global-scope guard must not shadow it.
+    status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$HOME/some-dir" --agent codex 2>&1) || status=$?
+    printf '%s\n' "$output" | grep -qF 'not supported with --scope project' || {
+        echo "the project-scope --agent refusal regressed to the generic message:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+
+    # And each flag ALONE still works — a guard that refused everything would pass
+    # both assertions above.
+    status=0
+    bash "$UNINSTALL_SCRIPT" --path "$HOME/some-dir" --dry-run > /dev/null 2>&1 || status=$?
+    assert_eq "0" "$status" "--path alone must still be accepted" || return 1
+    return 0
+}
+
+test_w_install_wrapper_rejects_a_path_it_would_drop() {
+    # install.sh parsed --path for every mapping and honoured it for exactly one,
+    # `--agent custom`. Everywhere else it was dropped without a word: a bare
+    # `install.sh --path DIR` forwarded a flagless setup.sh, which opens the
+    # interactive front-end against a target the user never named.
+    local dir="$HOME/target-repo"
+    mkdir -p "$dir"
+
+    local output status=0
+    output=$(bash "$INSTALL_SCRIPT" --path "$dir" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "install.sh --path with no --agent exited 0 having dropped the path"; return 1
+    fi
+    printf '%s\n' "$output" | grep -qF -- '--path requires --agent custom' || {
+        echo "the refusal never names the flag combination:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    }
+
+    # A named global harness resolves its own target, so it drops --path just as
+    # silently and must be refused too.
+    status=0
+    output=$(bash "$INSTALL_SCRIPT" --agent claude-code --path "$dir" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "install.sh --agent claude-code --path DIR installed elsewhere and said nothing"; return 1
+    fi
+
+    # The one mapping --path IS for must still reach setup.sh. $dir is not a git
+    # repo, so setup.sh refuses it for ITS own reason — which is the proof the
+    # wrapper forwarded instead of refusing here.
+    status=0
+    output=$(bash "$INSTALL_SCRIPT" --agent custom --path "$dir" 2>&1) || status=$?
+    if printf '%s\n' "$output" | grep -qF -- '--path requires --agent custom'; then
+        echo "the guard also blocked --agent custom, the one mapping --path exists for"
+        return 1
+    fi
+    return 0
+}
+
+test_w_project_receipt_cannot_reach_a_merged_config_outside_the_repo() {
+    # #33 bounded files[] — the array uninstall drives `rm` from. The MERGED-config
+    # arrays were never bounded at all: prompts[], settings[], engram_mcp[],
+    # opencode_configs[], tui_plugins[] and gitignore[] each honoured an absolute
+    # entry exactly as written. In project scope the receipt lives inside the
+    # target repo, so its contents come from whoever wrote that repo — and a
+    # crafted entry aimed a marker strip, and the `.bak` copy that precedes it, at
+    # any readable path on the box. Measured on origin/main: both files below were
+    # rewritten, two .bak files appeared beside them, and the run exited 0.
+    local outside="$HOME/private"
+    mkdir -p "$outside"
+    cat > "$outside/CLAUDE.md" <<'EOT'
+my own notes
+<!-- BEGIN:kurama -->
+not kurama's to remove
+<!-- END:kurama -->
+more of my own notes
+EOT
+    printf '{"theme":"dark"}\n' > "$outside/settings.json"
+    local prompt_before settings_before
+    prompt_before="$(cksum < "$outside/CLAUDE.md")"
+    settings_before="$(cksum < "$outside/settings.json")"
+
+    local repo="$HOME/proj"
+    mkdir -p "$repo"
+    cat > "$repo/.kurama-install-manifest.json" <<JSON
+{
+  "receiptSchema": 1,
+  "tool": "claude-code",
+  "tools": ["claude-code"],
+  "scope": "project",
+  "version": "6.1.2",
+  "files": [],
+  "settings": ["../private/settings.json"],
+  "prompts": ["$outside/CLAUDE.md"],
+  "engram_mcp": [],
+  "opencode_configs": [],
+  "tui_plugins": []
+}
+JSON
+
+    local output status=0
+    output=$(bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages 2>&1) || status=$?
+    assert_eq "$prompt_before" "$(cksum < "$outside/CLAUDE.md")" \
+        "a recorded prompt outside the repo must not be stripped" || return 1
+    assert_eq "$settings_before" "$(cksum < "$outside/settings.json")" \
+        "a recorded settings.json outside the repo must not be rewritten" || return 1
+    assert_eq "0" "$(count_matching_files "$outside" '*.bak.*')" \
+        "no backup may be written beside a refused entry" || return 1
+    if [ "$status" -eq 0 ]; then
+        echo "a receipt naming files outside the repo still produced a clean exit"
+        printf '%s\n' "$output" | tail -6
+        return 1
+    fi
+    printf '%s\n' "$output" | grep -qF 'resolves outside' || {
+        echo "the refusal never says the entry resolved outside the tree:"
+        printf '%s\n' "$output" | tail -8
+        return 1
+    }
+    return 0
+}
+
+test_w_backup_prune_never_reaches_another_file_through_a_glob() {
+    # prune_stale_agent_backups interpolated a recorded basename into
+    # `find -name "$orig.bak.*"`, where it is a PATTERN. A glob metacharacter in a
+    # recorded agent filename therefore matched OTHER files' backups — in
+    # ~/.claude/agents, the directory shared with the user's own agents and their
+    # own hand-made backups, which is exactly what the recorded-names argument
+    # exists to keep this function away from.
+    local agents="$HOME/.claude/agents"
+    local skills="$HOME/.claude/skills"
+    mkdir -p "$agents" "$skills"
+
+    # The user's own agent and their own two backups of it. Kurama wrote none of
+    # them and the receipt records none of them.
+    printf 'mine\n'    > "$agents/a.md"
+    printf 'mine v1\n' > "$agents/a.md.bak.20260101000000"
+    printf 'mine v2\n' > "$agents/a.md.bak.20260102000000"
+
+    # A receipt recording ONE agent, whose basename carries a glob metacharacter.
+    cat > "$skills/.kurama-install-manifest.json" <<'JSON'
+{
+  "receiptSchema": 1,
+  "tool": "claude-code",
+  "tools": ["claude-code"],
+  "scope": "global",
+  "version": "6.1.2",
+  "files": [
+    "../agents/?.md"
+  ],
+  "settings": [],
+  "prompts": [],
+  "engram_mcp": [],
+  "opencode_configs": [],
+  "tui_plugins": []
+}
+JSON
+
+    # update.sh delegates a real re-sync, then prunes using the PRE-run snapshot of
+    # files[] — which is the crafted entry above.
+    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
+        || { echo "update.sh --agent claude-code failed"; return 1; }
+
+    assert_file_exists "$agents/a.md.bak.20260101000000" || {
+        echo "a recorded '?.md' pruned the user's own a.md backup"; return 1; }
+    assert_file_exists "$agents/a.md.bak.20260102000000" || {
+        echo "a recorded '?.md' pruned the user's own a.md backup"; return 1; }
+    assert_file_exists "$agents/a.md" || return 1
+    return 0
+}
+
+# Read receiptSchema out of receipt $1 through the SHIPPED lib, in a clean shell.
+w_read_schema() {
+    bash -c '. "$1"; receipt_schema "$2"' bash "$KURAMA_LIB" "$1"
+}
+
+test_w_receipt_schema_reads_the_same_with_and_without_jq() {
+    # jq being installed is not supposed to change what a receipt MEANS, and for
+    # receiptSchema it did — in both directions. `"receiptSchema": "1"` read 1 with
+    # jq and 0 without (awk's bare-integer regex found nothing); `1.0` read 0 with
+    # jq (the digits-only guard rejected "1.0") and 1 without (awk matched the
+    # leading digit). Parity is the assertion, and the canonical values are
+    # asserted too so parity cannot be reached by both branches being wrong
+    # together.
+    command -v jq > /dev/null 2>&1 || { echo "jq is required for the control half"; return 1; }
+    local bindir="$TEST_TMPDIR/nojqbin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local d="$TEST_TMPDIR/schema"
+    mkdir -p "$d"
+    printf '{"receiptSchema": 1, "tool": "x"}\n'   > "$d/int.json"
+    printf '{"receiptSchema": 7, "tool": "x"}\n'   > "$d/seven.json"
+    printf '{"tool": "x"}\n'                       > "$d/absent.json"
+    printf '{"receiptSchema": "1", "tool": "x"}\n' > "$d/string.json"
+    printf '{"receiptSchema": 1.0, "tool": "x"}\n' > "$d/fraction.json"
+    printf '{\n  "tool": "x",\n  "receiptSchema": 3\n}\n' > "$d/trailing.json"
+
+    local name withjq nojq
+    for name in int seven absent string fraction trailing; do
+        withjq="$(bash -c '. "$1"; receipt_schema "$2"' bash "$KURAMA_LIB" "$d/$name.json")"
+        nojq="$(PATH="$bindir" bash -c '. "$1"; receipt_schema "$2"' bash "$KURAMA_LIB" "$d/$name.json")"
+        assert_eq "$withjq" "$nojq" "receiptSchema '$name' reads differently with and without jq" || return 1
+    done
+
+    assert_eq "1" "$(w_read_schema "$d/int.json")"      "a bare integer reads as itself" || return 1
+    assert_eq "7" "$(w_read_schema "$d/seven.json")"    "a bare integer reads as itself" || return 1
+    assert_eq "3" "$(w_read_schema "$d/trailing.json")" "the field as the LAST key still reads" || return 1
+    assert_eq "0" "$(w_read_schema "$d/absent.json")"   "an absent field reads as 0" || return 1
+    assert_eq "0" "$(w_read_schema "$d/string.json")"   "a quoted value is not a schema this build knows" || return 1
+    assert_eq "0" "$(w_read_schema "$d/fraction.json")" "a fractional value is not a schema this build knows" || return 1
+    return 0
+}
+
+# Print the body of shell function $1 as defined in file $2, from its `name() {`
+# line through the first line that is a bare `}`.
+w_extract_function() {
+    awk -v f="$1" '$0 == f "() {" { on = 1 } on { print } on && $0 == "}" { exit }' "$2"
+}
+
+test_w_resolve_source_copies_are_byte_identical() {
+    # #37 consolidated the receipt parser into scripts/lib/receipt.sh but left
+    # resolve_source / resolve_source_any duplicated in doctor.sh and update.sh
+    # with nothing enforcing that they stay the same. They answer the SAME
+    # question — which repo file did this recorded path come from — for doctor's
+    # drift check and update's --dry-run drift preview, so a fix landing in one
+    # and not the other is precisely the class #37 existed to end. Until they
+    # share a home, this is the guard.
+    local fn a b
+    for fn in resolve_source resolve_source_any; do
+        a="$(w_extract_function "$fn" "$DOCTOR_SCRIPT")"
+        b="$(w_extract_function "$fn" "$UPDATE_SCRIPT")"
+        [ -n "$a" ] || { echo "$fn was not found in doctor.sh"; return 1; }
+        [ -n "$b" ] || { echo "$fn was not found in update.sh"; return 1; }
+        if [ "$a" != "$b" ]; then
+            echo "$fn has drifted between doctor.sh and update.sh:"
+            diff <(printf '%s\n' "$a") <(printf '%s\n' "$b") | head -20
+            return 1
+        fi
+    done
+    return 0
+}
+
+test_w_resolve_source_any_prefers_the_matching_harness_source() {
+    # examples/claude-code/agents/sdd-spec.md and examples/pi/agents/sdd-spec.md
+    # are DIFFERENT files sharing a basename. For a receipt recording both
+    # harnesses, taking the first candidate that exists misattributes the Pi copy
+    # to the claude-code source and reports a soft drift on a file that is
+    # perfectly in sync. The content-match branch exists for exactly that — and a
+    # single-harness receipt collapses both branches, so nothing exercised it.
+    local src="$TEST_TMPDIR/resolve_source_any.sh"
+    {
+        printf 'EXAMPLES_DIR="%s"\n' "$REPO_DIR/examples"
+        printf 'SKILLS_SRC="%s"\n' "$REPO_DIR/skills"
+        printf '. "%s"\n' "$KURAMA_LIB"
+        w_extract_function resolve_source "$UPDATE_SCRIPT"
+        w_extract_function resolve_source_any "$UPDATE_SCRIPT"
+    } > "$src"
+
+    local cc="$REPO_DIR/examples/claude-code/agents/sdd-spec.md"
+    local pi="$REPO_DIR/examples/pi/agents/sdd-spec.md"
+    assert_file_exists "$cc" || return 1
+    assert_file_exists "$pi" || return 1
+    if cmp -s "$cc" "$pi"; then
+        echo "the two sdd-spec.md sources are byte-identical — this case cannot tell the branches apart"
+        return 1
+    fi
+
+    local tools got
+    tools="$(printf 'claude-code\npi\n')"
+
+    # The installed file IS the Pi source, recorded under a Pi agents path, in a
+    # receipt whose first tool is claude-code. Content match must win.
+    got="$(bash -c '. "$1"; resolve_source_any "$2" "$3" "$4"' bash \
+        "$src" '.pi/agents/sdd-spec.md' "$tools" "$pi")"
+    assert_eq "$pi" "$got" "the candidate the installed file actually matches must win" || return 1
+
+    # And the fallback: an installed file matching NEITHER source still resolves,
+    # to the first existing candidate, so a genuinely drifted file stays reportable.
+    local edited="$TEST_TMPDIR/edited-sdd-spec.md"
+    printf 'hand edited, matches no repo source\n' > "$edited"
+    got="$(bash -c '. "$1"; resolve_source_any "$2" "$3" "$4"' bash \
+        "$src" '.pi/agents/sdd-spec.md' "$tools" "$edited")"
+    assert_eq "$cc" "$got" "a drifted file must fall back to the first existing candidate" || return 1
+    return 0
+}
+
+test_w_doctor_reads_a_receipt_bigger_than_the_pipe_buffer() {
+    # The #110 SIGPIPE shape in a shipped script. `producer | grep -q` makes grep
+    # exit on its first match while the producer is still writing; under
+    # `set -o pipefail` the resulting SIGPIPE becomes the PIPELINE's status, so a
+    # match reads as NO match. doctor's site decides whether the receipt CLAIMS
+    # the hook scripts, and hook entries sit near the head of files[] — exactly
+    # when grep exits early. The consequence is not a flake: a genuinely broken
+    # install (receipt records the hooks, hooks gone from disk) silently
+    # downgrades from a hard failure to "skills-only install — the receipt claims
+    # none".
+    #
+    # This case runs doctor on the jq-LESS farm, and that is load-bearing, not
+    # incidental. manifest_json_array's jq branch ends in an explicit `return 0`,
+    # which swallows jq's SIGPIPE status, so the pipeline reads correctly whenever
+    # jq is installed. The awk branch is the function's LAST command, so ITS
+    # status is the function's, and the bug is live on exactly the hosts the awk
+    # fallback exists for. Measured on origin/main over this 140 KB receipt:
+    # 20/20 correct with jq, 0/20 without, 20/20 with the herestring either way.
+    # Installing still happens with jq present — only the diagnosis is jq-less.
+    local bindir="$TEST_TMPDIR/nojqbin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup claude-code failed"; return 1; }
+
+    # Rebuild files[] with the hook entries at the HEAD and ~124 KB of padding
+    # behind them — past a 64 KB pipe buffer on Linux and a 16 KB one on macOS.
+    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
+    local pad="" i=0
+    while [ "$i" -lt 2000 ]; do
+        pad="$pad    \"../padding/entry-$i-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.md\",
+"
+        i=$((i + 1))
+    done
+    {
+        printf '{\n'
+        printf '  "receiptSchema": 1,\n'
+        printf '  "tool": "claude-code",\n'
+        printf '  "tools": ["claude-code"],\n'
+        printf '  "scope": "global",\n'
+        printf '  "version": "6.1.2",\n'
+        printf '  "settings": [],\n'
+        printf '  "files": [\n'
+        printf '    "../hooks/kurama/archive-gate.sh",\n'
+        printf '    "../hooks/kurama/orchestrator-write-guard.sh",\n'
+        printf '%s' "$pad"
+        printf '    "../padding/last.md"\n'
+        printf '  ]\n'
+        printf '}\n'
+    } > "$manifest"
+    local bytes
+    bytes="$(wc -c < "$manifest" | tr -d ' ')"
+    if [ "$bytes" -lt 70000 ]; then
+        echo "the crafted receipt is only $bytes bytes — too small to outgrow a pipe buffer"
+        return 1
+    fi
+
+    # The hook scripts are gone from disk while the receipt records them.
+    rm -rf "$HOME/.claude/hooks/kurama"
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1) || status=$?
+    printf '%s\n' "$output" | grep -qF 'the receipt records them as installed' || {
+        echo "doctor read a 2002-entry files[] as recording no hook scripts:"
+        printf '%s\n' "$output" | grep -F 'hook scripts' | head -3
+        return 1
+    }
+    if printf '%s\n' "$output" | grep -qF 'skills-only install'; then
+        echo "doctor took the skills-only branch for a receipt that records the hooks"
+        return 1
+    fi
+    return 0
+}
+
+echo ""
+echo -e "${BOLD}UNIT-W (issue #65): the deferred backlog${NC}"
+run_test "legacy OpenCode sweep refuses rather than half-removing" test_w_legacy_opencode_sweep_refuses_instead_of_half_removing
+run_test "uninstall refuses --path together with --agent" test_w_uninstall_rejects_path_together_with_agent
+run_test "install.sh refuses a --path it would drop" test_w_install_wrapper_rejects_a_path_it_would_drop
+run_test "a project receipt cannot reach a merged config outside the repo" test_w_project_receipt_cannot_reach_a_merged_config_outside_the_repo
+run_test "backup prune never reaches another file through a glob" test_w_backup_prune_never_reaches_another_file_through_a_glob
+run_test "receiptSchema reads the same with and without jq" test_w_receipt_schema_reads_the_same_with_and_without_jq
+run_test "resolve_source copies are byte-identical (doctor vs update)" test_w_resolve_source_copies_are_byte_identical
+run_test "resolve_source_any prefers the matching harness source" test_w_resolve_source_any_prefers_the_matching_harness_source
+run_test "doctor reads a receipt bigger than the pipe buffer" test_w_doctor_reads_a_receipt_bigger_than_the_pipe_buffer
+
+
+# ============================================================================
 # UNIT-M (issue #104): the brainstorm gate and Kurama's own interview skill
 #
 # The gap #104 closed: `sdd-new` ran init -> explore -> propose -> gate, so the
