@@ -25,8 +25,8 @@ context: |
   Stack agnosticism: the harness carries no language knowledge. Test and build
   commands are ASKED at sdd-init and recorded in rules.verify — never detected —
   and skills/_shared/test-runners.md is a suggestion table with no authority.
-  Per-language pattern skills live in the opt-in `lang` manifest group (OFF by
-  default).
+  No per-language pattern skill ships with the harness; user-authored ones reach
+  sub-agents through the skill registry.
   Testing: scripts/install_test.sh, a self-contained bash suite (149 tests) that
   installs into a temp HOME with shimmed binaries and asserts on the result.
   scripts/validate_skills.sh is a structural linter for skill frontmatter and

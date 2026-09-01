@@ -27,11 +27,6 @@
       "description": "TDD module: the RED-GREEN-REFACTOR protocol skill (skills/tdd). Installed by default; opt out with --without tdd. Installing the module does not activate TDD \u2014 activation stays opt-in per project (a project can start without tests and add them later).",
       "default": true,
       "required": false
-    },
-    "lang": {
-      "description": "Per-language coding/testing pattern skills. OFF by default \u2014 Kurama is stack-agnostic and carries no language knowledge in a default install; opt in with --with lang, or install your own language skills where the skill registry finds them.",
-      "default": false,
-      "required": false
     }
   },
   "skills": [
@@ -122,10 +117,6 @@
     {
       "name": "review-refuter",
       "group": "review"
-    },
-    {
-      "name": "go-testing",
-      "group": "lang"
     },
     {
       "name": "kanban-github",

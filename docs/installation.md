@@ -74,9 +74,10 @@ per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban
 > drops `judgment-day` (27 skills), `--without optional` excludes the `optional` group —
 > `kanban-github`, `sdd-learn`, `sdd-brainstorm`, `kurama-report` and
 > `systemic-issue-triage` (23 skills), `--without review` drops the 4R + refuter review
-> lenses AND their review-layer agents (23 skills), and `--with lang` adds the
-> per-language pattern skills, OFF by default (29 skills). Kurama
-> is stack-agnostic, so a default install ships no language-specific knowledge. The
+> lenses AND their review-layer agents (23 skills). Every group Kurama ships is on by
+> default, so `--with` only ever re-affirms one; a name outside
+> `quality|review|optional|tdd` is rejected. Kurama is stack-agnostic and ships no
+> language-specific knowledge at any flag. The
 > flags apply to the full `setup.sh` install (skills, agents, hooks, orchestrator merge)
 > — `scripts/install.sh` forwards them to `setup.sh` for backward compatibility.
 
@@ -394,9 +395,8 @@ cp -r skills/_shared \
 > omitting the `review-*` lenses leaves the orchestrator's review triage with nothing to
 > select, and omitting `tdd`/`kanban-github` leaves those modules impossible to activate
 > — `sdd-init` records `enabled: false` and the phases that would use them degrade with a
-> WARNING rather than failing. `skills/go-testing` is deliberately **not** in the list —
-> it is the opt-in `lang` group. `skills/manifest.json` is installer metadata, not a
-> skill.
+> WARNING rather than failing. `skills/manifest.json` is installer metadata, not a
+> skill, so it stays out of the copy.
 
 **2. Add orchestrator to `~/.claude/CLAUDE.md`:**
 

@@ -144,10 +144,9 @@ separate per-project switches.
 > full setup without the review lenses). `scripts/install.sh` forwards these flags to
 > `setup.sh` for backward compatibility.
 
-**No language knowledge is installed by default.** Kurama is stack-agnostic: it knows
-the shape of the workflow, never the values of a specific ecosystem. Per-language
-pattern skills live in the opt-in `lang` group (OFF by default; `setup.sh --with lang`
-adds `go-testing`), and your own language skills reach sub-agents through the
+**No language knowledge is installed, at all.** Kurama is stack-agnostic: it knows
+the shape of the workflow, never the values of a specific ecosystem. It ships zero
+per-language pattern skills; your own language skills reach sub-agents through the
 [skill registry](#the-skills) without touching the harness. The project's test and
 build commands are **asked at `/sdd-init`** and recorded in config — never guessed from
 a list of supported stacks, so any ecosystem works, including one Kurama has never
@@ -182,7 +181,7 @@ heard of.
 | Skill | Role |
 |-------|------|
 | `skill-registry` | Rebuild the project skill index by running `_shared/build-skill-registry.sh`. |
-| `skill-creator` | Author new Agent Skills that follow the open spec format. |
+| `skill-creator` | Author a new Kurama skill and wire it into the registry, the manifest and the suite. |
 
 ### Quality & delivery
 

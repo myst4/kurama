@@ -133,30 +133,37 @@ command fails opaquely or, worse, runs the wrong thing.
 **Existing projects need no action.** A config that already has these keys keeps
 working unchanged; the propagated-value precedence is untouched.
 
-## `go-testing` moved to the opt-in `lang` group
+## Breaking change: `go-testing` is deleted and the `lang` group no longer exists
 
-The default install carries **one skill fewer**: `go-testing` moved to a new
-`lang` manifest group that is **OFF by default**.
+6.2.x parked the one language-specific skill in an opt-in `lang` group instead of
+deciding about it. This release decides: the skill file is **deleted** from the repo
+and the group that held it is gone from `skills/manifest.json`, from `setup.sh`, and
+from `install.sh`. On-disk skills go **29 → 28**; the default set is unchanged at 28,
+because the group was already off.
 
-**Why it moved.** It was the only language-specific skill shipped to every user of
-every language. The skill registry is already the agnostic extension point for
-per-language patterns, so the special case bought nothing and contradicted the
-stack-agnostic claim.
+**Why.** Parking it kept the contradiction alive in a quieter place. One ecosystem
+still had a skill written for it by the harness while every other ecosystem had to
+supply its own, and the group's whole population was that single file. A group with
+nothing in it is not an extension point — the skill registry is, and it always was.
 
-**Nothing was deleted.** The skill file is unchanged and still ships in the repo.
+**`--with lang` is now rejected.** It does not degrade to a no-op: an unknown group
+name fails with `Unknown skill group: lang (valid: quality, review, optional, tdd)`
+and stops the install. A silent no-op would let a command keep claiming it installs
+Go patterns forever. If that flag is in a script or a CI job, delete the flag.
 
-**If you rely on it**, add `--with lang`:
+**If you were installing it on purpose**, keep your own copy: pull
+`skills/go-testing/SKILL.md` from tag `v6.2.0` and drop it anywhere the skill registry
+scans (`~/.claude/skills/`, or `.claude/skills/` inside the project). Sub-agents then
+receive it exactly as before — the registry never cared who wrote a skill.
 
 ```bash
-./scripts/install.sh --agent claude-code --with lang
+mkdir -p ~/.claude/skills/go-testing
+git show v6.2.0:skills/go-testing/SKILL.md > ~/.claude/skills/go-testing/SKILL.md
 ```
 
-```powershell
-.\scripts\install.ps1 -Agent claude-code -With lang
-```
-
-Otherwise place your own language skills anywhere the skill registry scans, and they
-reach sub-agents as compact rules the same way.
+A future upstream sync cannot quietly restore it: `go-testing` is now on the
+**Deliberate removals stay removed** list in `.github/workflows/pr-check.yml`, which
+fails any PR whose docs advertise it again.
 
 ## Breaking change: the `none` artifact-store mode was removed
 

@@ -52,7 +52,7 @@ show_help() {
     echo "Options:"
     echo "  --agent NAME     Install for a specific agent (forwarded to setup.sh)"
     echo "  --path DIR       Target git repo for --agent custom (required for custom)"
-    echo "  --with GROUP     Include an optional skill group (quality, review, optional, tdd, lang)"
+    echo "  --with GROUP     Include an optional skill group (quality, review, optional, tdd)"
     echo "  --without GROUP  Exclude an on-by-default skill group (quality, review, optional, tdd)"
     echo "  --version        Print the Kurama version and exit"
     echo "  -h, --help       Show this help"

@@ -128,18 +128,20 @@ ENGRAM_BINARY_CHECKED=false   # ensure the binary probe/brew prompt runs at most
 SETUP_ACTIVE_GROUPS=" sdd-core quality review optional tdd "
 
 # #38: group selection, ported from install.sh so setup.sh alone can do a full
-# setup WITHOUT an on-by-default group (e.g. --without review) or WITH an opt-in
-# one (--with lang) — install.sh is now a thin wrapper that forwards these here.
-# sdd-core is mandatory; quality/review/optional/tdd are on by default and opt-out;
-# lang is off by default and opt-in. Kept in sync with skills/manifest.json "groups".
+# setup WITHOUT an on-by-default group (e.g. --without review) — install.sh is now
+# a thin wrapper that forwards these here. sdd-core is mandatory;
+# quality/review/optional/tdd are on by default and opt-out. Every group Kurama
+# ships is on by default, so --with only ever re-affirms one; the list is kept in
+# sync with skills/manifest.json "groups", and a name outside it is rejected
+# loudly rather than silently ignored.
 SETUP_REQUIRED_GROUPS=" sdd-core "
-SETUP_KNOWN_GROUPS="sdd-core quality review optional tdd lang"
+SETUP_KNOWN_GROUPS="sdd-core quality review optional tdd"
 
 setup_validate_group_name() {
     case "$1" in
-        sdd-core|quality|review|optional|tdd|lang) return 0 ;;
+        sdd-core|quality|review|optional|tdd) return 0 ;;
         *)
-            fail "Unknown skill group: $1 (valid: quality, review, optional, tdd, lang)"
+            fail "Unknown skill group: $1 (valid: quality, review, optional, tdd)"
             exit 1
             ;;
     esac
@@ -2898,7 +2900,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --without-pi-packages  Skip the Pi package stack (--agent pi, non-interactive)"
             echo "  --with-engram          Use Engram as the persistence engine (register its MCP)"
             echo "  --without-engram       Keep the built-in markdown persistence (default)"
-            echo "  --with GROUP           Include an optional skill group (quality, review, optional, tdd, lang)"
+            echo "  --with GROUP           Include an optional skill group (quality, review, optional, tdd)"
             echo "  --without GROUP        Exclude an on-by-default skill group (quality, review, optional, tdd)"
             echo "  --non-interactive      No prompts (for external installers)"
             echo "  -h, --help             Show this help"

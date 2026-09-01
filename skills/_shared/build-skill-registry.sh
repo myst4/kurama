@@ -264,9 +264,9 @@ fi
 #
 # Skipped when this copy is running out of the CLONE. setup.sh and update.sh both
 # invoke the builder from the repo, where `skills/` holds SOURCES — including
-# groups a default install deliberately excludes (`--without lang`). Indexing
-# them would advertise skills the project does not have, at paths inside somebody
-# else's checkout. `skills/manifest.json` sits beside `_shared/` in the clone and
+# groups a default install can deliberately exclude (`--without review`).
+# Indexing them would advertise skills the project does not have, at paths inside
+# somebody else's checkout. `skills/manifest.json` sits beside `_shared/` in the clone and
 # is never copied to an install, which is exactly the distinction.
 if [ ! -f "$INSTALLED_SKILLS_DIR/manifest.json" ]; then
     scan_root "$INSTALLED_SKILLS_DIR" user >> "$ROWS_RAW"
