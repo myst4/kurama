@@ -220,6 +220,54 @@ The system {MUST/SHALL/SHOULD} {behavior}.
 - THEN {outcome}
 ```
 
+### Step 4b: Lint Your Own Output (mechanical gate)
+
+**Run BEFORE Step 5. A delta you never linted is a delta whose structure rests entirely on
+your own reading of it** — and every rule above (whole-block MODIFIED, GIVEN/WHEN/THEN, stable
+IDs, RFC 2119) is mechanically checkable. `skills/_shared/lint-spec.sh` checks them.
+
+Resolve it with a **fail-loud existence check** — `test -f`, never a finder:
+
+```bash
+# In a Kurama clone the linter is skills/_shared/lint-spec.sh; in an installed
+# harness it sits beside this skill's directory as _shared/lint-spec.sh.
+# The `else` branch is the point: a missing linter is REPORTED, never silently skipped.
+if [ -f skills/_shared/lint-spec.sh ]; then
+  linter=skills/_shared/lint-spec.sh
+elif [ -f ../_shared/lint-spec.sh ]; then
+  linter=../_shared/lint-spec.sh
+else
+  linter=""
+  echo "lint-spec.sh not found — report this, do not claim a clean lint" >&2
+fi
+[ -n "$linter" ] && bash "$linter" openspec/changes/{change-name}/specs
+```
+
+- **openspec / hybrid**: run it on `openspec/changes/{change-name}/specs` (the directory —
+  it lints every domain spec under it).
+- **engram**: your spec is composed in memory, so write it to a temp file
+  (`mktemp "${TMPDIR:-/tmp}/sdd-spec.XXXXXX.md"`) and lint that path, then delete it. There is
+  no reason for engram mode to skip a check the filesystem modes get.
+
+What to do with the result:
+
+- **Exit 0, no output** → proceed to Step 5.
+- **Any `ERROR:` line** → FIX the spec and re-run, until the linter is clean. These are not
+  suggestions: an unknown delta section, a scenario without GIVEN/WHEN/THEN, a duplicate
+  scenario ID, a MODIFIED block carrying fewer scenarios than the baseline — each of them
+  merges into `openspec/specs/` as-is at archive time.
+- **Any `WARNING:` line** → fix it if you can (a `TBD` in a spec is an unanswered question,
+  not a specification); if you deliberately keep it, say WHY in your return summary.
+- **You cannot make it clean** — the linter reports a defect you have no basis to resolve
+  (e.g. a MODIFIED baseline you could not retrieve in Step 3) → return the **Section D**
+  envelope with `status: blocked`, quote the offending finding lines VERBATIM in
+  `executive_summary`, and set `next_recommended: sdd-spec`. Never persist a spec whose
+  linter findings you could not resolve.
+- **NEITHER path exists** (`test -f` fails on both) → the linter is not installed in this
+  harness. Say so plainly in your return summary — *"the delta-spec linter
+  (`_shared/lint-spec.sh`) is not present; delta structure was checked by reading only"* —
+  and continue. NEVER report a lint pass you did not run.
+
 ### Step 5: Persist Artifact
 
 **This step is MANDATORY — do NOT skip it.**
@@ -268,6 +316,7 @@ Ready for design (sdd-design). If design already exists, ready for tasks (sdd-ta
 - Deleting a scenario on purpose is legitimate: delete it from the copied full block AND say so in the `(Previously: ...)` line, so the archive's preservation readback can account for it
 - `REMOVED` requirements MUST carry `(Reason: ...)` and SHOULD carry `(Migration: ...)` when consumers, persisted behavior, docs, or tests are affected
 - `RENAMED` requirements MUST state old and new names explicitly and SHOULD carry `(Migration: ...)`; never model a rename as REMOVED + ADDED — that discards the requirement's scenario history and its stable scenario IDs
+- **ALWAYS run `skills/_shared/lint-spec.sh` on your own output before persisting it (Step 4b)**, in EVERY mode — resolve it with `test -f` (never a finder), fix every `ERROR:` it reports and re-run until clean, return `status: blocked` quoting the findings verbatim if you cannot, and state plainly that the check did not run when the script is absent. A structural defect you did not catch here merges into `openspec/specs/` at archive time, and that directory has exactly one writer
 - Apply any `rules.specs` from `openspec/config.yaml`
 - **Size budget**: Spec artifact MUST be under 650 words. Prefer requirement tables over narrative descriptions. Each scenario: 3-5 lines max. This budget NEVER justifies trimming scenarios out of a `MODIFIED` block — completeness outranks it (see *MODIFIED Requirements Workflow*).
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

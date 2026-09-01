@@ -137,6 +137,50 @@ FOR EACH REQUIREMENT in specs/:
 
 Note: This is static analysis only. Behavioral validation with real execution happens in Step 6.
 
+### Step 3a: Lint the Delta Spec (mechanical gate)
+
+Step 3 asks whether the implementation matches the spec. This step asks whether the SPEC is
+well-formed — a separate question, and the only one of the two that is mechanical.
+`skills/_shared/lint-spec.sh` checks the delta's structure against
+`skills/_shared/openspec-convention.md` → *Delta Spec Sections*: the four canonical section
+names, an RFC 2119 keyword per requirement, GIVEN/WHEN/THEN per scenario, `[S-{req}-{n}]` IDs
+unique and well-formed, RENAMED entries naming both names, no leftover template placeholders,
+and — the case that matters most — a MODIFIED block carrying FEWER scenarios than the same
+requirement currently has in `openspec/specs/**`.
+
+Resolve it with a **fail-loud existence check** — `test -f`, never a finder (`_shared/` is
+where the shared conventions live; the script sits beside them):
+
+```bash
+# Kurama clone: skills/_shared/lint-spec.sh. Installed harness: _shared/lint-spec.sh
+# beside this skill's directory. A missing linter is REPORTED, never silently skipped.
+if [ -f skills/_shared/lint-spec.sh ]; then
+  linter=skills/_shared/lint-spec.sh
+elif [ -f ../_shared/lint-spec.sh ]; then
+  linter=../_shared/lint-spec.sh
+else
+  linter=""
+fi
+[ -n "$linter" ] && bash "$linter" openspec/changes/{change-name}/specs
+```
+
+How the result is graded — this is a GATE, so the mapping is fixed:
+
+- **Every `ERROR:` line is a CRITICAL issue.** Quote the finding VERBATIM (`file:line: ERROR:
+  message`) in the report's **Issues Found → CRITICAL** list. A CRITICAL issue blocks the
+  archive, which is exactly right: `sdd-archive` is the only writer of `openspec/specs/`, and
+  an ERROR is a defect that merges into the source of truth unchanged.
+- **Every `WARNING:` line is a WARNING** in the same section. It does not block.
+- **Exit 0 with no output** → record "delta spec structure: clean (`lint-spec.sh`)".
+- **In `engram` mode** there is no `openspec/changes/` directory: write the retrieved delta
+  spec artifact to a temp file (`mktemp "${TMPDIR:-/tmp}/sdd-verify-spec.XXXXXX.md"`) and lint
+  that path. The check is not filesystem-mode-only.
+- **NEITHER path exists** → the linter is not installed in this harness. Report it as a
+  WARNING naming the path — *"the delta-spec linter (`_shared/lint-spec.sh`) is not present;
+  spec structure was checked by reading only"* — and continue with the rest of verification.
+  NEVER report a lint pass you did not run: an unrun check reported as clean is the one failure
+  mode a verification phase must not have.
+
 ### Step 4: Check Coherence (Design Match)
 
 Verify design decisions were followed:
@@ -333,11 +377,16 @@ recorded against code that was edited afterward would still archive. Compute a *
 hash** over a THROWAWAY git index; the real index is NEVER touched:
 
 ```bash
-# Run from the repository root. GIT_INDEX_FILE points at a temp file, so the working index is untouched.
-tmp_index="$(mktemp)"; rm -f "$tmp_index"   # git rejects a zero-byte index ("smaller than expected") — let it create a fresh one
-GIT_INDEX_FILE="$tmp_index" git add -A -- . ':(exclude)openspec' ':(exclude).kurama'
-tree_hash="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
-rm -f "$tmp_index"
+# Run from the repository root. GIT_INDEX_FILE points INSIDE a private temp directory, so the
+# working index is untouched. Never `mktemp` a file and then `rm` it to hand git a free path:
+# that unlinks a name anyone can recreate before git does (CWE-377), and the receipt this whole
+# step exists to make trustworthy would then be computed against an index someone else planted.
+# mktemp -d creates the directory 0700 and the index is born inside it.
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf -- "$tmp_dir"' EXIT
+GIT_INDEX_FILE="$tmp_dir/index" git add -A -- . ':(exclude)openspec' ':(exclude).kurama'
+tree_hash="$(GIT_INDEX_FILE="$tmp_dir/index" git write-tree)"
+rm -rf -- "$tmp_dir"
 ```
 
 - The two exclusions (`openspec/` artifact store, `.kurama/` harness state) keep the hash stable
@@ -533,8 +582,9 @@ Also surface the same hash to the orchestrator in the return envelope so it is s
 - ALWAYS run the **Work Unit Evidence Audit** (Step 2a) in EVERY mode — it is independent of `compliance_mode` and of `tdd.enabled`, and it is never skipped. A unit marked `[x]` with no evidence block, or with a claimed pass and no recorded command, is a WARNING at minimum and CRITICAL when that unit touched code; a rollback boundary that is missing or `N/A` is a WARNING; a recorded command whose recorded result is a FAILURE under an `[x]` is CRITICAL in both compliance modes
 - Step 2a and Step 6a COMPOSE, they do not substitute: with `tdd.enabled` true both run over the same apply report, the TDD audit adding scenario → test traceability and RED evidence on top of the always-on evidence block. Never skip one because the other ran, and never downgrade a Step 2a CRITICAL because TDD-audit findings are capped at WARNING
 - When `tdd.enabled` resolves true (Step 6a — same precedence as `compliance_mode`), run the two TDD-audit checks (scenario → test traceability for MUST scenarios; RED evidence in the apply report). Missing either is a WARNING labeled "test-after detected" — NEVER CRITICAL, and independent of `compliance_mode`. When `tdd.enabled` is false, skip Step 6a entirely
+- **ALWAYS run `skills/_shared/lint-spec.sh` over the change's delta specs (Step 3a), in EVERY mode** — resolve it with `test -f` (never a finder). Each `ERROR:` line is a CRITICAL issue quoted verbatim in the report; each `WARNING:` line is a WARNING; a missing script is a WARNING naming the path, never a silent pass. This is the mechanical half of spec review — structure is checkable, and a defect that reaches `sdd-archive` merges into `openspec/specs/` unchanged
 - Detect the test runner via `skills/_shared/test-runners.md` (Step 5b) — the single runner table shared with `sdd-apply` and `skills/tdd`
-- Stamp a **Content Binding** receipt (Step 6b): a `Tree-Hash` computed over a THROWAWAY git index (`GIT_INDEX_FILE` temp file — never the real index), excluding `openspec/` and `.kurama/`. Record it in the report's Content Binding section AND surface it in the return envelope (`Reviewed-Tree: {tree_hash}`) so the orchestrator stamps it into the state artifact. sdd-archive Step 0 and the archive-gate hook recompute it and block on a mismatch (STALE — re-run sdd-verify). Keep the pathspec byte-identical across all three
+- Stamp a **Content Binding** receipt (Step 6b): a `Tree-Hash` computed over a THROWAWAY git index (`GIT_INDEX_FILE` inside a `mktemp -d` directory — never the real index, and never an unlinked `mktemp` path), excluding `openspec/` and `.kurama/`. Record it in the report's Content Binding section AND surface it in the return envelope (`Reviewed-Tree: {tree_hash}`) so the orchestrator stamps it into the state artifact. sdd-archive Step 0 and the archive-gate hook recompute it and block on a mismatch (STALE — re-run sdd-verify). Keep the pathspec byte-identical across all three
 - If a REQUIRED artifact (`spec`, `tasks`) cannot be retrieved, return `status: blocked` naming it (E2) — never verify against a missing baseline
 - Compare against SPECS first (behavioral correctness), DESIGN second (structural correctness)
 - Be objective — report what IS, not what should be

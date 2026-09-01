@@ -115,11 +115,16 @@ changed since. Recompute the live hash with the IDENTICAL procedure (throwaway i
 index is never touched) and compare:
 
 ```bash
-# From the repository root. GIT_INDEX_FILE is a temp file, so the working index is untouched.
-tmp_index="$(mktemp)"; rm -f "$tmp_index"   # git rejects a zero-byte index — let it create a fresh one
-GIT_INDEX_FILE="$tmp_index" git add -A -- . ':(exclude)openspec' ':(exclude).kurama'
-live_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
-rm -f "$tmp_index"
+# From the repository root. GIT_INDEX_FILE points INSIDE a private temp directory, so the
+# working index is untouched. Never `mktemp` a file and then `rm` it to hand git a free path:
+# that unlinks a name anyone can recreate before git does (CWE-377), and this comparison is
+# exactly the one an attacker would want to win. mktemp -d creates the directory 0700 and the
+# index is born inside it.
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf -- "$tmp_dir"' EXIT
+GIT_INDEX_FILE="$tmp_dir/index" git add -A -- . ':(exclude)openspec' ':(exclude).kurama'
+live_tree="$(GIT_INDEX_FILE="$tmp_dir/index" git write-tree)"
+rm -rf -- "$tmp_dir"
 ```
 
 - Read the RECORDED hash from the report's `Tree-Hash` line — `openspec/changes/{change-name}/verify-report.md`
@@ -141,6 +146,51 @@ rm -f "$tmp_index"
 
 ### Step 1: Load Skills
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
+
+### Step 1a: Refuse a Structurally Invalid Delta (mechanical gate)
+
+BEFORE any merge. You are the ONLY writer of `openspec/specs/` — a structural defect that gets
+past you is in the source of truth, and nothing downstream re-checks it.
+`skills/_shared/lint-spec.sh` is the mechanical half of that check: canonical section names, an
+RFC 2119 keyword per requirement, GIVEN/WHEN/THEN per scenario, well-formed and unique
+`[S-{req}-{n}]` IDs, RENAMED entries naming both names, no leftover template placeholders, and
+a MODIFIED block that carries FEWER scenarios than the baseline in `openspec/specs/**` — the
+partial-MODIFIED data-loss case, caught before the merge instead of after it.
+
+Resolve it with a **fail-loud existence check** — `test -f`, never a finder:
+
+```bash
+# Kurama clone: skills/_shared/lint-spec.sh. Installed harness: _shared/lint-spec.sh
+# beside this skill's directory. A missing linter is REPORTED, never silently skipped.
+if [ -f skills/_shared/lint-spec.sh ]; then
+  linter=skills/_shared/lint-spec.sh
+elif [ -f ../_shared/lint-spec.sh ]; then
+  linter=../_shared/lint-spec.sh
+else
+  linter=""
+fi
+[ -n "$linter" ] && bash "$linter" openspec/changes/{change-name}/specs
+```
+
+**An `ERROR:` line REFUSES the merge.** Leave every main spec and the change folder exactly as
+you found them, return `status: blocked` with `next_recommended: sdd-spec`, and quote the
+offending `file:line: ERROR: message` lines VERBATIM in `executive_summary` / `risks`. Do NOT
+merge the clean domains and skip the broken one, do NOT edit the delta yourself to make it
+lint, and do NOT proceed on the reasoning that the merge would "probably" be fine. A blocked
+archive is recoverable; a malformed requirement admitted into `openspec/specs/` stays, and in
+`engram` mode there is no git history to recover it from.
+
+- `WARNING:` lines do NOT block. Record them in `risks` and continue.
+- **In `engram` mode**, write the retrieved delta spec artifact to a temp file
+  (`mktemp "${TMPDIR:-/tmp}/sdd-archive-spec.XXXXXX.md"`) and lint that path. The refusal is
+  identical — engram has LESS recovery, not more.
+- **Small changes**: lint the proposal's `## Spec (inline)` delta the same way, by extracting
+  that section to a temp file. Inline is where the delta lives on that path, not an exemption.
+- **NEITHER path exists** → the linter is not installed in this harness. This is NOT a refusal:
+  say so plainly in the archive report and in `risks` — *"the delta-spec linter
+  (`_shared/lint-spec.sh`) is not present; delta structure was checked by reading only"* — and
+  fall back to the Step 2 *Merge preservation readback*, which is mandatory regardless. NEVER
+  report a lint pass you did not run.
 
 ### Step 2: Sync Delta Specs to Main Specs
 
@@ -433,6 +483,7 @@ Ready for the next change.
 - ALWAYS run Step 0 first: NEVER archive when the verify report is missing or its verdict is `FAIL` / has unresolved CRITICAL issues, UNLESS an explicit user-authorized override is passed — and when it is, record the override verbatim in the archive report
 - ALWAYS revalidate the **content binding** in Step 0 when the report carries a `Tree-Hash`: recompute the live reviewed-tree hash (throwaway index, excluding `openspec/` and `.kurama/` — byte-identical to sdd-verify Step 6b and archive-gate.sh) and BLOCK on a mismatch with `"verify receipt stale — re-run sdd-verify"`. Only the same explicit override bypasses it; a legacy report with no `Tree-Hash` falls back to the verdict gate alone
 - ALWAYS write `.kurama/sdd/{change-name}/archive-report.md` on a successful archive, in EVERY mode (Step 5). It is the only signal that retires the cycle for `orchestrator-write-guard.sh`; without it the guard blocks the orchestrator indefinitely after the change is closed
+- ALWAYS run `skills/_shared/lint-spec.sh` over the delta BEFORE merging it (Step 1a), in EVERY mode — resolve it with `test -f` (never a finder). An `ERROR:` line REFUSES the merge: nothing is written, `status: blocked` with `next_recommended: sdd-spec`, findings quoted verbatim. `WARNING:` lines go to `risks` and do not block. A missing script is stated plainly in the report and falls back to the Step 2 preservation readback — never a silent pass
 - ALWAYS sync delta specs BEFORE moving to archive
 - Archival is a MECHANICAL filesystem operation: copy and move artifacts with `cp`/`cp -R`/`mv`/`git mv` in the shell, NEVER through model Read/Write — a model can truncate or alter bytes silently while reporting success, and only an independent `diff -r` catches it
 - ALWAYS run `diff -r` after every archive copy and move (source or pre-move snapshot vs. destination) and include its VERBATIM output in the phase result; EMPTY output is the only passing evidence, and a skipped, missing, or unreported `diff -r` FAILS the phase — agent self-report is never sufficient
