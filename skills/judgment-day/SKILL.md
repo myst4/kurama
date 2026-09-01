@@ -7,19 +7,26 @@ description: >
   after 2 fix iterations.
   Trigger: When user says "judgment day", "judgment-day", "review adversarial", "dual review",
   "doble review", "juzgar", "que lo juzguen".
-license: Apache-2.0
+license: MIT
 metadata:
   author: kurama
   version: "1.1"
 ---
 
-## When to Use
+## When this is worth two review rounds
 
-- User explicitly asks for "judgment day", "judgment-day", or equivalent trigger phrases
-- After significant implementations before merging
-- When high-confidence review of code, features, or architecture is needed
-- When a single reviewer might miss edge cases or have blind spots
-- When the cost of a production bug is higher than the cost of two review rounds
+This protocol costs two judges, a refuter, and up to two fix iterations. Spend it when:
+
+- the user asks for it by name — "judgment day", "judgment-day", or one of the trigger phrases
+  in the frontmatter;
+- an implementation is substantial and about to merge;
+- the target is code, a feature, or an architecture where you want a verdict you can act on
+  rather than an opinion;
+- one reviewer's blind spot is a plausible failure mode — the whole point of two lenses is that
+  they miss different things;
+- shipping the bug would cost more than running the rounds. That comparison is the real test,
+  and it is why this is not the default review path: `review-*` lenses handle a standard diff,
+  and this is the escalation.
 
 ## Severity & Blocking
 
@@ -33,7 +40,7 @@ Every finding carries one severity. Blocking is a property of severity, not of c
 
 **Blocking findings** = CRITICAL + WARNING. SUGGESTIONs are always reported but never gate approval, never enter the fix list, and never consume a refutation or fix iteration.
 
-## Critical Patterns
+## The protocol, pattern by pattern
 
 ### Pattern 0: Skill Resolution (BEFORE launching judges)
 
@@ -85,7 +92,7 @@ Found by exactly one judge                                  → Suspect (A only 
 
 **Tie-break rule**: when in doubt whether two findings are "the same", classify as **Suspect**, never silently as Confirmed. Confirmed must be earned by a real match; refutation (Pattern 3) exists precisely to adjudicate the doubtful cases. This keeps "Confirmed" statistically meaningful.
 
-Present the classified findings as a structured verdict table (see [Output Format](#output-format)).
+Present the classified findings as a structured verdict table (see [the report shape](#the-report-the-orchestrator-writes)).
 
 ### Pattern 3: Refutation of Suspects & Contradictions
 
@@ -114,7 +121,7 @@ After matching (Pattern 2) and refutation (Pattern 3), compute the **Confirmed b
 
 ---
 
-## Decision Tree
+## The whole loop in one view
 
 ```
 User asks for "judgment day"
@@ -200,7 +207,7 @@ The `task` binding above is **one example**, not a requirement. Any harness's eq
 
 ---
 
-## Sub-Agent Prompt Templates
+## The four prompts this skill sends
 
 ### Judge Prompt (shared skeleton — inject a distinct lens per judge)
 
@@ -287,7 +294,7 @@ Do not introduce new findings. Adjudicate only the list above.
 **Skill Resolution**: {injected|fallback-registry|fallback-path|none} — {details}
 ```
 
-### Fix Agent Prompt
+### Fix Agent Prompt (applies the confirmed blocking findings and nothing else)
 
 ```
 You are a surgical fix agent. You apply ONLY the confirmed blocking issues listed below.
@@ -320,7 +327,7 @@ Return a summary:
 
 ---
 
-## Output Format
+## The report the orchestrator writes
 
 ```markdown
 ## Judgment Day — {target}

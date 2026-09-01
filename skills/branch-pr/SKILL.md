@@ -3,27 +3,30 @@ name: branch-pr
 description: >
   PR creation workflow for Kurama following the issue-first enforcement system.
   Trigger: When creating a pull request, opening a PR, or preparing changes for review.
-license: Apache-2.0
+license: MIT
 metadata:
   author: kurama
   version: "2.0"
 ---
 
-## When to Use
+## When this runs
 
-Use this skill when:
-- Creating a pull request for any change
-- Preparing a branch for submission
-- Helping a contributor open a PR
+Reach for this the moment work stops being code and starts being a delivery: a branch about to
+be cut, a diff about to become one or more pull requests, or a contributor asking how to open
+one here. It covers the whole path from branch name to merged card.
 
 ---
 
-## Critical Rules
+## Non-negotiables
 
-1. **Every PR MUST link an approved issue** — no exceptions
-2. **Every PR MUST have exactly one `type:*` label**
-3. **Automated checks must pass** before merge is possible
-4. **Blank PRs without issue linkage will be blocked** by GitHub Actions
+Four requirements bind every PR this repo receives, including the ones you open yourself and
+every unit of a stacked chain:
+
+1. **An approved issue is linked** — there is no exception, and "small" is not one
+2. **Exactly one `type:*` label** — not zero, not two
+3. **Every automated check is green** before a merge is even possible
+4. **A PR with no issue linkage is rejected by GitHub Actions**, so an unlinked PR is not a
+   shortcut — it is a round trip
 
 ---
 
@@ -134,8 +137,9 @@ and stack them.
   `type/{issue}-{n}-{slug}`, `{n}` 1-based. Must still satisfy the Branch Naming regex
   below (lowercase, `a-z0-9._-` only).
 - **Each PR is standalone reviewable** — it passes on its own, links its own
-  `status:approved` issue, and carries exactly one `type:*` label. Every Critical Rule
-  applies to every PR in the chain.
+  `status:approved` issue, and carries exactly one `type:*` label. All four
+  non-negotiables bind every unit; a chain does not spread one issue's approval across
+  three PRs.
 - **base = previous PR's branch** (the first unit bases on `main`).
 - **Merge order is documented** in every PR body.
 
@@ -214,9 +218,10 @@ The regex is the same for both — it already admits digits.
 
 ---
 
-## PR Body Format
+## What the body must carry
 
-The PR template is at `.github/PULL_REQUEST_TEMPLATE.md`. Every PR body MUST contain:
+`.github/PULL_REQUEST_TEMPLATE.md` is the shipped shape; these six pieces are the ones a
+reviewer and the validation jobs both depend on, so none of them is optional:
 
 ### 1. Linked Issue (REQUIRED)
 
@@ -224,8 +229,9 @@ The PR template is at `.github/PULL_REQUEST_TEMPLATE.md`. Every PR body MUST con
 Closes #<issue-number>
 ```
 
-Valid closing keywords: `Closes #N`, `Fixes #N`, `Resolves #N` (case insensitive).
-The linked issue MUST have the `status:approved` label.
+Three keywords close an issue — `Closes #N`, `Fixes #N`, `Resolves #N` — and case does not
+matter. Whichever you use, that issue has to already carry `status:approved`; a PR against an
+unapproved issue fails validation rather than starting a discussion about the issue.
 
 **The branch number and this line MUST agree.** A branch named `type/{issue}-{slug}`
 carries the SAME `N` as its `Closes #N` / `Refs #N` — a branch numbered for one issue and
@@ -243,7 +249,8 @@ a body linking another is a broken trail. Fix the branch, not the body.
 
 ### 2. PR Type (REQUIRED)
 
-Check exactly ONE in the template and add the matching label:
+Tick a single checkbox in the template, then apply the label that goes with it — the checkbox
+is for the reader, the label is what the job reads:
 
 | Checkbox | Label to add |
 |----------|-------------|
@@ -256,7 +263,8 @@ Check exactly ONE in the template and add the matching label:
 
 ### 3. Summary
 
-1-3 bullet points of what the PR does.
+Between one and three bullets saying what this PR changes. Not why it was assigned, not what
+the issue said — what landed.
 
 ### 4. Changes Table
 
@@ -276,18 +284,19 @@ Check exactly ONE in the template and add the matching label:
 
 ### 6. Contributor Checklist
 
-All boxes must be checked:
-- Linked an approved issue
-- Added exactly one `type:*` label
-- Ran shellcheck on modified scripts
-- Skills tested in at least one agent
-- Docs updated if behavior changed
-- Conventional commit format
-- No `Co-Authored-By` trailers
+Every box in the template's checklist is ticked before the PR opens — an unticked box is a
+claim you have not made, and a reviewer reads it that way:
+- an approved issue is linked above
+- exactly **one** `type:*` label is on the PR
+- `shellcheck` was run over every modified script
+- the skills were loaded in at least one agent
+- docs were updated wherever behavior changed
+- the commits are conventional
+- no commit carries a `Co-Authored-By` trailer
 
 ---
 
-## Automated Checks (all must pass)
+## What CI blocks on
 
 | Check | Job name | What it verifies |
 |-------|----------|-----------------|
@@ -305,7 +314,7 @@ the orchestrator instructions and `skills/kanban-github/SKILL.md`). With kanban 
 of this runs and PR behavior is unchanged.
 
 - **Issue link.** The PR body's linked-issue line (already REQUIRED under *PR Body Format →
-  Linked Issue*) is what the board relies on: `Closes #{issue}` when the base is the default
+  Linked Issue*, in the body section above) is what the board relies on: `Closes #{issue}` when the base is the default
   branch (auto-links and auto-closes on merge), or `Refs #{issue}` when the base is not the
   default branch (the agent closes the issue explicitly after the merge — see Post-approval
   flow step 3).
@@ -364,9 +373,9 @@ instructions):**
 
 ---
 
-## Conventional Commits
+## Commit message format
 
-Commit messages MUST match this regex:
+Every commit message has to satisfy this regex:
 
 ```
 ^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9\._-]+\))?!?: .+
@@ -379,7 +388,7 @@ Commit messages MUST match this regex:
 - `!` — optional, indicates breaking change
 - `description` — required, starts after `: `
 
-Type-to-label mapping:
+Each type maps to exactly one PR label:
 
 | Commit type | PR label |
 |-------------|----------|
