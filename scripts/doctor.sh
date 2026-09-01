@@ -563,7 +563,14 @@ check_hooks() {
     # that is the state where something really did go missing after the install.
     local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
     local claims_scripts=false claims_settings=false
-    if manifest_json_array "$manifest" "files" | grep -q 'hooks/kurama/'; then
+    # Herestring, not a pipe (#65/#110). `producer | grep -q` makes grep exit on
+    # its first match while the producer is still writing, and the EPIPE/SIGPIPE
+    # that follows becomes the PIPELINE's status under `set -o pipefail` — so a
+    # receipt that DOES record the hook scripts reads as one that does not, and
+    # doctor grades a healthy install against the wrong branch. Hook entries sit
+    # near the head of files[], which is exactly when grep exits early: measured
+    # 0/40 correct verdicts once the list outgrows the pipe buffer, 40/40 here.
+    if grep -q 'hooks/kurama/' <<<"$(manifest_json_array "$manifest" "files")"; then
         claims_scripts=true
     fi
     if [ -n "$(manifest_json_array "$manifest" "settings" | awk 'NF')" ]; then

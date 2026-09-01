@@ -229,7 +229,10 @@ normalize_profile() { # raw -> normalized, or status 1
     [ "$val" != "$rest" ] || rest=""
     name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
     [ -n "$name" ] || name="kurama"
-    printf '%s' "$name" | grep -Eq '^[a-z0-9][a-z0-9-]*$' || return 1
+    # Herestring, not a pipe (#65/#110): `printf … | grep -q` leaves the producer
+    # writing into a pipe grep already closed, and under `set -o pipefail` that
+    # SIGPIPE becomes the pipeline's status — a valid name read as invalid.
+    grep -Eq '^[a-z0-9][a-z0-9-]*$' <<<"$name" || return 1
     if [ -n "$rest" ]; then printf '%s' "$name:$rest"; else printf '%s' "$name"; fi
 }
 
