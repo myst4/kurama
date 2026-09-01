@@ -48,6 +48,19 @@ standard:  propose → (spec ‖ design) → tasks
 small:     propose → tasks
 ```
 
+**Announce the gate you are skipping.** `sdd-ff` starts at `propose`: it never explores and it
+never brainstorms. That is the point of the fast path — a user typing `/sdd-ff` is saying *I know
+what I want* — but it must be an EXPLICIT bypass, never an accidental one. Before delegating
+`sdd-propose`, check for an `explore` artifact and a `brainstorm` ledger (`sdd/{change-name}/explore`
+and `sdd/{change-name}/brainstorm`, or `exploration.md` / `brainstorm.md` in openspec/hybrid). When
+NEITHER exists, print exactly one line and continue:
+
+> No exploration or brainstorm exists for `{change-name}` — fast-forwarding straight to proposal.
+> Use `/sdd-new {change-name}` if you want the gate.
+
+It is a **notice, not a question**: it never stops the run and never asks, so `auto` is unaffected.
+When either artifact exists, say nothing — the gate already happened.
+
 **Read the proposal's `## Change Size` before sequencing.** For `small`, `sdd-propose` already
 wrote the spec and design as sections inside the proposal, so the separate `sdd-spec` and
 `sdd-design` delegations are skipped — `tasks` reads them inline. An absent or unrecognized

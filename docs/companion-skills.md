@@ -34,10 +34,23 @@ present. None is required; none changes phase control flow.
 
 | superpowers skill | Kurama touchpoint | What it adds |
 |-------------------|-------------------|--------------|
-| `brainstorming` | `sdd-explore` / `sdd-propose` | A product/spec refinement round before the exploration or proposal is written — surfaces intent and requirements through structured questions. |
 | `systematic-debugging` | `sdd-apply` and `sdd-verify`-FAIL fix loops | Root-cause investigation before any fix — no patch lands until the failure is understood. |
 | `verification-before-completion` | `sdd-verify` / `sdd-archive` gates | Reinforces the completion gates with fresh, captured evidence before a change is declared done or archived. |
 | `receiving-code-review` | 4R review lenses and `judgment-day` | A rigorous way to process review findings — verify each point technically instead of performative agreement — when consuming lens or judge output. |
+
+**`brainstorming` is deliberately NOT paired.** It was listed here against `sdd-explore` /
+`sdd-propose` — both **sub-agents**, and brainstorming is *dialogue*: ask one question, wait for
+the human, gate on approval. A sub-agent has no human on the other side, so the pairing could
+never execute where it was declared. It also **owns its own artifacts** — it writes and commits a
+design spec under `docs/superpowers/specs/` and hands off to `writing-plans` — which would put a
+second source of truth beside `openspec/` and a handoff that bypasses `sdd-propose`. Kurama fills
+that slot itself, at the layer where a human is actually present: the
+[`sdd-brainstorm`](../skills/sdd-brainstorm/SKILL.md) skill, reached from the `sdd-new` brainstorm
+gate and run INLINE in the orchestrator. Its output is a decision ledger that feeds `sdd-explore`
+and `sdd-propose` by reference — an SDD artifact, not a parallel spec tree.
+
+The three rows above are *discipline* skills, not *dialogue* skills, which is why they work
+unchanged inside a sub-agent.
 
 ## TDD compatibility
 

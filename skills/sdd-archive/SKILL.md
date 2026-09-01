@@ -410,6 +410,7 @@ Return to the orchestrator:
 | {domain} | Created/Updated | {N added, M modified, K removed requirements} |
 
 ### Archive Contents
+- brainstorm.md ✅ (or "not present")
 - exploration.md ✅ (or "not present")
 - proposal.md ✅
 - specs/ ✅

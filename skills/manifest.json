@@ -19,7 +19,7 @@
       "required": false
     },
     "optional": {
-      "description": "Optional modules: the GitHub Projects kanban-github board and the sdd-learn MEMORY.md curator. Installed by default; opt out with --without optional. Installing the kanban-github module does not activate the board \u2014 activation stays opt-in per project via kanban.enabled. sdd-learn is active as soon as it installs; when it is absent the orchestrator skips the post-archive handoff silently.",
+      "description": "Optional modules: the GitHub Projects kanban-github board, the sdd-learn MEMORY.md curator, and the sdd-brainstorm decision-ledger interview. Installed by default; opt out with --without optional \u2014 which now drops THREE skills. Installing the kanban-github module does not activate the board \u2014 activation stays opt-in per project via kanban.enabled. sdd-learn and sdd-brainstorm are active as soon as they install; when either is absent the orchestrator skips its handoff (post-archive, brainstorm gate) silently.",
       "default": true,
       "required": false
     },
@@ -133,6 +133,10 @@
     },
     {
       "name": "sdd-learn",
+      "group": "optional"
+    },
+    {
+      "name": "sdd-brainstorm",
       "group": "optional"
     },
     {
