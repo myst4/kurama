@@ -13220,6 +13220,345 @@ run_test "every branch example shown matches the published regex" test_r_every_b
 echo ""
 
 # ============================================================================
+# ===== UNIT-X (issue #90) =====
+# Enforcement tiers: the two deterministic gates existed on Claude Code and
+# nowhere else, and the four other harnesses got the same rules as prose. Two
+# things are pinned here.
+#
+# 1. THE PORT. OpenCode's `tool.execute.before` can veto a tool call (throwing
+#    aborts it), so both gates now reach OpenCode through a plugin. The plugin is
+#    a THIN ADAPTER over the SAME two bash scripts — if it ever grows its own
+#    copy of the active-cycle detection, the path exemptions or the verdict
+#    parser, the two harnesses start enforcing two different contracts under one
+#    name. So the tests below assert PARITY (identical block/allow decisions on
+#    the same scenarios) rather than re-asserting the decisions themselves, plus
+#    one structural test that the adapter has not absorbed the logic.
+#
+# 2. THE TIER STATEMENT. Where no veto primitive ships, the gap must be visible
+#    BEFORE install — a per-harness row naming all five harnesses in README.md
+#    and docs/hooks.md, each saying enforced or advisory. Those assertions are
+#    mutation-checked against origin/main: the same check must FAIL on the
+#    pre-change file, or it is not testing anything.
+# ============================================================================
+
+OPENCODE_PLUGIN="$REPO_DIR/examples/opencode/plugins/kurama-sdd-gates.ts"
+
+# The driver that loads the shipped plugin and reports its decision. Written to a
+# temp dir rather than committed: it is scaffolding for this suite, not an
+# installed artifact. It fakes exactly the two things OpenCode supplies —
+# `PluginInput.directory`, and a `client.session.get` that answers with (or
+# without) a `parentID`, which is that harness's own subagent marker.
+write_parity_driver() {
+    cat > "$1" <<'PARITY_DRIVER'
+import { pathToFileURL } from "node:url"
+
+const [pluginPath, directory, kind, argsJson, parentID] = process.argv.slice(2)
+
+const client = {
+  session: {
+    get: async () => ({ data: parentID ? { id: "s1", parentID } : { id: "s1" } }),
+  },
+}
+
+let hooks
+try {
+  const mod = await import(pathToFileURL(pluginPath).href)
+  const factory = mod.default ?? mod.KuramaSddGates
+  hooks = await factory({ client, directory, project: {}, worktree: directory })
+} catch (error) {
+  console.error(`driver: ${error?.stack ?? error}`)
+  process.exit(3)
+}
+
+const args = JSON.parse(argsJson)
+try {
+  if (kind === "command") {
+    await hooks["command.execute.before"]({ command: args.command, sessionID: "s1", arguments: "" })
+  } else {
+    const tool = kind === "task" ? "task" : (args.__tool ?? "write")
+    delete args.__tool
+    await hooks["tool.execute.before"]({ tool, sessionID: "s1", callID: "c1" }, { args })
+  }
+  console.log("ALLOW")
+} catch {
+  console.log("BLOCK")
+}
+PARITY_DRIVER
+}
+
+# Node loads the plugin's TypeScript natively from 22.6 (behind
+# --experimental-strip-types) and by default from 22.18/23. Probe once for a
+# working invocation; an empty NODE_TS_CMD means "cannot run here", and the
+# section below then reports a SKIP with the reason rather than a silent pass.
+NODE_TS_CMD=()
+PARITY_DRIVER_PATH=""
+PARITY_DRIVER_DIR=""
+probe_node_ts() {
+    command -v node >/dev/null 2>&1 || return 0
+    local probe="${TMPDIR:-/tmp}/kurama-ts-probe-$$.ts"
+    printf 'const n: number = 1\nprocess.stdout.write(String(n))\n' > "$probe"
+    if node --no-warnings "$probe" >/dev/null 2>&1; then
+        NODE_TS_CMD=(node --no-warnings)
+    elif node --no-warnings --experimental-strip-types "$probe" >/dev/null 2>&1; then
+        NODE_TS_CMD=(node --no-warnings --experimental-strip-types)
+    fi
+    rm -f "$probe"
+    return 0
+}
+
+# The plugin's decision for one scenario: "ALLOW" or "BLOCK".
+#   $1 repo  $2 kind (write|task|command)  $3 args JSON  $4 optional parentID
+plugin_decides() {
+    local repo="$1" kind="$2" args="$3" parent="${4:-}"
+    KURAMA_HOOKS_DIR="$REPO_DIR/examples/claude-code/hooks" \
+        "${NODE_TS_CMD[@]}" "$PARITY_DRIVER_PATH" "$OPENCODE_PLUGIN" "$repo" "$kind" "$args" "$parent" \
+        2>/dev/null | head -n 1
+}
+
+# The bash gate's decision for the SAME scenario, in the same two words, so the
+# two sides are compared on one vocabulary.
+bash_decides() {
+    local hook="$1" payload="$2"
+    run_hook "$hook" "$payload"
+    if [ "$HOOK_STATUS" -eq 2 ]; then printf 'BLOCK'; else printf 'ALLOW'; fi
+}
+
+test_x_write_guard_parity_between_the_plugin_and_the_bash_hook() {
+    # The four scenarios the bash write-guard tests already pin, driven through
+    # the OpenCode plugin. What would make this pass for the wrong reason: a
+    # plugin (or a driver) that answers ALLOW to everything — so each case also
+    # pins what the bash side must say, and the mutation test below proves the
+    # comparison can produce two different answers at all.
+    local repo="$TEST_TMPDIR/x-guard"
+    make_active_cycle_repo "$repo"
+
+    local expected actual
+    # (a) main-thread write to repository code, cycle active -> blocked.
+    expected="$(bash_decides "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "src/widget.ts")")"
+    actual="$(plugin_decides "$repo" write '{"__tool":"edit","filePath":"src/widget.ts"}')"
+    assert_eq "BLOCK" "$expected" "precondition: the bash guard must block this write" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash guard must agree on a main-thread code write" || return 1
+
+    # (b) the same write from a subagent -> allowed. On Claude Code the marker is
+    #     a root agent_id; on OpenCode it is the session's parentID.
+    expected="$(bash_decides "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" "src/widget.ts" "agent_7")")"
+    actual="$(plugin_decides "$repo" write '{"__tool":"edit","filePath":"src/widget.ts"}' "parent_1")"
+    assert_eq "ALLOW" "$expected" "precondition: a subagent write must pass the bash guard" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash guard must agree on a delegated write" || return 1
+
+    # (c) the SDD artifact paths stay writable mid-cycle.
+    expected="$(bash_decides "$WRITE_GUARD_HOOK" "$(edit_payload "$repo" ".kurama/sdd/add-widget/state.md")")"
+    actual="$(plugin_decides "$repo" write '{"__tool":"write","filePath":".kurama/sdd/add-widget/state.md"}')"
+    assert_eq "ALLOW" "$expected" "precondition: the marker path must stay writable" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash guard must agree on an exempt path" || return 1
+
+    # (d) no active cycle -> nothing is guarded at all.
+    local clean="$TEST_TMPDIR/x-guard-clean"
+    make_git_repo "$clean"
+    mkdir -p "$clean/src"
+    printf 'x\n' > "$clean/src/app.ts"
+    expected="$(bash_decides "$WRITE_GUARD_HOOK" "$(edit_payload "$clean" "src/app.ts")")"
+    actual="$(plugin_decides "$clean" write '{"__tool":"write","filePath":"src/app.ts"}')"
+    assert_eq "ALLOW" "$expected" "precondition: a repo with no cycle must not be guarded" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash guard must agree when no cycle is active" || return 1
+    return 0
+}
+
+test_x_archive_gate_parity_between_the_plugin_and_the_bash_hook() {
+    # The gate reads the INVOKED IDENTITY (skill / subagent_type / description)
+    # out of tool_input, so the adapter has to forward those exact fields —
+    # OpenCode's task args for the Task spelling, the command name for the Skill
+    # spelling. A field the gate does not read reads as "no identity at all", and
+    # then every archive sails through while the tier table still says enforced.
+    local repo="$TEST_TMPDIR/x-gate"
+    make_active_cycle_repo "$repo"
+
+    local expected actual
+    # (a) no verify report -> the archive is refused (fails closed).
+    expected="$(bash_decides "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)")"
+    actual="$(plugin_decides "$repo" task '{"subagent_type":"sdd-archive"}')"
+    assert_eq "BLOCK" "$expected" "precondition: no report means the bash gate is shut" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash gate must agree with no verify report" || return 1
+
+    # (b) the slash-command door, which single-mode OpenCode uses instead of task.
+    actual="$(plugin_decides "$repo" command '{"command":"sdd-archive"}')"
+    assert_eq "$expected" "$actual" "the command path must reach the same gate as the task path" || return 1
+
+    # (c) a PASS verdict opens it.
+    write_verify_report "$repo" add-widget "PASS WITH WARNINGS"
+    expected="$(bash_decides "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)")"
+    actual="$(plugin_decides "$repo" task '{"subagent_type":"sdd-archive"}')"
+    assert_eq "ALLOW" "$expected" "precondition: a PASS verdict must open the bash gate" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash gate must agree on a PASS verdict" || return 1
+
+    # (d) a FAIL verdict shuts it again.
+    write_verify_report "$repo" add-widget "FAIL"
+    expected="$(bash_decides "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)")"
+    actual="$(plugin_decides "$repo" task '{"subagent_type":"sdd-archive"}')"
+    assert_eq "BLOCK" "$expected" "precondition: a FAIL verdict must shut the bash gate" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash gate must agree on a FAIL verdict" || return 1
+
+    # (e) every other launch is none of the gate's business.
+    expected="$(bash_decides "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-apply)")"
+    actual="$(plugin_decides "$repo" task '{"subagent_type":"sdd-apply"}')"
+    assert_eq "ALLOW" "$expected" "precondition: an sdd-apply launch is not gated" || return 1
+    assert_eq "$expected" "$actual" "plugin and bash gate must agree on a non-archive launch" || return 1
+    return 0
+}
+
+test_x_the_parity_harness_can_actually_fail() {
+    # The mutation check. Everything above compares two values; if the driver
+    # returned a constant, or the plugin never reached the scripts, the
+    # comparisons would agree for the wrong reason. So flip ONE input that must
+    # change the decision — the same write, once as the main thread and once as a
+    # subagent — and require the two answers to DIFFER. A harness that cannot
+    # produce two different answers was never testing anything.
+    local repo="$TEST_TMPDIR/x-mutation"
+    make_active_cycle_repo "$repo"
+    local main_thread subagent
+    main_thread="$(plugin_decides "$repo" write '{"__tool":"edit","filePath":"src/widget.ts"}')"
+    subagent="$(plugin_decides "$repo" write '{"__tool":"edit","filePath":"src/widget.ts"}' "parent_1")"
+    assert_eq "BLOCK" "$main_thread" "the plugin must block a main-thread write during a cycle" || return 1
+    assert_eq "ALLOW" "$subagent" "the plugin must allow the same write from a subagent" || return 1
+    [ "$main_thread" != "$subagent" ] || {
+        echo "the parity harness returns the same answer for both inputs — it is vacuous"; return 1; }
+    return 0
+}
+
+test_x_the_plugin_is_an_adapter_not_a_second_implementation() {
+    # The whole reason the port shells out: two implementations of these gates
+    # drift, and the drift is silent because both harnesses go on reporting
+    # "enforced". This test is the tripwire, and it needs no node.
+    assert_file_exists "$OPENCODE_PLUGIN" || return 1
+    local flat
+    flat="$(flatten_file "$OPENCODE_PLUGIN")"
+
+    assert_matches "$flat" 'orchestrator-write-guard\.sh' \
+        "the plugin naming the write-guard script it delegates to" || return 1
+    assert_matches "$flat" 'archive-gate\.sh' \
+        "the plugin naming the archive-gate script it delegates to" || return 1
+    assert_matches "$flat" 'spawn' \
+        "the plugin running the gate as a process instead of reimplementing it" || return 1
+    assert_matches "$flat" 'parentID' \
+        "the OpenCode subagent marker the write guard needs" || return 1
+
+    # And it must NOT carry a private copy of any gate decision. Each literal
+    # below is load-bearing in exactly one of the two scripts; finding one here
+    # means the logic has begun migrating out of them.
+    local forbidden
+    for forbidden in 'state\.yaml' 'archive-report\.md' 'Tree-Hash' 'PASS WITH WARNINGS' 'write-tree' 'openspec/changes'; do
+        assert_not_matches "$flat" "$forbidden" \
+            "a private copy of gate logic ($forbidden) — the decision stays in the bash scripts" || return 1
+    done
+    return 0
+}
+
+# --- the tier statement -----------------------------------------------------
+# A doc assertion is only worth running if it would have failed before the
+# change, so each one runs against origin/main's copy of the same file first.
+# `git show` failing (a shallow clone, no origin) is REPORTED, never skipped
+# silently — a missing baseline would turn the mutation check into a free pass.
+
+# Every harness must have a row that both names it and assigns it a tier, on the
+# SAME line. Matching the two words anywhere in the file would pass on prose that
+# happens to use them; a per-harness row is the thing a reader actually acts on.
+tier_rows_are_complete() {
+    local file="$1" harness
+    grep -qiE 'enforced' "$file" 2>/dev/null || return 1
+    grep -qiE 'advisory' "$file" 2>/dev/null || return 1
+    for harness in 'Claude Code' 'OpenCode' 'Codex' '(^|[^A-Za-z])Pi([^A-Za-z]|$)' '(^|[^A-Za-z])omp([^A-Za-z]|$)'; do
+        grep -E "$harness" "$file" 2>/dev/null | grep -qiE 'enforced|advisory' || return 1
+    done
+    return 0
+}
+
+assert_tier_rows_are_new_in() {
+    local rel="$1"
+    tier_rows_are_complete "$REPO_DIR/$rel" || {
+        echo "$rel has no enforced/advisory row for all five harnesses"; return 1; }
+
+    local baseline
+    baseline="$TEST_TMPDIR/baseline-$(basename "$rel")"
+    if ! git -C "$REPO_DIR" show "origin/main:$rel" > "$baseline" 2>/dev/null; then
+        echo "could not read origin/main:$rel — the mutation check has no baseline"
+        return 1
+    fi
+    [ -s "$baseline" ] || {
+        echo "origin/main:$rel is empty — the mutation check has no baseline"; return 1; }
+    if tier_rows_are_complete "$baseline"; then
+        echo "origin/main:$rel already satisfies this assertion — it does not test the change"
+        return 1
+    fi
+    return 0
+}
+
+test_x_readme_states_the_enforcement_tier_per_harness() {
+    # A user choosing a harness has to see, BEFORE installing, whether the two
+    # gates are mechanism or prose there. The support matrix is where they look.
+    assert_tier_rows_are_new_in "README.md" || return 1
+    return 0
+}
+
+test_x_hooks_doc_states_the_enforcement_tier_per_harness() {
+    # docs/hooks.md is the page that explains what the gates guarantee, so it is
+    # the page that has to say where they do not.
+    assert_tier_rows_are_new_in "docs/hooks.md" || return 1
+    return 0
+}
+
+test_x_the_tier_statement_gives_a_reason_per_harness() {
+    # A table of verdicts with no reasons is one nobody can act on or re-check.
+    # Each tier has to name the primitive it was decided on — that is the claim a
+    # future reader verifies against the harness when it ships a new version.
+    local flat
+    flat="$(flatten_file "$REPO_DIR/docs/hooks.md")"
+    assert_matches "$flat" 'tool\.execute\.before' \
+        "the OpenCode primitive the port rests on" || return 1
+    assert_matches "$flat" 'tool_call' \
+        "the Pi/omp primitive, named as verified even though no port ships yet" || return 1
+    assert_matches "$flat" 'SessionStart' \
+        "the Codex hook surface, named as the reason its tier is advisory" || return 1
+    return 0
+}
+
+test_x_no_prompt_bytes_were_spent_on_the_tier_statement() {
+    # The five generated orchestrator prompts are at their byte budget (omp has
+    # tens of bytes of headroom), so the tier statement lives in docs and nowhere
+    # else. This pins that it stayed there.
+    local f
+    for f in "examples/omp/AGENTS.md" "examples/pi/AGENTS.md" "examples/opencode/AGENTS.md" \
+             "examples/claude-code/CLAUDE.md" "examples/codex/agents.md" "examples/_templates"; do
+        if ! git -C "$REPO_DIR" diff --quiet origin/main -- "$f"; then
+            echo "$f changed — the prompt budget is exhausted; the tier statement belongs in docs"
+            return 1
+        fi
+    done
+    return 0
+}
+
+echo -e "${BOLD}UNIT-X (issue #90): enforcement tiers${NC}"
+run_test "the plugin is an adapter, not a second implementation" test_x_the_plugin_is_an_adapter_not_a_second_implementation
+run_test "README states the enforcement tier per harness" test_x_readme_states_the_enforcement_tier_per_harness
+run_test "docs/hooks.md states the enforcement tier per harness" test_x_hooks_doc_states_the_enforcement_tier_per_harness
+run_test "each tier names the primitive it was decided on" test_x_the_tier_statement_gives_a_reason_per_harness
+run_test "the tier statement cost zero prompt bytes" test_x_no_prompt_bytes_were_spent_on_the_tier_statement
+
+probe_node_ts
+if [ "${#NODE_TS_CMD[@]}" -gt 0 ]; then
+    PARITY_DRIVER_DIR="$(mktemp -d)"
+    PARITY_DRIVER_PATH="$PARITY_DRIVER_DIR/parity-driver.mjs"
+    write_parity_driver "$PARITY_DRIVER_PATH"
+    run_test "write guard: plugin and bash hook decide alike" test_x_write_guard_parity_between_the_plugin_and_the_bash_hook
+    run_test "archive gate: plugin and bash hook decide alike" test_x_archive_gate_parity_between_the_plugin_and_the_bash_hook
+    run_test "the parity harness can actually fail" test_x_the_parity_harness_can_actually_fail
+    rm -rf "$PARITY_DRIVER_DIR"
+else
+    echo -e "  ${YELLOW}SKIP${NC} OpenCode plugin parity — node here cannot load TypeScript (needs node >= 22.6); the bash gates stay covered above"
+fi
+
+echo ""
+
+# ============================================================================
 # UNIT-Q (issues #87, #100): the envelope's Key Learnings closing, and reaping
 # the sub-agent that sent it
 #

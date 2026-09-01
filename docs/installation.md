@@ -461,6 +461,12 @@ missing — prints the exact manual steps rather than ever `sed`-editing JSON.
 Both the scripts and the touched `settings.json` are recorded in the install
 receipt. See [docs/hooks.md](hooks.md) for what each gate enforces.
 
+**Enforcement tier: enforced.** Claude Code is the harness these gates were built
+for, and the only one where both run through a first-party hook contract. The same
+two scripts also back the OpenCode plugin; the other three harnesses get the rules
+as prose. The per-harness verdicts, and the reason behind each, are in
+[docs/hooks.md](hooks.md#enforcement-tiers--what-each-harness-actually-guarantees).
+
 ---
 
 ## OpenCode
@@ -575,6 +581,40 @@ In **single** mode there are no `sdd-<phase>` agents to point at: `opencode.sing
 
 </details>
 
+<a id="opencode-gate-plugin"></a>
+**Enforcement tier: enforced.** OpenCode is the second harness where Kurama's two
+deterministic gates are a *mechanism* rather than prose. The plugin
+[`examples/opencode/plugins/kurama-sdd-gates.ts`](../examples/opencode/plugins/kurama-sdd-gates.ts)
+subscribes to `tool.execute.before` (and `command.execute.before`, for the
+slash-command route single mode uses) and **throws** to veto the call — the only
+veto the hook's `Promise<void>` signature allows, and one OpenCode honours because
+it awaits the hook before the tool body without catching it.
+
+The plugin is a **thin adapter, not a second implementation**: it translates the
+OpenCode event into the same JSON payload Claude Code's `PreToolUse` hooks read on
+stdin, runs the *same* two scripts from `examples/claude-code/hooks/`, and turns
+their exit 2 back into a thrown error. Two fields OpenCode does not put in the
+event are recovered from the plugin input — `cwd` from `PluginInput.directory`,
+and the subagent marker from the session's `parentID` (the task tool creates a
+child session with `parentID` set, which is OpenCode's equivalent of Claude Code's
+`agent_id`, so delegated writers pass exactly as they do there).
+
+Installed layout:
+
+```
+~/.config/opencode/plugins/kurama-sdd-gates.ts        # the adapter (auto-discovered)
+~/.config/opencode/kurama/hooks/orchestrator-write-guard.sh
+~/.config/opencode/kurama/hooks/archive-gate.sh       # the decision logic
+```
+
+With `--scope project` the same three land under `<repo>/.opencode/plugins/` and
+`<repo>/.opencode/kurama/hooks/`. `KURAMA_HOOKS_DIR` overrides the search if you
+keep the scripts somewhere else. The escape hatches are unchanged and still read
+from the environment: `KURAMA_ORCHESTRATOR_GUARD=0`, `KURAMA_GUARD_BYPASS=1`,
+`KURAMA_ARCHIVE_OVERRIDE=1`. If the scripts are missing, the write guard warns
+once and allows (matching its documented fail-open posture) while the archive gate
+refuses the archive (matching its fail-closed one) — neither degrades silently.
+
 **How to use in OpenCode:**
 - Start OpenCode in your project: `opencode .`
 - Use the agent picker (Tab) and choose `sdd-orchestrator`
@@ -611,6 +651,16 @@ Append the contents of [`examples/codex/agents.md`](../examples/codex/agents.md)
 **Verify:** Open Codex and type `/sdd-init`.
 
 > **Note:** Codex runs skills inline rather than as true sub-agents. The planning phases still work well; implementation batching is handled by the orchestrator instructions.
+
+**Enforcement tier: advisory.** Kurama's two deterministic gates do **not** run on
+Codex. There is no pre-tool event to hook — the Codex hooks surface in use is
+`SessionStart` in `~/.codex/hooks.json`, a lifecycle event — and because skills run
+inline rather than as sub-agents, the orchestrator/executor boundary the write
+guard enforces is not expressible here at all. The delegate-only rule and the
+no-PASS-no-archive rule are still in the orchestrator prompt, and
+`archive-gate.sh <change>` still runs standalone, so the recommended backstop is a
+CI step or a manual run before closing a change. See
+[docs/hooks.md](hooks.md#enforcement-tiers--what-each-harness-actually-guarantees).
 
 **Project-level convention (documented, not installed by default).** Codex CLI
 also scans a project-level `.agents/skills/` directory in addition to the
@@ -675,6 +725,17 @@ and re-runnable.
 > orchestrator-level model table is injected; the installed agents inherit the
 > session's default model. Like Codex, Pi reads the skills as inline
 > instructions rather than spawning true fresh-context sub-agents.
+
+**Enforcement tier: advisory.** Pi *does* expose a veto primitive — an extension
+may register `pi.on("tool_call", …)` and return `{ block: true, reason }` to refuse
+a tool call before it runs — but neither of Kurama's gates ports cleanly onto it
+yet. The write guard needs to tell the main thread from a delegated writer, and
+Pi's `tool_call` event carries no agent identity, so the guard would block the
+delegated writer too. The archive gate needs a launch to intercept, and Pi injects
+skills into the prompt rather than invoking them as a tool, so no call carries the
+`sdd-archive` identity. Until both are solved the rules stay prose here; run
+`archive-gate.sh <change>` manually or in CI as the backstop. Reasons in full:
+[docs/hooks.md](hooks.md#enforcement-tiers--what-each-harness-actually-guarantees).
 
 <a id="native-pi-subagents-installed-automatically"></a>
 ### Native Pi subagents (installed automatically)
@@ -795,6 +856,15 @@ path above moves with it.
 > `<!-- BEGIN:kurama -->` / `<!-- END:kurama -->` markers. With
 > `--scope project` everything lands under `<repo>/.omp/` instead — skills, agents,
 > `RULES.md`, and `AGENTS.md`.
+
+**Enforcement tier: advisory.** Like Pi, omp honours a `tool_call` extension hook
+that can return `{ block: true, reason }` — its runtime uses that same shape to
+report an extension that failed or timed out — so the primitive is there. The two
+gates do not port yet for the same two reasons as Pi: the event carries no agent
+identity for the write guard to discriminate on, and there is no skill-invocation
+call for the archive gate to intercept. The rules stay prose here; run
+`archive-gate.sh <change>` manually or in CI. Reasons in full:
+[docs/hooks.md](hooks.md#enforcement-tiers--what-each-harness-actually-guarantees).
 
 ### Why omp needs its own agent set
 

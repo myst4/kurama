@@ -247,14 +247,26 @@ and `openspec` named as its replacement. See
 
 The same skills install everywhere; sub-agent support depends on what each host
 exposes. "Full" means true sub-agents with isolated, fresh context windows.
+**Enforcement** is a separate axis — see the tier column below.
 
-| Harness | Sub-agent support | Setup |
-|---------|:-----------------:|-------|
-| Claude Code | Full (Task tool, fresh-context sub-agents) | `setup.sh --agent claude-code` |
-| OpenCode | Full (native phase agents via the built-in `task` tool, which blocks) | `setup.sh --agent opencode` |
-| Codex | Inline (skills load as instructions) | `setup.sh --agent codex` |
-| Pi | Inline (skills load as instructions) | `setup.sh --agent pi` (global `~/.pi/agent/AGENTS.md`; see installation guide) |
-| omp | Full (native task agents, isolated per-phase contexts) | `setup.sh --agent omp` (global `~/.omp/agent/`; see installation guide) |
+| Harness | Sub-agent support | Gate enforcement | Setup |
+|---------|:-----------------:|:----------------:|-------|
+| Claude Code | Full (Task tool, fresh-context sub-agents) | **Enforced** (`PreToolUse` hooks) | `setup.sh --agent claude-code` |
+| OpenCode | Full (native phase agents via the built-in `task` tool, which blocks) | **Enforced** (`tool.execute.before` plugin) | `setup.sh --agent opencode` |
+| Codex | Inline (skills load as instructions) | Advisory (no pre-tool event) | `setup.sh --agent codex` |
+| Pi | Inline (skills load as instructions) | Advisory (no agent identity in the event) | `setup.sh --agent pi` (global `~/.pi/agent/AGENTS.md`; see installation guide) |
+| omp | Full (native task agents, isolated per-phase contexts) | Advisory (no agent identity in the event) | `setup.sh --agent omp` (global `~/.omp/agent/`; see installation guide) |
+
+> **What "Gate enforcement" means.** Kurama's two hardest structural rules —
+> *the orchestrator delegates, it never edits code mid-cycle*, and *never archive
+> a change that did not pass verification* — exist as prose in every orchestrator
+> prompt, and as deterministic gates on some harnesses. **Enforced** means a
+> mechanism refuses the tool call: the model cannot forget it or argue with it.
+> **Advisory** means only the prose stands, and prose can fall out of context.
+> This is a real difference in what an install protects you from, so it is stated
+> here rather than left to be discovered. The per-harness reasons — including the
+> two harnesses where a veto primitive is verified but neither gate ports cleanly
+> yet — are in [docs/hooks.md](docs/hooks.md#enforcement-tiers--what-each-harness-actually-guarantees).
 
 > **OpenCode delegation is synchronous.** Kurama no longer ships the
 > `background-agents.ts` plugin, so there is no async `delegate` tool: both OpenCode
@@ -269,7 +281,10 @@ phases plus 8 review-layer agents — the 4R lenses, refuter, two Judgment Day j
 and the fix agent) into `~/.claude/agents/`, each with its own `tools`/`model`
 frontmatter (the read-only lenses are enforced read-only by that `tools` list), and
 **always installs the two deterministic hooks** (a write-guard and an archive-gate,
-merged into `settings.json`). On **Pi**, `setup.sh --agent pi` installs the **same
+merged into `settings.json`). On **OpenCode**, the same two gates run through
+`plugins/kurama-sdd-gates.ts` — a thin adapter that hands the OpenCode
+`tool.execute.before` event to the *same* two scripts, so both harnesses enforce
+one implementation rather than two that drift. On **Pi**, `setup.sh --agent pi` installs the **same
 17 agents** in Pi's format into `~/.pi/agent/agents/`, and can optionally add a
 curated, consent-gated stack of Pi runtime packages (persistent memory, MCP adapter,
 native subagents, ask-user, web access, todo, side-conversations) at pinned versions
