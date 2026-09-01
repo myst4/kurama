@@ -19,7 +19,7 @@
       "required": false
     },
     "optional": {
-      "description": "Optional modules: the GitHub Projects kanban-github board, the sdd-learn MEMORY.md curator, and the sdd-brainstorm decision-ledger interview. Installed by default; opt out with --without optional \u2014 which now drops THREE skills. Installing the kanban-github module does not activate the board \u2014 activation stays opt-in per project via kanban.enabled. sdd-learn and sdd-brainstorm are active as soon as they install; when either is absent the orchestrator skips its handoff (post-archive, brainstorm gate) silently.",
+      "description": "Optional modules: the GitHub Projects kanban-github board, the sdd-learn MEMORY.md curator, the sdd-brainstorm decision-ledger interview, the kurama-report upstream failure reporter, and the systemic-issue-triage root-cause partitioner. Installed by default; opt out with --without optional \u2014 which now drops FIVE skills. Installing the kanban-github module does not activate the board \u2014 activation stays opt-in per project via kanban.enabled. The other four are active as soon as they install; when one is absent the orchestrator skips its handoff (post-archive, brainstorm gate, upstream report, batch triage) silently. kurama-report lives here on purpose: a user who does not want outward-facing reports to myst4/kurama drops the group and the path stops existing.",
       "default": true,
       "required": false
     },
@@ -137,6 +137,14 @@
     },
     {
       "name": "sdd-brainstorm",
+      "group": "optional"
+    },
+    {
+      "name": "kurama-report",
+      "group": "optional"
+    },
+    {
+      "name": "systemic-issue-triage",
       "group": "optional"
     },
     {
