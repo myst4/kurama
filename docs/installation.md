@@ -9,6 +9,8 @@ For manual installation or specific tools, see below.
 
 ## Table of Contents
 - [Install scope: global vs. project (trial a repo)](#install-scope-global-vs-project-trial-a-repo)
+  - [Machine-local files and your `.gitignore`](#machine-local-files-and-your-gitignore)
+  - [When the repo already has its own workflow](#when-the-repo-already-has-its-own-workflow)
 - [Engram (optional persistence engine)](#engram-optional-persistence-engine)
 - [Session identity: persona and name](#session-identity-persona-and-name)
 - [Claude Code](#claude-code)
@@ -137,10 +139,93 @@ Where project scope writes, per harness:
 The install **receipt** (`.kurama-install-manifest.json`) lands at the **repo
 root** for project scope (in the skills dir for global scope), and records the
 scope, version, every installed file, the touched `settings.json`, any Pi
-packages, any Engram MCP registrations, and — for OpenCode — the `opencode.json`
-it merged agents into plus the resolved `--opencode-mode`/`--opencode-profile`,
-so `uninstall.sh`, `update.sh`, and `doctor.sh` (all of which accept the same
+packages, any Engram MCP registrations, the `.gitignore` carrying the managed
+machine-local block, and — for OpenCode — the `opencode.json` it merged agents
+into plus the resolved `--opencode-mode`/`--opencode-profile`, so
+`uninstall.sh`, `update.sh`, and `doctor.sh` (all of which accept the same
 `--scope`/`--path`) operate on exactly what was installed.
+
+### Machine-local files and your `.gitignore`
+
+Project scope writes files into your repo that are **machine-local** — they
+carry absolute paths and per-machine state, and committing them hands a
+teammate your paths. So in project scope, and **only** when the target is a git
+repository, `setup.sh` ensures a **managed block** in the repo root's
+`.gitignore`:
+
+```gitignore
+# BEGIN:kurama
+… one line of *why* per pattern …
+.kurama/
+.kurama-install-manifest.json
+*.bak.[0-9]*
+.claude/settings.local.json
+# END:kurama
+```
+
+| Pattern | Why it is machine-local |
+|---------|-------------------------|
+| `.kurama/` | Harness state: the skill registry and the fallback SDD artifacts. |
+| `.kurama-install-manifest.json` | The install receipt — it records absolute paths. |
+| `*.bak.[0-9]*` | Timestamped backups left beside any file setup/uninstall merges into. |
+| `.claude/settings.local.json` | Per-machine agent config (permissions, local paths). |
+| `.atl/` | Pi runtime state — **added only when `pi` is one of the installed harnesses**, because nothing else writes it. Install Pi later and the next `setup.sh`/`update.sh` run adds the line. |
+
+Rules the block obeys:
+
+- **Marker-managed and idempotent.** Kurama rewrites only the lines *between*
+  the markers; a rule you wrote is never touched, and a second run whose block
+  is already current leaves the file **byte-identical**. Unbalanced markers are
+  refused rather than repaired.
+- **The file is created when absent**, and `uninstall.sh` removes exactly the
+  block (deleting the file only when it holds nothing else).
+- **`update.sh` ensures the block on re-sync**, so an install predating this
+  gets one without a reinstall.
+- **`openspec/` and `MEMORY.md` are never in it.** The specs are the source of
+  truth and *must* be committed; `MEMORY.md` is a team artifact.
+- **Not a git repo?** One note, skipped, exit 0 — nothing is written.
+
+The install summary reports which of the three happened:
+
+```
+✓ .gitignore: Kurama block added (4 patterns)
+✓ .gitignore: Kurama block already present (4 patterns)
+! .gitignore: not a git repo — skipped
+```
+
+`doctor.sh` checks both halves: the block missing on a project install is a
+**warning**, and a machine-local file that is *already tracked* by git is a
+**failure** naming the file — a `.gitignore` rule does not untrack something
+already committed, so it prints the `git rm --cached` fix.
+
+> **Engram in project scope is written as the bare `engram` command** when it
+> comes from Homebrew, so `.mcp.json` / `opencode.json` stay shareable. Kurama
+> resolves the Homebrew symlink (`/opt/homebrew/bin/engram` → the Cellar) to
+> decide that. A non-Homebrew install keeps its **absolute** path on purpose:
+> a GUI-launched client does not always inherit your shell `PATH`.
+
+### When the repo already has its own workflow
+
+If the prompt file Kurama merges into (`CLAUDE.md`, `AGENTS.md`, …) already
+carries content of its own, `setup.sh` says so at merge time — and when that
+content looks like a **workflow** (a `## Workflow` / `## Process` / `## How we
+work` heading, or a numbered list of 3+ steps), it names what it found:
+
+```
+! Two workflows now live in /repo/CLAUDE.md
+  This project already describes how work is done here:
+    - the heading "## Workflow"
+    - a numbered step list (5 steps)
+  Kurama's orchestrator block was added at lines 130-335 of 335. Nothing you wrote was changed.
+  The project's own instructions take precedence over Kurama's block.
+```
+
+Kurama **never refuses the install and never edits your content** — the
+project's own committed instructions legitimately outrank Kurama's block. The
+decision is handed to `/sdd-init`, which asks one question about how the two
+should coexist (SDD's specs as the source of truth, with your issue/board
+bodies reflecting them — or your flow kept, with SDD invoked selectively) and
+records the answer as `workflow_coexistence`. No default is chosen silently.
 
 ---
 
@@ -826,6 +911,19 @@ block), the recorded Engram MCP registrations, and the environment tooling
 (`gh` present + authenticated + project scope, `pi` + the package stack via
 `pi list`, `engram` present + responding).
 
+For **project scope** it adds two findings that a receipt alone cannot answer:
+
+- **Machine-local files** — the managed `.gitignore` block missing is a warning;
+  a machine-local file **already tracked** by git is a failure naming the file,
+  with the `git rm --cached` fix (see
+  [Machine-local files and your `.gitignore`](#machine-local-files-and-your-gitignore)).
+- **Installed, never initialized** — a receipt with no `openspec/config.yaml`
+  and no `.kurama/` settings bundle means `sdd-init` never ran: the install is
+  structurally complete and functionally inert, because no phase has an
+  `artifact_store.mode`, `execution_mode` or `tdd` setting to read. Reported as
+  *"installed, never initialized; run `/sdd-init`"* — a **warning**, since it is
+  also what every correct install looks like in the minute before you run it.
+
 ```bash
 ./scripts/doctor.sh                              # every global agent with a receipt
 ./scripts/doctor.sh --agent claude-code
@@ -835,7 +933,9 @@ block), the recorded Engram MCP registrations, and the environment tooling
 **`uninstall.sh` — remove exactly what was installed.** Removes every file the
 receipt recorded (skills, agents, hooks), **surgically strips** the Kurama
 `hooks/kurama/` block from `settings.json` (jq, with a backup) while leaving
-your other hooks intact, prunes only emptied directories, and — for Pi — can
+your other hooks intact, strips the managed machine-local block from
+`.gitignore` (deleting the file only if it held nothing else), prunes only
+emptied directories, and — for Pi — can
 **offer to revert the Pi packages** Kurama installed (`--with-pi-packages` /
 `--without-pi-packages`; interactive default is no). `--dry-run` shows what
 would be removed.

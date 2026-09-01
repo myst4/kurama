@@ -19,6 +19,10 @@ set -uo pipefail
 #   - pi present + the Pi package stack (best-effort via `pi list`)
 #   - engram present + responds (engram --version)
 #   - Engram MCP registrations recorded in the receipt still exist (O5)
+#   - project scope: the machine-local .gitignore block is there (#105), and
+#     nothing machine-local is already TRACKED by git (the actual damage)
+#   - project scope: installed but never initialized — no openspec/config.yaml
+#     and no .kurama/ settings bundle means no SDD cycle can run (#101)
 #
 # Usage:
 #   ./doctor.sh --agent claude-code
@@ -625,6 +629,133 @@ $entries
 EOF
 }
 
+# ============================================================================
+# #105: machine-local files vs. the target repo
+#
+# Two findings, and the second is the sharper one. A missing block is a risk;
+# a machine-local file that is ALREADY TRACKED is damage that happened — the
+# field case committed .kurama-install-manifest.json, absolute paths and all,
+# into a shared repo. `git ls-files` can answer that question exactly, so doctor
+# asks it instead of guessing from the presence of a .gitignore rule (a rule
+# added AFTER the file was committed does not untrack it — that is precisely how
+# a tracked receipt survives a healthy-looking .gitignore).
+# ============================================================================
+
+# Every machine-local path Kurama writes into a target repo, as an ERE matching a
+# git-tracked path at any depth. Kept beside kurama_gitignore_body's pattern list
+# in scripts/lib/receipt.sh — the two answer the same question in two languages
+# (what to ignore / what must never be tracked), so they change together.
+MACHINE_LOCAL_TRACKED_ERE='(^|/)\.kurama/|(^|/)\.kurama-install-manifest\.json$|\.bak\.[0-9]+|(^|/)\.claude/settings\.local\.json$'
+
+check_machine_local_files() {
+    local receipt_dir="$1" scope="$2"
+    [ "$scope" = "project" ] || return 0
+
+    local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
+    local root
+    if ! root="$(git -C "$receipt_dir" rev-parse --show-toplevel 2>/dev/null)" || [ -z "$root" ]; then
+        note "not a git repository — no .gitignore to check"
+        return 0
+    fi
+
+    # (a) is the managed block there? The receipt says where setup put it; the
+    # file on disk is what actually governs, so both are checked. An install from
+    # before #105 records nothing, which is itself the finding.
+    local recorded rel target found_block=0
+    recorded="$(manifest_gitignore "$manifest" | awk 'NF')"
+    if [ -n "$recorded" ]; then
+        while IFS= read -r rel; do
+            [ -n "$rel" ] || continue
+            case "$rel" in
+                /*) target="$rel" ;;
+                *)  target="$receipt_dir/$rel" ;;
+            esac
+            if [ -f "$target" ] && grep -qF "$GITIGNORE_MARKER_BEGIN" "$target" 2>/dev/null; then
+                pass "machine-local files are gitignored: $rel"
+                found_block=1
+            else
+                soft "the Kurama .gitignore block is recorded but gone from $rel (re-run scripts/update.sh)"
+            fi
+        done <<EOF
+$recorded
+EOF
+    elif [ -f "$root/.gitignore" ] && grep -qF "$GITIGNORE_MARKER_BEGIN" "$root/.gitignore" 2>/dev/null; then
+        # Block present, receipt silent: a pre-#105 receipt next to a block added
+        # by a newer setup, or by hand. Not a finding — the repo is protected.
+        pass "machine-local files are gitignored: $root/.gitignore (not recorded in the receipt)"
+        found_block=1
+    fi
+
+    if [ "$found_block" -eq 0 ]; then
+        soft "machine-local files are NOT gitignored in $root — .kurama/, the install receipt (absolute paths), *.bak.* and .claude/settings.local.json can be committed"
+        note "  fix: re-run scripts/update.sh (or scripts/setup.sh) for this target — it writes a managed $GITIGNORE_MARKER_BEGIN block"
+    fi
+
+    # (b) the damage: something machine-local is already tracked.
+    local tracked hits count
+    tracked="$(git -C "$root" ls-files 2>/dev/null)"
+    hits="$(printf '%s\n' "$tracked" | grep -E "$MACHINE_LOCAL_TRACKED_ERE" 2>/dev/null)"
+    # .atl/ is Pi runtime state; it is only ever written when Pi is installed
+    # here, matching kurama_gitignore_body's own condition for the pattern.
+    if manifest_tools "$manifest" | grep -Fxq -- pi; then
+        hits="$(printf '%s\n%s\n' "$hits" "$(printf '%s\n' "$tracked" | grep -E '(^|/)\.atl/' 2>/dev/null)" | awk 'NF')"
+    fi
+    hits="$(printf '%s\n' "$hits" | awk 'NF')"
+    [ -n "$hits" ] || return 0
+
+    count="$(printf '%s\n' "$hits" | awk 'END { print NR + 0 }')"
+    bad "$count machine-local file(s) are TRACKED by git in $root — they carry absolute paths and per-machine state:"
+    printf '%s\n' "$hits" | head -10 | while IFS= read -r rel; do
+        [ -n "$rel" ] && note "    $rel"
+    done
+    if [ "$count" -gt 10 ]; then
+        note "    … and $((count - 10)) more"
+    fi
+    note "  a .gitignore rule does not untrack a file that is already committed:"
+    note "    git -C $root rm --cached <file>   (then commit the removal)"
+}
+
+# ============================================================================
+# #101: installed, never initialized
+#
+# Field case: a receipt with the right version, the right commit, scope project,
+# balanced markers and working hooks — and no openspec/ at all. `sdd-init` had
+# never run, so there was no settings bundle: no artifact_store.mode, no
+# execution_mode, no tdd.enabled. doctor graded that green, which is the same
+# silent-partial-success shape 6.1.1 closed repeatedly: structurally complete,
+# functionally inert.
+#
+# Graded as a WARNING, not a failure. "Installed but not yet initialized" is a
+# legitimate transient state — it is what every correct install looks like in the
+# minute between setup.sh finishing and the user typing /sdd-init. What was wrong
+# was doctor saying nothing, not doctor exiting 0.
+# ============================================================================
+check_initialized() {
+    local receipt_dir="$1" scope="$2"
+    [ "$scope" = "project" ] || return 0
+
+    # `sdd-init` writes .kurama/skill-registry.md in EVERY persistence mode (see
+    # skills/sdd-init/SKILL.md Step 4), and openspec/config.yaml in the openspec
+    # and hybrid modes. Either one proves the phase ran; requiring config.yaml
+    # alone would report every engram-mode project as uninitialized.
+    if [ -f "$receipt_dir/openspec/config.yaml" ]; then
+        pass "initialized: openspec/config.yaml is the settings home"
+        return 0
+    fi
+    if [ -f "$receipt_dir/.kurama/skill-registry.md" ]; then
+        pass "initialized: .kurama/ carries the skill registry (engram-mode settings live in Engram)"
+        return 0
+    fi
+    if [ -d "$receipt_dir/.kurama" ] && [ -n "$(ls -A "$receipt_dir/.kurama" 2>/dev/null)" ]; then
+        pass "initialized: .kurama/ settings bundle present"
+        return 0
+    fi
+
+    soft "installed, never initialized; run /sdd-init"
+    note "  no openspec/config.yaml and no .kurama/ settings bundle — the install is on disk"
+    note "  but no SDD cycle can run: there is no artifact_store.mode, execution_mode or tdd setting."
+}
+
 check_tooling() {
     local scope="$1"
     header "Environment tooling"
@@ -725,6 +856,8 @@ TOOLS
     check_hooks "$tools" "$scope" "$receipt_dir"
     check_engram_mcp "$receipt_dir"
     check_tui_logo "$receipt_dir"
+    check_machine_local_files "$receipt_dir" "$scope"
+    check_initialized "$receipt_dir" "$scope"
 }
 
 # ============================================================================

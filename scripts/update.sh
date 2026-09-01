@@ -449,6 +449,23 @@ EOF
         rm -f "$logfile"
     done
 
+    # #105: the machine-local .gitignore block. The re-sync above delegates to
+    # setup.sh with the SAME --scope project --path, and setup ensures the block
+    # itself — which is exactly how an install predating #105 acquires one
+    # without a second writer to keep in sync. Reported here because the drift
+    # report below reads files[] only, and .gitignore is not a files[] entry:
+    # Kurama merges a marker block into it, it never owns the file. The manifest
+    # was rewritten by the delegated runs, so this reads the fresh receipt.
+    if [ "$rscope" = "project" ]; then
+        local gfile
+        gfile="$(manifest_gitignore "$manifest" | awk 'NF' | head -1)"
+        if [ -n "$gfile" ]; then
+            ok "machine-local .gitignore block ensured: $gfile"
+        else
+            info "no machine-local .gitignore block recorded — target is not a git repo, or the write was refused (see the run above)"
+        fi
+    fi
+
     # Report which recorded files changed (restored drift or picked up new content).
     local changed=0 post
     while IFS=$'\t' read -r rel pre; do

@@ -67,6 +67,7 @@ RECEIPT_SETTINGS=""      # newline list of settings.json paths (relative to RECE
 RECEIPT_PI_PACKAGES=""   # newline list of "npm:pkg@ver" specs installed via pi
 RECEIPT_ENGRAM_MCP=""    # O5: newline list of config files an Engram MCP server was written to
 RECEIPT_PROMPTS=""       # newline list of orchestrator prompt files carrying a removable BEGIN:kurama block
+RECEIPT_GITIGNORE=""     # #105: .gitignore files carrying the managed machine-local block
 RECEIPT_TUI_PLUGINS=""   # newline list of opencode tui.json files a Kurama TUI plugin was registered in
 RECEIPT_OPENCODE_CONFIGS=""  # #22: opencode.json files carrying Kurama's sdd-* agent block (merged, never owned)
 # #22: the OpenCode install-time choices. update.sh re-passes them so a re-sync
@@ -89,6 +90,21 @@ ENGRAM_MCP_WRITTEN=0    # registrations that actually reached disk
 ENGRAM_MCP_NO_JQ=0      # registrations skipped because jq is missing (manual steps printed)
 ENGRAM_MCP_BUILTIN=0    # agents where Engram needs no MCP entry (pi: the package stack provides it)
 ENGRAM_MCP_DEFERRED=0   # registrations postponed by design (codex in project scope: its config is global-only)
+
+# #105: what happened to the machine-local .gitignore block, for show_summary.
+# Run-scoped like the Engram counters above — setup_agent clears the per-agent
+# receipt accumulators, and the summary runs ONCE at the end of a possibly
+# multi-agent run. The status is the LAST outcome of the run, which is the final
+# state of the file: every agent re-ensures the SAME block in the SAME file, so
+# the last word is the true one (a first agent "added" it, pi later "updated" it
+# to add .atl/, and what the user should be told is where it ended up).
+GITIGNORE_STATUS=""     # created | added | updated | present | nogit | unbalanced | failed | "" (global scope: never ran)
+GITIGNORE_PATTERNS=0    # how many patterns the block ended up carrying
+
+# #101: prompt files that already carried the project's OWN workflow when Kurama
+# merged its block in. Run-scoped, so the summary can name them after the
+# per-file notice has scrolled away.
+WORKFLOW_NOTICE_FILES=""
 
 # O5: Engram optional persistence engine. setup asks ONCE (or honors the
 # --with-engram/--without-engram flags) whether to wire Engram as the memory
@@ -625,7 +641,8 @@ _receipt_existing() {
 # (settings.json files carrying a surgically-removable kurama hooks block),
 # "pi_packages" (packages installed via `pi install`), "engram_mcp" (client
 # config files an Engram MCP server was written into), "prompts" (orchestrator
-# prompt files carrying a removable BEGIN:kurama block), "tui_plugins"
+# prompt files carrying a removable BEGIN:kurama block), "gitignore" (#105: the
+# .gitignore carrying the managed machine-local block), "tui_plugins"
 # (opencode tui.json files carrying a removable kurama-logo entry),
 # "opencode_configs" (opencode.json files carrying Kurama's sdd-* agent block)
 # and the scalar "opencode_mode"/"opencode_profile"/"opencode_profile_model"
@@ -654,12 +671,13 @@ finalize_receipt() {
     local prev_tools
     prev_tools="$(manifest_tools "$manifest_path" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
 
-    local tools files settings pi_packages engram_mcp prompts tui_plugins opencode_configs
+    local tools files settings pi_packages engram_mcp prompts gitignore tui_plugins opencode_configs
     tools="$(_merge_lines "$prev_tools" "$RECEIPT_TOOL")"
     files="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "files")")" "$RECEIPT_FILES")"
     settings="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "settings")")" "$RECEIPT_SETTINGS")"
     engram_mcp="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "engram_mcp")")" "$RECEIPT_ENGRAM_MCP")"
     prompts="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "prompts")")" "$RECEIPT_PROMPTS")"
+    gitignore="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "gitignore")")" "$RECEIPT_GITIGNORE")"
     tui_plugins="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "tui_plugins")")" "$RECEIPT_TUI_PLUGINS")"
     opencode_configs="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "opencode_configs")")" "$RECEIPT_OPENCODE_CONFIGS")"
     # pi_packages holds "npm:pkg@ver" specs, not paths: nothing to stat.
@@ -717,6 +735,9 @@ finalize_receipt() {
         printf '  "prompts": [\n'
         _json_array "$prompts"
         printf '  ],\n'
+        printf '  "gitignore": [\n'
+        _json_array "$gitignore"
+        printf '  ],\n'
         printf '  "tui_plugins": [\n'
         _json_array "$tui_plugins"
         printf '  ],\n'
@@ -725,6 +746,99 @@ finalize_receipt() {
         printf '  ]\n'
         printf '}\n'
     } > "$manifest_path"
+}
+
+# ============================================================================
+# #105: the machine-local .gitignore block
+#
+# Project scope writes machine-local files INTO the target repo — the receipt
+# (absolute paths), `.kurama/`, timestamped merge backups, `.claude/settings.local.json`
+# — and until now said nothing about any of them. In the field that ended with a
+# receipt committed to a shared repo. The pattern list, the marker pair and the
+# writer all live in scripts/lib/receipt.sh so setup, update, uninstall and doctor
+# read ONE definition (the six-copies lesson of #37).
+#
+# Global scope never runs this: it writes nothing into a repo.
+# A non-git target is a NOTE and a skip, never a failure — `--scope project`
+# tolerates a non-repo path when the user says so interactively.
+# ============================================================================
+
+# The harnesses this install has recorded so far, plus the one being installed.
+# The receipt is the memory across a multi-harness project install (they share
+# one receipt dir) AND across update.sh's one-setup-run-per-slug re-sync, which
+# is what lets the `pi`-only `.atl/` line survive a re-sync driven by a different
+# harness. Read BEFORE finalize_receipt rewrites the file.
+gitignore_installed_tools() {
+    local manifest="$RECEIPT_DIR/$INSTALL_MANIFEST_NAME"
+    _merge_lines "$(manifest_tools "$manifest")" "$RECEIPT_TOOL"
+}
+
+ensure_machine_local_gitignore() {
+    [ "$SCOPE" = "project" ] || return 0
+    [ -n "$RECEIPT_DIR" ] || return 0
+
+    local root
+    if ! root="$(git -C "$TARGET_PATH" rev-parse --show-toplevel 2>/dev/null)" || [ -z "$root" ]; then
+        GITIGNORE_STATUS="nogit"
+        info ".gitignore: $TARGET_PATH is not a git repository — skipped (nothing to ignore)"
+        return 0
+    fi
+
+    # The block belongs at the REPO ROOT (an unanchored pattern there matches at
+    # any depth), but it has to be RECORDED relative to RECEIPT_DIR so uninstall
+    # and doctor resolve it the way they resolve every other recorded path.
+    # `git rev-parse --show-toplevel` answers PHYSICALLY (/private/var/… on macOS,
+    # where /var is a symlink) while TARGET_PATH is the logical path, so the two
+    # strings differ for the same directory and receipt_rel would fall through to
+    # an absolute entry. Compare physically, then express the file through
+    # TARGET_PATH so the receipt keeps its ".gitignore" / "../.gitignore" form.
+    local file tools status root_phys target_phys sub rel_prefix
+    root_phys="$(cd -P "$root" 2>/dev/null && pwd -P)" || root_phys="$root"
+    target_phys="$(cd -P "$TARGET_PATH" 2>/dev/null && pwd -P)" || target_phys="$TARGET_PATH"
+    file="$TARGET_PATH/.gitignore"
+    if [ "$root_phys" != "$target_phys" ]; then
+        case "$target_phys" in
+            "$root_phys"/*)
+                sub="${target_phys#"$root_phys"/}"
+                rel_prefix="$(printf '%s' "$sub" | awk -F/ '{ for (i = 1; i <= NF; i++) printf "../" }')"
+                file="$TARGET_PATH/${rel_prefix}.gitignore"
+                ;;
+            # Unrelated trees (a target reached through a path the repo root does
+            # not prefix): record the root's own .gitignore absolute rather than
+            # invent a relative form that resolves somewhere else.
+            *) file="$root/.gitignore" ;;
+        esac
+    fi
+    tools="$(gitignore_installed_tools)"
+    GITIGNORE_PATTERNS="$(kurama_gitignore_pattern_count "$tools")"
+    status="$(kurama_gitignore_ensure "$file" "$tools")"
+    GITIGNORE_STATUS="$status"
+
+    case "$status" in
+        created|added|updated)
+            ok "Machine-local files ignored: $GITIGNORE_PATTERNS pattern(s) in $file"
+            ;;
+        present)
+            ok "Machine-local .gitignore block already current: $file"
+            ;;
+        unbalanced)
+            warn "Unbalanced $GITIGNORE_MARKER_BEGIN / $GITIGNORE_MARKER_END markers in $file — left untouched"
+            info "Fix the markers and re-run; Kurama never rewrites a block it cannot bound."
+            return 0
+            ;;
+        *)
+            warn "Could not write the machine-local block into $file"
+            info "Add these by hand so they are never committed:"
+            kurama_gitignore_body "$tools" | awk '!/^[[:space:]]*#/ && NF { print "      " $0 }'
+            return 0
+            ;;
+    esac
+
+    # Recorded so uninstall.sh strips exactly this block and doctor.sh can tell a
+    # project install that has it from one that does not.
+    RECEIPT_GITIGNORE="$RECEIPT_GITIGNORE
+$(receipt_rel "$file")"
+    return 0
 }
 
 # ============================================================================
@@ -1167,6 +1281,100 @@ prompt_is_kurama_generated_copy() {
     grep -qF 'Kurama Orchestrator' "$file"
 }
 
+# ----------------------------------------------------------------------------
+# #101: the prompt file already carries the project's OWN workflow
+#
+# Field case: a repo whose committed CLAUDE.md defines a mandatory pipeline
+# ("the issue body is the source of truth") installed Kurama 6.1.1. The merge was
+# intact — balanced markers, complete block — and #18's "SDD owns the work
+# lifecycle" clause was present, verbatim, in the installed file. It still lost:
+# the repo's own workflow started at line 13 with its own hard rules, and the
+# clause subordinating it sat 117 lines lower. Two features later the SDD cycle
+# had never run once, and nobody had decided to skip it.
+#
+# So the defect is not the merge and not the missing precedence sentence. It is
+# that setup APPENDED a second lifecycle claim below a first one and said
+# NOTHING, at the one moment a human is watching. This does not refuse, does not
+# reorder, and does not touch a byte of the project's content — the project's
+# instructions legitimately outrank Kurama's block. It makes the collision
+# visible and hands the decision to /sdd-init, which asks how the two coexist.
+# ----------------------------------------------------------------------------
+
+# Print the content of the prompt file $1 that is NOT inside Kurama's or
+# gentle-ai's markers — i.e. what the PROJECT wrote. A file with no markers is
+# entirely foreign, which is exactly right for a first install.
+prompt_foreign_content() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    awk -v kb="$MARKER_BEGIN" -v ke="$MARKER_END" \
+        -v gb="$GAI_MARKER_BEGIN" -v ge="$GAI_MARKER_END" '
+        $0 == kb || $0 == gb { skip = 1; next }
+        $0 == ke || $0 == ge { skip = 0; next }
+        !skip                { print }
+    ' "$file"
+}
+
+# Name what looks like a pre-existing workflow in the text on stdin, one finding
+# per line, empty when nothing matches. Deliberately a HEURISTIC over the two
+# shapes a project workflow actually takes in a prompt file — a section heading
+# and a numbered step list. It only ever decides what the notice SAYS; it never
+# decides whether Kurama installs, so a false positive costs three lines of text
+# and a false negative costs nothing that was not already lost.
+detect_workflow_signals() {
+    awk '
+        # A heading whose title names a process. Printed verbatim (trimmed) so
+        # the notice quotes the project back to itself instead of paraphrasing.
+        /^#{1,6}[[:space:]]/ {
+            line = $0
+            if (tolower(line) ~ /(workflow|process|how we work|way we work|development flow|pipeline|ways of working)/) {
+                sub(/[[:space:]]+$/, "", line)
+                if (!seen[line]++ && headings < 3) {
+                    print "the heading \"" line "\""
+                    headings++
+                }
+            }
+        }
+        # A numbered step list: 3+ "1." / "2)" openers. Two is a pair of notes;
+        # three is somebody describing a procedure.
+        /^[[:space:]]*[0-9]+[.)][[:space:]]+/ { steps++ }
+        END { if (steps >= 3) print "a numbered step list (" steps " steps)" }
+    '
+}
+
+# Print the notice for prompt file $1 whose project content produced the signals
+# in $2 (possibly empty). Runs AFTER the merge so it can say where the block
+# actually landed — position is the whole point of #101.
+notice_pre_existing_workflow() {
+    local file="$1" signals="$2"
+    local total begin end where
+    total="$(awk 'END { print NR + 0 }' "$file")"
+    begin="$(grep -nF "$MARKER_BEGIN" "$file" 2>/dev/null | head -1 | cut -d: -f1)"
+    end="$(grep -nF "$MARKER_END" "$file" 2>/dev/null | tail -1 | cut -d: -f1)"
+    if [ -n "$begin" ] && [ -n "$end" ]; then
+        where="lines $begin-$end of $total"
+    else
+        where="the end of the file"
+    fi
+
+    echo ""
+    if [ -n "$signals" ]; then
+        echo -e "  ${YELLOW}${BOLD}! Two workflows now live in $file${NC}"
+        echo -e "    This project already describes how work is done here:"
+        printf '%s\n' "$signals" | awk 'NF { print "      - " $0 }'
+        WORKFLOW_NOTICE_FILES="$WORKFLOW_NOTICE_FILES
+$file"
+    else
+        echo -e "  ${YELLOW}${BOLD}! $file already had content of its own${NC}"
+    fi
+    echo -e "    Kurama's orchestrator block was added at $where. Nothing you wrote was changed."
+    echo -e "    ${BOLD}The project's own instructions take precedence over Kurama's block.${NC}"
+    if [ -n "$signals" ]; then
+        echo -e "    Two pipelines claiming the same work is a decision, not a merge conflict:"
+        echo -e "    run ${CYAN}/sdd-init${NC} — it asks how the two should coexist and records the answer."
+    fi
+    echo ""
+}
+
 setup_orchestrator() {
     local prompt_path="$1"
     local example_file="$2"
@@ -1196,6 +1404,19 @@ $(receipt_rel "$prompt_path")"
         validate_markers "$prompt_path" "$MARKER_BEGIN" "$MARKER_END" "kurama"
         validate_markers "$prompt_path" "$GAI_MARKER_BEGIN" "$GAI_MARKER_END" "gentle-ai"
 
+        # #101: what the PROJECT already says, captured BEFORE the merge rewrites
+        # the file. A wholesale copy of one of our own generated examples is not
+        # the project's content — it is Kurama's, unmarked (see
+        # prompt_is_kurama_generated_copy) — and its own "## SDD Workflow"
+        # heading would otherwise report the installer to itself.
+        local foreign="" workflow_signals=""
+        if ! prompt_is_kurama_generated_copy "$prompt_path"; then
+            foreign="$(prompt_foreign_content "$prompt_path" | awk 'NF')"
+            if [ -n "$foreign" ]; then
+                workflow_signals="$(printf '%s\n' "$foreign" | detect_workflow_signals)"
+            fi
+        fi
+
         # The injected content is multi-line. Pass it to awk via a file read with
         # getline instead of `-v content=...`: BSD awk (macOS) and mawk reject
         # literal newlines in a -v value, and -v also mangles backslashes.
@@ -1217,6 +1438,9 @@ $(receipt_rel "$prompt_path")"
                 rm -f "$cfile"
                 printf '%s\n' "$updated" | atomic_replace --backup "$prompt_path"
                 ok "Orchestrator updated in $prompt_path"
+                if [ -n "$foreign" ]; then
+                    notice_pre_existing_workflow "$prompt_path" "$workflow_signals"
+                fi
             else
                 rm -f "$cfile"
                 fail "Failed to rewrite $prompt_path (left unchanged)"; exit 1
@@ -1240,6 +1464,9 @@ $(receipt_rel "$prompt_path")"
                 rm -f "$cfile"
                 printf '%s\n' "$updated" | atomic_replace --backup "$prompt_path"
                 ok "Orchestrator updated in $prompt_path (replaced gentle-ai section)"
+                if [ -n "$foreign" ]; then
+                    notice_pre_existing_workflow "$prompt_path" "$workflow_signals"
+                fi
             else
                 rm -f "$cfile"
                 fail "Failed to rewrite $prompt_path (left unchanged)"; exit 1
@@ -1286,6 +1513,9 @@ $(receipt_rel "$prompt_path")"
                     echo "$MARKER_END"
                 } | atomic_replace --backup "$prompt_path"
                 ok "Orchestrator appended to $prompt_path"
+                if [ -n "$foreign" ]; then
+                    notice_pre_existing_workflow "$prompt_path" "$workflow_signals"
+                fi
             fi
         fi
     else
@@ -1947,17 +2177,54 @@ ask_engram() {
     fi
 }
 
+# Follow a symlink chain to the file it finally names, portably. macOS's stock
+# readlink has no -f (that is a GNU coreutils extension), and the one place this
+# matters is a Homebrew binary — which is ALWAYS a symlink into the Cellar. Bare
+# `readlink` gives one hop, so the loop walks the chain, resolving each relative
+# target against the directory of the link that carried it, and `pwd -P` collapses
+# the result physically. Bounded at 32 hops so a symlink cycle terminates.
+resolve_symlink_path() {
+    local p="$1" hops=0 d t
+    while [ -L "$p" ] && [ "$hops" -lt 32 ]; do
+        d="$(dirname "$p")"
+        t="$(readlink "$p")" || break
+        case "$t" in
+            /*) p="$t" ;;
+            *)  p="$d/$t" ;;
+        esac
+        hops=$((hops + 1))
+    done
+    d="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || { printf '%s' "$1"; return 0; }
+    printf '%s/%s' "$d" "${p##*/}"
+}
+
 # Resolve the most stable engram command string, mirroring gentle-ai's
-# resolveEngramCommand: prefer an absolute PATH hit, but collapse a versioned
-# Homebrew Cellar path back to bare "engram" (it changes on every upgrade).
-# Falls back to "engram" when the binary is not yet installed.
+# resolveEngramCommand: prefer an absolute PATH hit, but collapse a Homebrew
+# install back to bare "engram" (its Cellar path changes on every upgrade, and
+# an absolute path in a PROJECT-scope .mcp.json/opencode.json is machine-specific
+# in a file the team shares). Falls back to "engram" when the binary is not yet
+# installed.
+#
+# #105: the Cellar match alone never fired. `command -v engram` returns the
+# SYMLINK Homebrew puts on PATH — /opt/homebrew/bin/engram — never the Cellar
+# path it points at, so every Homebrew install wrote the absolute path, and a
+# field install committed /opt/homebrew/bin/engram into a shared .mcp.json and
+# opencode.json. Both halves are checked now: the brew bin prefixes on the path
+# as found, and the Cellar path it resolves to. Anything else keeps its absolute
+# path on purpose — a GUI-launched client does not always inherit the shell PATH,
+# and outside brew there is no stable bare name to fall back on.
 engram_command() {
-    local p
+    local p resolved
     if p="$(command -v engram 2>/dev/null)" && [ -n "$p" ]; then
         case "$p" in
-            */Cellar/engram/*) echo "engram" ;;
-            *)                 echo "$p" ;;
+            */homebrew/bin/engram|*/linuxbrew/*/bin/engram|*/Cellar/engram/*)
+                echo "engram"; return 0 ;;
         esac
+        resolved="$(resolve_symlink_path "$p")"
+        case "$resolved" in
+            */Cellar/engram/*) echo "engram"; return 0 ;;
+        esac
+        echo "$p"
     else
         echo "engram"
     fi
@@ -2157,6 +2424,7 @@ setup_agent() {
     RECEIPT_PI_PACKAGES=""
     RECEIPT_ENGRAM_MCP=""
     RECEIPT_PROMPTS=""
+    RECEIPT_GITIGNORE=""
     RECEIPT_TUI_PLUGINS=""
     RECEIPT_OPENCODE_CONFIGS=""
     RECEIPT_OPENCODE_MODE=""
@@ -2207,6 +2475,14 @@ setup_agent() {
     setup_engram "$agent" \
         || warn "Engram registration did not complete — the rest of the install stands"
 
+    # #105: name the machine-local files in the target repo's .gitignore. Runs
+    # LAST among the writers and BEFORE finalize_receipt, so the block reflects
+    # every harness this receipt knows about (the `pi`-only `.atl/` line) and the
+    # entry reaches the receipt uninstall drives its strip from. Non-fatal for
+    # the same reason as the hooks merge: the install is already on disk.
+    ensure_machine_local_gitignore \
+        || warn "The machine-local .gitignore block was not written — the rest of the install stands"
+
     # Flush the single per-agent receipt (skills + agents + hooks + settings +
     # pi packages + engram MCP) now that every step has recorded its writes.
     # Disarm FIRST: with the trap still armed, a finalize_receipt that fails
@@ -2241,6 +2517,29 @@ show_summary() {
             fi
             echo -e "    Receipt: $(scoped_receipt_dir "$agent")/$INSTALL_MANIFEST_NAME"
         done
+    fi
+
+    # #105: one line about the machine-local block, in project scope only — the
+    # one moment someone is looking at what the install just did to their repo.
+    case "$GITIGNORE_STATUS" in
+        created|added|updated)
+            echo -e "  ${GREEN}✓${NC} ${BOLD}.gitignore${NC}: Kurama block added ($GITIGNORE_PATTERNS patterns)" ;;
+        present)
+            echo -e "  ${GREEN}✓${NC} ${BOLD}.gitignore${NC}: Kurama block already present ($GITIGNORE_PATTERNS patterns)" ;;
+        nogit)
+            echo -e "  ${YELLOW}!${NC} ${BOLD}.gitignore${NC}: not a git repo — skipped" ;;
+        unbalanced|failed)
+            echo -e "  ${YELLOW}!${NC} ${BOLD}.gitignore${NC}: Kurama block NOT written — see the note above" ;;
+    esac
+
+    # #101: a prompt file that already carried the project's own workflow. Named
+    # again here because the merge-time notice is 200 lines up the scrollback by
+    # the time the run ends, and position is exactly what this issue is about.
+    if [ -n "$(printf '%s' "$WORKFLOW_NOTICE_FILES" | awk 'NF')" ]; then
+        echo ""
+        echo -e "  ${YELLOW}!${NC} ${BOLD}Two workflows now live in one file${NC} — the project's own instructions take precedence:"
+        printf '%s\n' "$WORKFLOW_NOTICE_FILES" | awk 'NF && !seen[$0]++ { print "      " $0 }'
+        echo -e "      Run ${CYAN}/sdd-init${NC}: it asks how the two should coexist and records the answer."
     fi
 
     echo ""

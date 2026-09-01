@@ -268,6 +268,35 @@ strip_markers_from_prompt() {
     print_ok "stripped kurama orchestrator block from $file"
 }
 
+# #105: remove the managed machine-local block from a .gitignore the receipt
+# recorded (gitignore[]). Marker-bounded exactly like the prompt strip above, so
+# every rule the repo wrote itself survives byte-for-byte. The one file this can
+# delete outright is one holding nothing BUT our block — which only happens when
+# setup created the .gitignore in the first place.
+strip_gitignore_block() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    grep -qF "$GITIGNORE_MARKER_BEGIN" "$file" 2>/dev/null || return 0
+
+    if $DRY_RUN; then
+        print_info "would strip the kurama machine-local block from: $file"
+        return 0
+    fi
+
+    local status
+    status="$(kurama_gitignore_strip "$file")"
+    case "$status" in
+        stripped)     print_ok "stripped the kurama machine-local block from $file" ;;
+        removed-file) print_ok "removed $file (it held nothing but the kurama block)" ;;
+        absent)       ;;
+        unbalanced)   print_warn "unbalanced kurama markers in $file — leaving it untouched" ;;
+        *)
+            print_warn "could not rewrite $file — the kurama block is still there"
+            UNINSTALL_FAILED=1
+            ;;
+    esac
+}
+
 # #22: strip Kurama's agent block from an opencode.json recorded in the receipt's
 # opencode_configs[]. setup.sh MERGES into that file — it is the user's config,
 # not ours — so removal is surgical: every "sdd-*" key plus the profile's
@@ -890,6 +919,21 @@ EOF
         esac
     done <<EOF
 $prompts
+EOF
+
+    # #105: strip the managed machine-local block from every .gitignore the
+    # receipt recorded (gitignore[]). Same relative/absolute handling as above.
+    # Runs while the manifest is still on disk, like every strip in this block.
+    local gfile gitignores
+    gitignores="$(manifest_gitignore "$manifest")"
+    while IFS= read -r gfile; do
+        [ -n "$gfile" ] || continue
+        case "$gfile" in
+            /*) strip_gitignore_block "$gfile" ;;
+            *)  strip_gitignore_block "$dir/$gfile" ;;
+        esac
+    done <<EOF
+$gitignores
 EOF
 
     # Strip the Kurama logo entry from every opencode tui.json the receipt

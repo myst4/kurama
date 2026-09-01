@@ -10121,6 +10121,699 @@ run_test "assert_matches survives a haystack larger than the pipe buffer" test_n
 echo ""
 
 # ============================================================================
+# UNIT-P (issues #105, #101): machine-local files, and a repo that already has
+# its own workflow
+#
+# Both issues are the same failure in two places: setup.sh does something
+# consequential to the target repo and says nothing about it.
+#
+#   #105  Project scope writes machine-local files INTO the repo — the receipt
+#         (absolute paths), .kurama/, timestamped merge backups,
+#         .claude/settings.local.json — and never touched .gitignore. Six docs
+#         asserted ".kurama/ is gitignored" as fact with no producer. In the
+#         field a receipt full of absolute paths was COMMITTED, and .mcp.json /
+#         opencode.json were committed carrying /opt/homebrew/bin/engram,
+#         because engram_command matched */Cellar/engram/* against a path
+#         `command -v` never returns: Homebrew puts a SYMLINK on PATH.
+#
+#   #101  setup.sh appended Kurama's "SDD owns the work lifecycle" block 117
+#         lines BELOW a pre-existing workflow in the same CLAUDE.md and printed
+#         nothing. The precedence clause was present and readable, and lost
+#         anyway. Position is not neutral in a 335-line file.
+#
+# Most of this section runs under the jq-less farm on purpose. The receipt grew
+# a new array key (gitignore[]) that uninstall drives an rm-adjacent rewrite
+# from, and the awk fallback parser is the one no developer's Mac ever executes
+# — which is exactly how the single-line-empty-array bug shipped (#13). The one
+# case that needs jq is the Engram registration: engram_merge_json is jq-only by
+# the documented never-sed-on-JSON contract.
+#
+# NOTE on controls. Like UNIT-L, nothing here reads git history:
+# .github/workflows/pr-check.yml checks out at depth 1, so `origin/main` is not
+# a ref on CI and a history-based control would fail there or degrade to a
+# vacuous skip. Every case below asserts the new behaviour directly, which is
+# absent on main by construction — verified by hand against a clone whose
+# scripts/setup.sh and scripts/lib/receipt.sh came from `git show origin/main:`:
+# no .gitignore written, no gitignore[] key, no workflow notice, and
+# "command": "/opt/homebrew/bin/engram" in .mcp.json.
+# ============================================================================
+
+# Print the managed machine-local block of the .gitignore at $1 — everything
+# strictly between the markers. Empty when the file or the markers are missing,
+# which is why every caller size-checks or grep-counts the result.
+gitignore_block() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    awk '/^# BEGIN:kurama$/ { f = 1; next } /^# END:kurama$/ { f = 0 } f' "$file"
+}
+
+# Fail unless the .gitignore at $1 carries exactly one balanced managed block.
+assert_balanced_gitignore_block() {
+    local file="$1"
+    assert_file_exists "$file" || return 1
+    local begin end
+    begin=$(grep -cxF '# BEGIN:kurama' "$file" 2>/dev/null || true)
+    end=$(grep -cxF '# END:kurama' "$file" 2>/dev/null || true)
+    if [ "$begin" != "1" ] || [ "$end" != "1" ]; then
+        echo "  ${file##*/}: $begin BEGIN:kurama / $end END:kurama (expected exactly one pair)"
+        return 1
+    fi
+    return 0
+}
+
+# The PATTERNS of the managed block at $1 — its non-comment, non-blank lines.
+# The comments are the per-pattern "why"; what a repo actually ignores is this.
+gitignore_block_patterns() {
+    gitignore_block "$1" | awk '!/^[[:space:]]*#/ && NF'
+}
+
+# Build a Homebrew-shaped engram at $1: a bin/engram SYMLINK into a versioned
+# Cellar path, which is what `command -v engram` really returns on a Mac and the
+# exact shape the */Cellar/engram/* case could never match. Echoes the bin dir.
+make_brew_engram() {
+    local root="$1" version="${2:-1.2.3}"
+    mkdir -p "$root/bin" "$root/Cellar/engram/$version/bin"
+    cat > "$root/Cellar/engram/$version/bin/engram" <<'SHIM'
+#!/usr/bin/env bash
+echo "engram 1.2.3"
+exit 0
+SHIM
+    chmod +x "$root/Cellar/engram/$version/bin/engram"
+    ln -sf "$root/Cellar/engram/$version/bin/engram" "$root/bin/engram"
+    printf '%s' "$root/bin"
+}
+
+test_p_project_install_writes_the_managed_gitignore_block() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "setup.sh exited $status:"; printf '%s\n' "$output" | tail -5; return 1
+    fi
+
+    assert_balanced_gitignore_block "$repo/.gitignore" || return 1
+
+    # The four machine-local patterns, each of which was individually left to a
+    # human to remember. .atl/ is Pi-only and this install is claude-code.
+    local patterns
+    patterns="$(gitignore_block_patterns "$repo/.gitignore")"
+    local want
+    for want in '.kurama/' '.kurama-install-manifest.json' '*.bak.[0-9]*' '.claude/settings.local.json'; do
+        if ! printf '%s\n' "$patterns" | grep -qxF -- "$want"; then
+            echo "  the managed block is missing the pattern: $want"
+            printf '%s\n' "$patterns" | awk '{ print "    " $0 }'
+            return 1
+        fi
+    done
+    if printf '%s\n' "$patterns" | grep -qxF -- '.atl/'; then
+        echo "  .atl/ is Pi runtime state and must not appear in a claude-code-only install"
+        return 1
+    fi
+
+    # The invariant that killed the `none` mode: the specs are the source of
+    # truth and MUST be committed. Same for the shared MEMORY.md. Checked over
+    # the WHOLE file, not just the block — a rule outside the markers would be
+    # just as fatal and Kurama is the only thing that wrote this file.
+    if grep -qE '(^|/)openspec' "$repo/.gitignore"; then
+        echo "  openspec/ must NEVER be ignored — the specs are the source of truth"
+        grep -nE '(^|/)openspec' "$repo/.gitignore" | awk '{ print "    " $0 }'
+        return 1
+    fi
+    if grep -qF 'MEMORY.md' "$repo/.gitignore"; then
+        echo "  MEMORY.md is a team artifact and must NEVER be ignored"
+        return 1
+    fi
+
+    # Every pattern carries its own one-line reason: a bare list dropped into
+    # somebody else's repo is unreviewable, and the reasons are what let a
+    # reviewer tell this block from a hand-edit.
+    local comments
+    comments=$(gitignore_block "$repo/.gitignore" | grep -c '^#' || true)
+    if [ "$comments" -lt 4 ]; then
+        echo "  the block carries $comments comment lines — the per-pattern 'why' is gone"
+        return 1
+    fi
+
+    # And the summary says it happened, with the count. A block written in
+    # silence is the defect this issue is about.
+    assert_matches "$output" '\.gitignore.*Kurama block added \(4 patterns\)' \
+        "the Setup Complete summary line naming the block and its pattern count" || return 1
+    return 0
+}
+
+test_p_second_run_leaves_the_gitignore_byte_identical() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    # Rules the repo already had. They must survive untouched, in place, and the
+    # block must never be written twice.
+    printf 'node_modules/\ndist/\n.env\n' > "$repo/.gitignore"
+    local before; before="$(cat "$repo/.gitignore")"
+
+    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "first setup exited non-zero"; return 1; }
+    local first; first="$(cat "$repo/.gitignore")"
+    local first_hash; first_hash="$(hash_file "$repo/.gitignore")"
+
+    local output; output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project \
+        --path "$repo" --without-engram --non-interactive 2>&1) \
+        || { echo "second setup exited non-zero"; return 1; }
+
+    if [ "$first_hash" != "$(hash_file "$repo/.gitignore")" ]; then
+        echo "  the second run rewrote .gitignore — an unchanged block must not be touched"
+        diff <(printf '%s\n' "$first") <(cat "$repo/.gitignore") | head -10 | awk '{ print "    " $0 }'
+        return 1
+    fi
+    assert_balanced_gitignore_block "$repo/.gitignore" || return 1
+    assert_matches "$output" '\.gitignore.*already present' \
+        "the summary reporting the block as already present rather than added again" || return 1
+
+    # The repo's own three rules, byte-for-byte, still the first three lines.
+    if [ "$(head -3 "$repo/.gitignore")" != "$before" ]; then
+        echo "  the repo's own rules were modified or reordered"
+        head -5 "$repo/.gitignore" | awk '{ print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+test_p_uninstall_removes_the_block_and_keeps_unrelated_lines() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    printf 'node_modules/\ndist/\n.env\n' > "$repo/.gitignore"
+    local before; before="$(cat "$repo/.gitignore")"
+
+    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+    grep -qxF '# BEGIN:kurama' "$repo/.gitignore" || { echo "no block to remove"; return 1; }
+
+    PATH="$bindir" bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages \
+        > /dev/null 2>&1 || { echo "uninstall exited non-zero"; return 1; }
+
+    assert_file_exists "$repo/.gitignore" || return 1
+    if grep -qF 'kurama' "$repo/.gitignore"; then
+        echo "  the managed block survived the uninstall:"
+        grep -nF 'kurama' "$repo/.gitignore" | head -5 | awk '{ print "    " $0 }'
+        return 1
+    fi
+    # Byte-for-byte back to what the repo had — not "close enough", and not one
+    # blank line longer per install/uninstall cycle.
+    assert_eq "$before" "$(cat "$repo/.gitignore")" \
+        "uninstall must return .gitignore to exactly what the repo wrote" || return 1
+    return 0
+}
+
+test_p_uninstall_removes_a_gitignore_kurama_created() {
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    [ -f "$repo/.gitignore" ] && { echo "fixture already has a .gitignore"; return 1; }
+
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+    assert_file_exists "$repo/.gitignore" || return 1
+
+    bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages \
+        > /dev/null 2>&1 || { echo "uninstall exited non-zero"; return 1; }
+
+    # Kurama created the file and it held nothing else, so removing the block
+    # leaves nothing — the repo goes back to having no .gitignore at all rather
+    # than keeping an empty one nobody asked for.
+    if [ -f "$repo/.gitignore" ]; then
+        echo "  a .gitignore holding nothing but our block should be removed, not left empty:"
+        awk '{ print "    [" $0 "]" }' "$repo/.gitignore"
+        return 1
+    fi
+    return 0
+}
+
+test_p_non_git_target_skips_the_block_and_exits_zero() {
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    # A directory, deliberately NOT a git repo. --scope project tolerates one
+    # when the user says so, and there is nothing to gitignore in it.
+    local plain="$TEST_TMPDIR/plain"
+    mkdir -p "$plain"
+
+    local output status=0
+    output=$(printf 'y\n' | PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project \
+        --path "$plain" --without-engram 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "a non-git project target must still install cleanly (exit 0), got $status:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    if [ -e "$plain/.gitignore" ]; then
+        echo "  a .gitignore was written into a directory git does not track"
+        return 1
+    fi
+    assert_matches "$output" '\.gitignore.*not a git repo.*skipped' \
+        "the summary line saying the block was skipped, and why" || return 1
+    # Skipped, not silently claimed: nothing may be recorded for uninstall to strip.
+    local recorded
+    recorded="$(receipt_array_values "$plain/.kurama-install-manifest.json" gitignore)"
+    if [ -n "$(printf '%s' "$recorded" | awk 'NF')" ]; then
+        echo "  the receipt records a .gitignore block that was never written: $recorded"
+        return 1
+    fi
+    return 0
+}
+
+test_p_receipt_records_the_block_for_both_parsers() {
+    # The receipt grew an array key that uninstall rewrites a user file from.
+    # Read it BOTH ways over the same bytes: jq (the host's) and the awk
+    # fallback the shipped lib uses when jq is absent. A key only one of them
+    # can see is the #13 shape all over again.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    assert_file_exists "$manifest" || return 1
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "  jq is absent on this host — this case compares the two parsers and needs both"
+        return 1
+    fi
+    local with_jq without_jq
+    with_jq="$(jq -r '(.gitignore // [])[]' "$manifest")"
+    # The lib's awk branch, reached by making jq unresolvable for this call only.
+    local farm="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$farm"
+    assert_farm_has_no_jq "$farm" || return 1
+    without_jq="$(PATH="$farm" bash -c '
+        . "$1/lib/receipt.sh"
+        manifest_gitignore "$2"
+    ' bash "$SCRIPT_DIR" "$manifest")"
+
+    if [ -z "$(printf '%s' "$with_jq" | awk 'NF')" ]; then
+        echo "  the receipt records no gitignore[] entry at all"
+        return 1
+    fi
+    assert_eq "$with_jq" "$without_jq" \
+        "manifest_gitignore must read the same entries with and without jq" || return 1
+    # Recorded relative to the receipt dir, like every other recorded path —
+    # never as an absolute path uninstall's containment filter would refuse.
+    assert_eq ".gitignore" "$with_jq" \
+        "the block is recorded relative to the receipt dir" || return 1
+    return 0
+}
+
+test_p_atl_is_recorded_only_when_pi_is_installed() {
+    # The one decision #105 left open. .atl/ is Pi runtime state; the block
+    # describes what THIS install writes, so it appears only once Pi is here —
+    # and it must APPEAR then, on the same shared project receipt, without a
+    # reinstall of the first harness.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "claude-code setup exited non-zero"; return 1; }
+    if gitignore_block_patterns "$repo/.gitignore" | grep -qxF -- '.atl/'; then
+        echo "  .atl/ appeared before Pi was installed"
+        return 1
+    fi
+
+    bash "$SETUP_SCRIPT" --agent pi --scope project --path "$repo" \
+        --without-engram --without-pi-packages --non-interactive > /dev/null 2>&1 \
+        || { echo "pi setup exited non-zero"; return 1; }
+    if ! gitignore_block_patterns "$repo/.gitignore" | grep -qxF -- '.atl/'; then
+        echo "  .atl/ is still missing after a Pi install — Pi runtime state can be committed"
+        gitignore_block_patterns "$repo/.gitignore" | awk '{ print "    " $0 }'
+        return 1
+    fi
+    # Still ONE block, still balanced: the second harness updated it in place.
+    assert_balanced_gitignore_block "$repo/.gitignore" || return 1
+    return 0
+}
+
+test_p_update_ensures_the_block_on_an_install_that_predates_it() {
+    # An install made before #105 has no block and no gitignore[] entry. The
+    # re-sync is how it acquires one — otherwise every existing project install
+    # stays exposed until someone reinstalls by hand.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+
+    # Age the install: drop the block and the receipt key, exactly as a 6.1.2
+    # receipt looks. Done with awk so it needs no jq.
+    rm -f "$repo/.gitignore"
+    local manifest="$repo/.kurama-install-manifest.json" tmp="$TEST_TMPDIR/aged.json"
+    awk '
+        /^[[:space:]]*"gitignore"[[:space:]]*:[[:space:]]*\[/ { skip = 1; next }
+        skip && /^[[:space:]]*\],?[[:space:]]*$/ { skip = 0; next }
+        skip { next }
+        { print }
+    ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
+    if grep -qF '"gitignore"' "$manifest"; then
+        echo "  the fixture still carries a gitignore key — this case would prove nothing"
+        return 1
+    fi
+
+    local output status=0
+    output=$(bash "$UPDATE_SCRIPT" --scope project --path "$repo" 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "update.sh exited $status:"; printf '%s\n' "$output" | tail -8; return 1
+    fi
+    assert_balanced_gitignore_block "$repo/.gitignore" || return 1
+    assert_matches "$output" 'gitignore block ensured' \
+        "update.sh reporting that it ensured the block" || return 1
+    return 0
+}
+
+test_p_doctor_flags_a_tracked_machine_local_file() {
+    # The actual damage. A .gitignore rule does NOT untrack a file that is
+    # already committed, so a repo can look protected and still be leaking the
+    # receipt's absolute paths on every push — which is what the field report
+    # found. This is the one finding graded as a hard failure.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+
+    # Commit the receipt the way a human does: -f, because the block that would
+    # have stopped them did not exist when they ran `git add`.
+    git -C "$repo" add -f .kurama-install-manifest.json > /dev/null 2>&1
+    git -C "$repo" -c commit.gpgsign=false commit -qm "commit the receipt" > /dev/null 2>&1
+
+    local output status=0
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "doctor graded a repo with a COMMITTED install receipt as healthy"
+        return 1
+    fi
+    assert_matches "$output" 'TRACKED by git' \
+        "the finding that a machine-local file is tracked" || return 1
+    assert_matches "$output" '\.kurama-install-manifest\.json' \
+        "the finding NAMING the tracked file" || return 1
+    assert_matches "$output" 'rm --cached' \
+        "the fix — a .gitignore rule does not untrack an already-committed file" || return 1
+    return 0
+}
+
+test_p_doctor_flags_a_missing_gitignore_block() {
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+    # Someone deleted it, or the install predates #105.
+    rm -f "$repo/.gitignore"
+
+    local output
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
+    assert_matches "$output" 'NOT gitignored|recorded but gone' \
+        "the finding that machine-local files are not ignored in this repo" || return 1
+    assert_matches "$output" 'update\.sh|setup\.sh' \
+        "the fix naming the script that writes the block" || return 1
+    # A missing block is a risk, not damage: it must not turn a healthy install
+    # into a failing one, or every fresh non-git-repo trial would exit 1.
+    assert_not_matches "$output" 'All checks passed' \
+        "a green grade over a repo whose machine-local files are unprotected" || return 1
+    return 0
+}
+
+test_p_doctor_flags_installed_but_never_initialized() {
+    # #101's second half. The field repo had a valid receipt, the right commit,
+    # balanced markers, working hooks — and no openspec/ at all, because
+    # sdd-init never ran. doctor called that healthy. An install with no
+    # settings bundle has no artifact_store.mode, no execution_mode and no
+    # tdd.enabled: structurally complete, functionally inert.
+    local shim="$TEST_TMPDIR/doctorbin"
+    make_doctor_shims "$shim"
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+    [ -e "$repo/openspec" ] && { echo "setup created openspec/ — sdd-init is what does that"; return 1; }
+
+    local output
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
+    assert_matches "$output" 'installed, never initialized' \
+        "the finding that the install exists but no SDD phase can run" || return 1
+    assert_matches "$output" 'sdd-init' \
+        "the fix naming the phase that has never run" || return 1
+    assert_not_matches "$output" 'All checks passed' \
+        "a green grade over an install that cannot run a single SDD phase" || return 1
+
+    # And it clears once init has actually happened, in EITHER settings home:
+    # openspec/config.yaml for openspec/hybrid, .kurama/ for engram mode.
+    write_sdd_init_config "$repo" neutral
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
+    assert_not_matches "$output" 'installed, never initialized' \
+        "the finding persisting after openspec/config.yaml exists" || return 1
+
+    rm -rf "$repo/openspec"
+    mkdir -p "$repo/.kurama"
+    printf '# skill registry\n' > "$repo/.kurama/skill-registry.md"
+    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
+    assert_not_matches "$output" 'installed, never initialized' \
+        "the finding persisting in engram mode, where .kurama/ is the settings home" || return 1
+    return 0
+}
+
+test_p_homebrew_engram_is_written_as_the_bare_command() {
+    # #105's root cause, measured. `command -v engram` returns the Homebrew
+    # SYMLINK (/opt/homebrew/bin/engram), never the Cellar path it points at, so
+    # the */Cellar/engram/* case never fired and a machine-specific absolute
+    # path was written into a project .mcp.json the whole team shares.
+    # jq-present on purpose: engram_merge_json is jq-only by contract.
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "  jq is absent — the MCP merge is jq-only by contract, so this case cannot run"
+        return 1
+    fi
+    local brewbin
+    brewbin="$(make_brew_engram "$TEST_TMPDIR/opt/homebrew")"
+    # The link must really be a link, or this case proves nothing.
+    [ -L "$brewbin/engram" ] || { echo "the fixture engram is not a symlink"; return 1; }
+
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    PATH="$brewbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --with-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+
+    assert_file_exists "$repo/.mcp.json" || return 1
+    local cmd
+    cmd="$(jq -r '.mcpServers.engram.command // ""' "$repo/.mcp.json")"
+    assert_eq "engram" "$cmd" \
+        "a Homebrew engram must be written as the bare command, never an absolute path" || return 1
+    if grep -qF '/homebrew/' "$repo/.mcp.json"; then
+        echo "  .mcp.json still carries a machine-specific Homebrew path:"
+        grep -nF '/homebrew/' "$repo/.mcp.json" | head -3 | awk '{ print "    " $0 }'
+        return 1
+    fi
+
+    # The other half of the fix: a brew prefix that is NOT literally
+    # ".../homebrew/bin" is caught by RESOLVING the symlink to its Cellar
+    # target — the readlink loop, since macOS has no readlink -f.
+    local otherbin
+    otherbin="$(make_brew_engram "$TEST_TMPDIR/custombrew" 9.9.9)"
+    local repo2="$TEST_TMPDIR/proj2"
+    make_git_repo "$repo2"
+    PATH="$otherbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo2" \
+        --with-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "second setup exited non-zero"; return 1; }
+    assert_eq "engram" "$(jq -r '.mcpServers.engram.command // ""' "$repo2/.mcp.json")" \
+        "a Cellar target reached through a non-'homebrew' prefix must still collapse to 'engram'" || return 1
+
+    # And a NON-brew engram keeps its absolute path on purpose: a GUI-launched
+    # client does not always inherit the shell PATH, and there is no stable bare
+    # name to fall back on outside brew.
+    local plainbin="$TEST_TMPDIR/plainbin"
+    mkdir -p "$plainbin"
+    printf '#!/usr/bin/env bash\necho engram\n' > "$plainbin/engram"
+    chmod +x "$plainbin/engram"
+    local repo3="$TEST_TMPDIR/proj3"
+    make_git_repo "$repo3"
+    PATH="$plainbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo3" \
+        --with-engram --non-interactive > /dev/null 2>&1 \
+        || { echo "third setup exited non-zero"; return 1; }
+    assert_eq "$plainbin/engram" "$(jq -r '.mcpServers.engram.command // ""' "$repo3/.mcp.json")" \
+        "a non-Homebrew engram must keep its absolute path" || return 1
+    return 0
+}
+
+test_p_setup_names_a_pre_existing_workflow_in_the_prompt() {
+    # #101, measured at the one moment a human is watching. The repo's own
+    # workflow is committed and complete; Kurama's block lands below it; the
+    # installer must say both things exist and which one wins — without
+    # refusing, and without editing a byte of theirs.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    cat > "$repo/CLAUDE.md" <<'PROMPT'
+# octo-pon-api
+
+## Workflow
+
+Every change follows this, no exceptions:
+
+1. Open an issue describing the problem.
+2. Refine the spec together — run the brainstorming skill.
+3. Update the issue with the agreed PRD: the issue body is the source of truth.
+4. Implement against the issue.
+5. Close the issue in the PR description.
+PROMPT
+    local theirs; theirs="$(cat "$repo/CLAUDE.md")"
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "setup must NEVER refuse over a pre-existing workflow, got exit $status:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+
+    assert_matches "$output" 'Two workflows now live in .*CLAUDE\.md' \
+        "the notice naming the file two workflows now share" || return 1
+    assert_matches "$output" 'the heading "## Workflow"' \
+        "what the heuristic actually found, quoted back to the project" || return 1
+    assert_matches "$output" 'numbered step list' \
+        "the second signal — a numbered list of steps describing a pipeline" || return 1
+    assert_matches "$output" "project's own instructions take precedence" \
+        "the precedence statement: the project's committed instructions outrank Kurama's block" || return 1
+    assert_matches "$output" 'lines [0-9]+-[0-9]+' \
+        "WHERE the block landed — position is the whole finding of #101" || return 1
+    assert_matches "$output" 'sdd-init' \
+        "the pointer to the phase that asks how the two coexist" || return 1
+
+    # Their content, untouched and still FIRST. The merge was never the defect.
+    assert_balanced_kurama_block "$repo/CLAUDE.md" || return 1
+    local kept
+    kept="$(awk '/<!-- BEGIN:kurama -->/ { exit } { print }' "$repo/CLAUDE.md")"
+    # The append separates their content from the block with one blank line;
+    # trim trailing blanks so the comparison is about THEIR bytes, not spacing.
+    kept="$(printf '%s\n' "$kept" | awk '
+        { l[NR] = $0 }
+        END { last = NR; while (last > 0 && l[last] ~ /^[[:space:]]*$/) last--
+              for (i = 1; i <= last; i++) print l[i] }')"
+    assert_eq "$theirs" "$kept" \
+        "setup must not change one byte of the project's own instructions" || return 1
+    return 0
+}
+
+test_p_no_workflow_notice_when_kurama_owns_the_whole_prompt() {
+    # The heuristic must not report the installer to itself. A generated example
+    # copied whole into place carries Kurama's own "## SDD Workflow" heading and
+    # its own numbered lists — foreign content by shape, ours by provenance.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    cp "$REPO_DIR/examples/claude-code/CLAUDE.md" "$repo/CLAUDE.md"
+    head -1 "$repo/CLAUDE.md" | grep -qF 'GENERATED FILE' \
+        || { echo "the shipped example lost its GENERATED banner — fixture invalid"; return 1; }
+
+    local output
+    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive 2>&1) \
+        || { echo "setup exited non-zero"; return 1; }
+
+    assert_not_matches "$output" 'Two workflows now live' \
+        "a workflow notice raised over Kurama's own generated prompt" || return 1
+    assert_balanced_kurama_block "$repo/CLAUDE.md" || return 1
+    return 0
+}
+
+test_p_a_fresh_prompt_file_raises_no_notice() {
+    # No pre-existing content, nothing to warn about. Guards the other side of
+    # the heuristic: a notice on every install is a notice nobody reads.
+    local repo="$TEST_TMPDIR/proj"
+    make_git_repo "$repo"
+    [ -e "$repo/CLAUDE.md" ] && { echo "fixture already has a prompt file"; return 1; }
+
+    local output
+    output=$(bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --without-engram --non-interactive 2>&1) \
+        || { echo "setup exited non-zero"; return 1; }
+    assert_not_matches "$output" 'Two workflows now live|already had content of its own' \
+        "a notice raised over a prompt file Kurama created from nothing" || return 1
+    return 0
+}
+
+test_p_sdd_init_asks_how_the_two_workflows_coexist() {
+    # The decision #101 says has no default. sdd-init is where it gets made, and
+    # the SKILL.md is the only place that instruction exists.
+    local skill="$REPO_DIR/skills/sdd-init/SKILL.md"
+    assert_file_exists "$skill" || return 1
+    local body; body="$(flatten_file "$skill")"
+
+    assert_matches "$body" 'pre-existing project workflow' \
+        "the conditional question about a workflow the project already has" || return 1
+    assert_matches "$body" 'OUTSIDE the .{0,20}BEGIN:kurama' \
+        "the detection rule: only content outside Kurama's own markers counts" || return 1
+    assert_matches "$body" 'sdd_primary' \
+        "the option under which the specs stay the source of truth" || return 1
+    assert_matches "$body" 'project_primary' \
+        "the option under which the project keeps its flow and uses SDD selectively" || return 1
+    assert_matches "$body" 'sdd_primary.{0,40}RECOMMENDED' \
+        "the recommended option, marked as such rather than left as a coin flip" || return 1
+    assert_matches "$body" 'AskUserQuestion' \
+        "the native question tool, per the shared rendering convention" || return 1
+    assert_matches "$body" 'workflow_coexistence' \
+        "the settings key the answer is recorded under" || return 1
+    assert_matches "$body" 'NO default|never resolve this by default|No default' \
+        "the rule that no side is chosen silently" || return 1
+    return 0
+}
+
+echo -e "${BOLD}UNIT-P (issues #105, #101): machine-local files + a repo's own workflow${NC}"
+run_test "project install writes the managed .gitignore block" test_p_project_install_writes_the_managed_gitignore_block
+run_test "a second run leaves .gitignore byte-identical" test_p_second_run_leaves_the_gitignore_byte_identical
+run_test "uninstall removes the block, unrelated lines intact" test_p_uninstall_removes_the_block_and_keeps_unrelated_lines
+run_test "uninstall removes a .gitignore Kurama created" test_p_uninstall_removes_a_gitignore_kurama_created
+run_test "a non-git target is skipped, exit 0" test_p_non_git_target_skips_the_block_and_exits_zero
+run_test "the receipt records the block for jq AND awk" test_p_receipt_records_the_block_for_both_parsers
+run_test ".atl/ appears only once Pi is installed" test_p_atl_is_recorded_only_when_pi_is_installed
+run_test "update ensures the block on a pre-#105 install" test_p_update_ensures_the_block_on_an_install_that_predates_it
+run_test "doctor fails on a TRACKED machine-local file" test_p_doctor_flags_a_tracked_machine_local_file
+run_test "doctor flags a missing .gitignore block" test_p_doctor_flags_a_missing_gitignore_block
+run_test "doctor flags installed-but-never-initialized" test_p_doctor_flags_installed_but_never_initialized
+run_test "a Homebrew engram is written as the bare command" test_p_homebrew_engram_is_written_as_the_bare_command
+run_test "setup names a pre-existing workflow in the prompt" test_p_setup_names_a_pre_existing_workflow_in_the_prompt
+run_test "no notice when Kurama owns the whole prompt" test_p_no_workflow_notice_when_kurama_owns_the_whole_prompt
+run_test "a fresh prompt file raises no notice" test_p_a_fresh_prompt_file_raises_no_notice
+run_test "sdd-init asks how the two workflows coexist" test_p_sdd_init_asks_how_the_two_workflows_coexist
+
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 

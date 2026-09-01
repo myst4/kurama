@@ -150,6 +150,36 @@ Read the project to understand:
     - **Size field (optional)**: if the board has a Size single-select field, optionally cache
       `size_field_id` + the `sizes` map; skip without error when absent.
     Record `kanban.enabled=true` and the full `kanban` block (schema in Step 3).
+- **Pre-existing project workflow (conditional explicit question — NO default, ever)**: the
+  prompt file this harness reads (`CLAUDE.md`, `AGENTS.md`, or `.omp/AGENTS.md`) may already
+  describe how work is done here, committed long before Kurama arrived. `setup.sh` merges
+  Kurama's orchestrator block into that same file and now says so at install time (#101) —
+  but it deliberately does not decide anything: the project's own committed instructions
+  legitimately outrank Kurama's block, and two pipelines claiming the same work is a
+  maintainer's decision, not a merge conflict.
+  **Preflight — is there a competing workflow?** Read the prompt file and consider ONLY the
+  content OUTSIDE the `<!-- BEGIN:kurama -->` / `<!-- END:kurama -->` markers. A competing
+  workflow is a section heading naming a process (`## Workflow`, `## Process`, `## How we
+  work`, `## Development flow`, `## Pipeline`) or a numbered list of 3+ steps describing one.
+  Kurama's own block never counts — it is inside the markers.
+  - **If none is found**: do NOT ask. Record `workflow_coexistence: ""` and move on; there is
+    nothing to reconcile.
+  - **If one IS found**: ask exactly ONE question and NEVER pick a side silently:
+    **"`{file}` already defines this project's own workflow. How should it and SDD coexist?"**
+    - **`sdd_primary` — RECOMMENDED**: *"SDD's specs are the source of truth; the project's own
+      artifacts (issue bodies, board cards, PRDs) become a reflection of the spec."* Marked
+      recommended because it is the only answer under which `sdd-verify` has something to
+      verify against and `sdd-archive` has something to merge into `openspec/specs/`.
+    - **`project_primary`**: *"The project keeps its own flow; SDD runs only when explicitly
+      invoked (`/sdd-new`, `/sdd-ff`), on the work the maintainer routes to it."*
+    **Rendering.** On Claude Code use the native `AskUserQuestion` tool, with the recommended
+    option first and labelled as recommended; on a harness without that primitive ask one text
+    question that names which option is recommended and why. Never render the two as equals
+    with no recommendation, and never resolve this by default — an unanswered question is
+    recorded as unanswered, not as `sdd_primary`.
+    Record the answer as `workflow_coexistence`, and the file that carries the competing
+    workflow as `workflow_coexistence_source`, so a later session can see WHY the setting
+    exists. Surface both in the return envelope's summary.
 
 ### Step 2: Initialize Persistence Backend
 
@@ -174,6 +204,12 @@ schema: spec-driven
 execution_mode: supervised  # supervised | auto; supervised stops at human gates, auto continues unless blocked/verify FAIL
 
 persona: neutral  # neutral | argentino; conversation tone ONLY — artifacts keep the project's language. Preset registry: skills/_shared/personas.md
+
+# #101: how this project's OWN pre-existing workflow and SDD coexist. Written ONLY when the
+# prompt file was found to carry a competing workflow and the user answered the question;
+# empty means "no competing workflow found" — never "we picked the default".
+workflow_coexistence: ""         # "" | sdd_primary | project_primary
+workflow_coexistence_source: ""  # the prompt file that carries the project's own workflow
 
 context: |
   Tech stack: {detected stack}

@@ -2,9 +2,11 @@
 # ============================================================================
 # Kurama — shared receipt library (issue #37)
 #
-# The single home of the install-receipt fallback parser and the small helpers
-# that setup.sh, install.sh, uninstall.sh, update.sh, doctor.sh and setup-tui.sh
-# used to each carry a byte-identical copy of. Sourced by all six — every script
+# The single home of the install-receipt fallback parser, the small helpers that
+# setup.sh, install.sh, uninstall.sh, update.sh, doctor.sh and setup-tui.sh used
+# to each carry a byte-identical copy of, and — since #105 — the managed
+# .gitignore block four of them write, read, verify and remove (one pattern list,
+# one marker pair, one parser). Sourced by all six — every script
 # resolves SCRIPT_DIR and runs from the clone, so `. "$SCRIPT_DIR/lib/receipt.sh"`
 # always finds this file; each source site fails loud if it does not (a partial
 # clone), never proceeding with an undefined parser.
@@ -208,4 +210,218 @@ skills_path() {
         omp)          echo "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
         *)            echo "" ;;
     esac
+}
+
+# ----------------------------------------------------------------------------
+# The machine-local .gitignore block (issue #105)
+#
+# Kurama writes files INTO a target repo in project scope and, until #105, never
+# said which of them are machine-local. Six docs asserted ".kurama/ is gitignored"
+# as fact with no producer, and a field install committed the receipt (absolute
+# paths) alongside two machine-specific MCP configs. The list below is Kurama's
+# OWN .gitignore, which docs/changelog.md already calls "what Kurama writes into
+# a target repo" — dogfooded here, never applied to the repos it installs into.
+#
+# Managed by MARKERS, exactly like the orchestrator block in a prompt file: the
+# writer only ever rewrites the lines between them, so a line the user wrote is
+# never touched, and uninstall removes exactly the block it put there.
+#
+# NOT in this block, deliberately:
+#   * openspec/  — the specs ARE the source of truth and must be committed.
+#                  Ignoring them is the failure that killed the `none` mode.
+#   * MEMORY.md  — a team artifact, shared on purpose.
+# A test asserts both stay absent; do not "helpfully" add either.
+# ----------------------------------------------------------------------------
+
+GITIGNORE_MARKER_BEGIN="# BEGIN:kurama"
+GITIGNORE_MARKER_END="# END:kurama"
+
+# Emit the block BODY (everything strictly between the markers) for a repo whose
+# installed harnesses are the newline list in $1. Each pattern carries the
+# one-line "why" from Kurama's own .gitignore: a bare pattern list dropped into
+# somebody else's repo is unreviewable.
+#
+# .atl/ is Pi runtime state and is emitted ONLY when `pi` is one of the installed
+# harnesses. Decision (#105 filed this as open): the block describes what THIS
+# install actually writes, so a repo that never installed Pi gets no rule for a
+# directory nothing here creates. It is additive — installing Pi later re-runs
+# setup, the block is re-ensured, and the line appears then.
+kurama_gitignore_body() {
+    local tools="$1"
+    printf '%s\n' "# Machine-local files Kurama writes into this repo. Managed block — Kurama"
+    printf '%s\n' "# rewrites ONLY the lines between the markers; keep your own rules outside"
+    printf '%s\n' "# them. scripts/uninstall.sh removes exactly this block."
+    printf '%s\n' "# Kurama harness state (skill registry, fallback SDD artifacts). openspec/ is"
+    printf '%s\n' "# deliberately NOT ignored — the specs are the source of truth and are meant"
+    printf '%s\n' "# to be version-controlled with the repo."
+    printf '%s\n' ".kurama/"
+    printf '%s\n' "# Install receipt: records exactly what was installed. Machine-local, and it"
+    printf '%s\n' "# carries absolute paths."
+    printf '%s\n' ".kurama-install-manifest.json"
+    printf '%s\n' "# Timestamped backups setup.sh/uninstall.sh leave beside any file they merge"
+    printf '%s\n' "# into (prompt files, settings.json, MCP configs)."
+    printf '%s\n' "*.bak.[0-9]*"
+    printf '%s\n' "# Per-machine agent config. The harness dirs themselves may be committed when a"
+    printf '%s\n' "# repo ships its own agents/hooks, but the local settings never are."
+    printf '%s\n' ".claude/settings.local.json"
+    if printf '%s\n' "$tools" | grep -Fxq -- pi; then
+        printf '%s\n' "# Local Pi runtime state."
+        printf '%s\n' ".atl/"
+    fi
+}
+
+# Count the PATTERNS (non-comment, non-blank lines) the block carries, for the
+# "(N patterns)" line the install summary reports.
+kurama_gitignore_pattern_count() {
+    kurama_gitignore_body "$1" | awk '!/^[[:space:]]*#/ && NF { n++ } END { print n + 0 }'
+}
+
+# Ensure the managed block in the .gitignore at $1, for the installed harnesses
+# in $2. Prints ONE status word and returns 0 in every case:
+#
+#   created     the file did not exist and now holds the block
+#   added       the file existed without the block; the block was appended
+#   updated     the block existed with different content and was rewritten
+#   present     the block was already byte-identical — the file was NOT touched
+#   unbalanced  BEGIN without END (or vice versa): refused, file untouched
+#   failed      the write itself failed (unwritable dir, full disk)
+#
+# `present` is what makes a second install byte-identical: an unchanged block is
+# never rewritten, so the file keeps its inode, its mtime and every byte.
+kurama_gitignore_ensure() {
+    local file="$1" tools="$2"
+    local body tmp has_begin=0 has_end=0
+
+    body="$(kurama_gitignore_body "$tools")"
+
+    if [ ! -f "$file" ]; then
+        if {
+            printf '%s\n' "$GITIGNORE_MARKER_BEGIN"
+            printf '%s\n' "$body"
+            printf '%s\n' "$GITIGNORE_MARKER_END"
+        } > "$file" 2>/dev/null; then
+            printf 'created'
+        else
+            printf 'failed'
+        fi
+        return 0
+    fi
+
+    grep -qF "$GITIGNORE_MARKER_BEGIN" "$file" 2>/dev/null && has_begin=1
+    grep -qF "$GITIGNORE_MARKER_END" "$file" 2>/dev/null && has_end=1
+
+    if [ "$has_begin" -ne "$has_end" ]; then
+        # The same refusal validate_markers makes for a prompt file: a lone BEGIN
+        # would make the awk rewrite below swallow everything after it.
+        printf 'unbalanced'
+        return 0
+    fi
+
+    if [ "$has_begin" -eq 1 ]; then
+        local current
+        current="$(awk -v b="$GITIGNORE_MARKER_BEGIN" -v e="$GITIGNORE_MARKER_END" '
+            $0 == b { f = 1; next }
+            $0 == e { f = 0; next }
+            f       { print }
+        ' "$file")"
+        if [ "$current" = "$body" ]; then
+            printf 'present'
+            return 0
+        fi
+        local bodyfile updated
+        bodyfile="$(mktemp)" || { printf 'failed'; return 0; }
+        printf '%s\n' "$body" > "$bodyfile"
+        if ! updated="$(awk -v b="$GITIGNORE_MARKER_BEGIN" -v e="$GITIGNORE_MARKER_END" -v cfile="$bodyfile" '
+            $0 == b { print; while ((getline line < cfile) > 0) print line; close(cfile); skip = 1; next }
+            $0 == e { print; skip = 0; next }
+            !skip   { print }
+        ' "$file")"; then
+            rm -f "$bodyfile"
+            printf 'failed'
+            return 0
+        fi
+        rm -f "$bodyfile"
+        tmp="$(mktemp "${file}.XXXXXX")" || { printf 'failed'; return 0; }
+        if printf '%s\n' "$updated" > "$tmp" && mv "$tmp" "$file"; then
+            printf 'updated'
+        else
+            rm -f "$tmp"
+            printf 'failed'
+        fi
+        return 0
+    fi
+
+    # No block yet. Append one, separated by a blank line from whatever the repo
+    # already ignores — and never rewrite a single existing line.
+    tmp="$(mktemp "${file}.XXXXXX")" || { printf 'failed'; return 0; }
+    if {
+        cat "$file"
+        # A file that does not end in a newline would otherwise glue its last
+        # pattern onto our separator.
+        if [ -s "$file" ] && [ -n "$(tail -c 1 "$file")" ]; then printf '\n'; fi
+        printf '\n'
+        printf '%s\n' "$GITIGNORE_MARKER_BEGIN"
+        printf '%s\n' "$body"
+        printf '%s\n' "$GITIGNORE_MARKER_END"
+    } > "$tmp" 2>/dev/null && mv "$tmp" "$file"; then
+        printf 'added'
+    else
+        rm -f "$tmp"
+        printf 'failed'
+    fi
+    return 0
+}
+
+# Remove the managed block from the .gitignore at $1, leaving every other line
+# byte-identical. A file left holding nothing but whitespace is deleted: the only
+# way to reach that state is a .gitignore Kurama created itself.
+# Prints one status word: stripped | absent | unbalanced | removed-file | failed.
+kurama_gitignore_strip() {
+    local file="$1"
+    [ -f "$file" ] || { printf 'absent'; return 0; }
+    grep -qF "$GITIGNORE_MARKER_BEGIN" "$file" 2>/dev/null || { printf 'absent'; return 0; }
+    if ! grep -qF "$GITIGNORE_MARKER_END" "$file" 2>/dev/null; then
+        printf 'unbalanced'
+        return 0
+    fi
+
+    local stripped tmp
+    stripped="$(awk -v b="$GITIGNORE_MARKER_BEGIN" -v e="$GITIGNORE_MARKER_END" '
+        $0 == b { skip = 1; next }
+        $0 == e { skip = 0; next }
+        !skip   { print }
+    ' "$file")"
+    # Drop the trailing blank the append introduced, so install → uninstall
+    # returns the file to what it was instead of growing a blank line per cycle.
+    stripped="$(printf '%s\n' "$stripped" | awk '
+        { lines[n++] = $0 }
+        END {
+            last = n - 1
+            while (last >= 0 && lines[last] ~ /^[[:space:]]*$/) last--
+            for (i = 0; i <= last; i++) print lines[i]
+        }')"
+
+    case "$stripped" in
+        *[![:space:]]*) ;;
+        *)
+            if rm -f "$file"; then printf 'removed-file'; else printf 'failed'; fi
+            return 0
+            ;;
+    esac
+
+    tmp="$(mktemp "${file}.XXXXXX")" || { printf 'failed'; return 0; }
+    if printf '%s\n' "$stripped" > "$tmp" && mv "$tmp" "$file"; then
+        printf 'stripped'
+    else
+        rm -f "$tmp"
+        printf 'failed'
+    fi
+    return 0
+}
+
+# The .gitignore files a receipt records the managed block in. Reads through the
+# ONE array parser (jq when present, awk otherwise), so a jq-less host resolves
+# the same list uninstall drives its strip from.
+manifest_gitignore() {
+    manifest_json_array "$1" "gitignore"
 }
