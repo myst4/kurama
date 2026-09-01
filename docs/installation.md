@@ -62,7 +62,7 @@ Two flags control **where** it installs:
 | `--scope project` | install **everything into one git repo** to trial Kurama there — skills, native agents, hooks, and the orchestrator merge all land under the repo (see [Install scope](#install-scope-global-vs-project-trial-a-repo)). |
 | `--path <repo>` | the target repo for `--scope project` (default: current directory). |
 
-`setup.sh` installs the **default skill set — 24 skills**, including two optional
+`setup.sh` installs the **default skill set — 28 skills**, including two optional
 modules that ship on disk but stay inert until you opt in per project: the TDD module
 (`skills/tdd`) and the GitHub Projects Kanban module (`skills/kanban-github`).
 Installing a module never activates it — activation is a separate explicit
@@ -70,10 +70,12 @@ per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban
 
 > **Changing the skill selection is a `setup.sh` flag.** `--with`/`--without` are
 > implemented by `scripts/setup.sh`; with no `--with`/`--without` it installs the
-> default set. `--without tdd` excludes the TDD module (23 skills), `--without optional`
-> excludes the `optional` group — `kanban-github` (23 skills), `--without review` drops
-> the 4R + refuter review lenses AND their review-layer agents (19 skills), and
-> `--with lang` adds the per-language pattern skills, OFF by default (25 skills). Kurama
+> default set. `--without tdd` excludes the TDD module (27 skills), `--without quality`
+> drops `judgment-day` (27 skills), `--without optional` excludes the `optional` group —
+> `kanban-github`, `sdd-learn`, `sdd-brainstorm`, `kurama-report` and
+> `systemic-issue-triage` (23 skills), `--without review` drops the 4R + refuter review
+> lenses AND their review-layer agents (23 skills), and `--with lang` adds the
+> per-language pattern skills, OFF by default (29 skills). Kurama
 > is stack-agnostic, so a default install ships no language-specific knowledge. The
 > flags apply to the full `setup.sh` install (skills, agents, hooks, orchestrator merge)
 > — `scripts/install.sh` forwards them to `setup.sh` for backward compatibility.
@@ -87,7 +89,7 @@ per-project switch (see [docs/tdd.md](tdd.md) and [docs/kanban-github.md](kanban
 > (`brew install gh` / `gh auth login` / `gh auth refresh -s read:project,project`) if
 > a check fails. See [docs/kanban-github.md](kanban-github.md).
 
-> **For external installers** (e.g. [gentle-ai](https://github.com/gentleman-programming/gentleman-ai-installer)): use `--non-interactive` flag.
+> **For external installers and CI**: use the `--non-interactive` flag.
 
 > **`install.sh` is now a thin wrapper around `setup.sh`** (issue #38). The two used
 > to be separate installers with conflicting receipts (#24); they are collapsed into
@@ -257,8 +259,8 @@ engine that survives compaction and cross-session recovery.
    activates once the binary is present). This is the only place setup runs a
    network command, and only after you say yes.
 2. **Registers the Engram MCP server into the client being configured.** The
-   exact config file and JSON shape differ per client (replicating gentle-ai's
-   shapes). JSON edits go through **jq** with a backup and an atomic write; if
+   exact config file and JSON shape differ per client — each is written in that
+   client's own shape. JSON edits go through **jq** with a backup and an atomic write; if
    `jq` is missing it prints guided manual steps and **never** `sed`-edits JSON.
    Codex uses TOML (`[mcp_servers.engram]`, block-upserted).
 
@@ -294,7 +296,7 @@ move that line and never chooses the language. It picks the **register and
 vocabulary of the half that was already going out in your language.**
 
 Kurama ships no voice of its own by default, which is why it coexists with
-Claude Code's output style, `gentle-pi`, and whatever else already sets a tone.
+Claude Code's output style, a harness persona package, and whatever else already sets a tone.
 The register is therefore a **setting, not a hardcode**: a top-level `persona:`
 key resolved by the same preflight that resolves the artifact store.
 
@@ -334,7 +336,7 @@ machine. Most specific first:
 
 1. an explicit instruction in the conversation ("contestame en inglés");
 2. the voice your own environment already imposes — a Claude Code output style,
-   `gentle-pi`, whatever your harness sets;
+   a harness persona package, whatever your harness sets;
 3. Kurama's `persona:` setting from `openspec/config.yaml`;
 4. `neutral`.
 
@@ -381,12 +383,14 @@ cp -r skills/_shared \
       skills/sdd-* skills/review-* \
       skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
+      skills/kurama-report skills/systemic-issue-triage \
       ~/.claude/skills/
 ```
 
-> That is the full **24-skill default set** (12 `sdd-*`, the 5 `review-*` lenses,
+> That is the full **28-skill default set** (14 `sdd-*`, the 5 `review-*` lenses,
 > `skill-registry`, `skill-creator`, `branch-pr`, `issue-creation`, `judgment-day`,
-> `tdd`, `kanban-github`). Copy all of them unless you deliberately want a reduced set:
+> `tdd`, `kanban-github`, `kurama-report`, `systemic-issue-triage`). Copy all of them
+> unless you deliberately want a reduced set:
 > omitting the `review-*` lenses leaves the orchestrator's review triage with nothing to
 > select, and omitting `tdd`/`kanban-github` leaves those modules impossible to activate
 > — `sdd-init` records `enabled: false` and the phases that would use them degrade with a
@@ -540,7 +544,7 @@ Interactive setup asks for it after the profile question and defaults to **no**.
 
 This is a **TUI plugin**, not a server plugin: it is copied to `~/.config/opencode/tui-plugins/kurama-logo.tsx` and registered in the `plugin[]` array of `~/.config/opencode/tui.json`, which is a **different list** from the server plugins OpenCode loads out of `~/.config/opencode/plugins/`. The merge is idempotent (`jq`): the file is created with its `$schema` when absent, your existing entries are preserved, and re-running setup never duplicates the entry. `scripts/uninstall.sh` removes the entry and the file again.
 
-The plugin registers the host's `home_logo` slot, which is declared `mode: "replace"` — so it substitutes the default logo rather than drawing below it. The host does **not** pick a single winner, though: if another plugin (for example gentle-ai's `gentle-logo`) also registers `home_logo`, both logos stack. Keep one logo plugin registered at a time.
+The plugin registers the host's `home_logo` slot, which is declared `mode: "replace"` — so it substitutes the default logo rather than drawing below it. The host does **not** pick a single winner, though: if another plugin also registers `home_logo`, both logos stack. Keep one logo plugin registered at a time.
 
 `examples/opencode/tui-plugins/kurama-logo.tsx` is a **generated file** — it is compiled from `assets/banner/wordmark.txt` by `scripts/gen-logo-plugin.mjs` (`--check` fails with exit code 3 when either committed artifact is stale). Edit the wordmark, re-run the generator, and commit the result; never hand-edit the art inside the `.tsx`.
 
@@ -556,12 +560,13 @@ cp -r skills/_shared \
       skills/sdd-* skills/review-* \
       skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
+      skills/kurama-report skills/systemic-issue-triage \
       ~/.config/opencode/skills/
 cp examples/opencode/commands/sdd-*.md ~/.config/opencode/commands/
 cp examples/opencode/AGENTS.md ~/.config/opencode/AGENTS.md
 ```
 
-> Same **24-skill default set** as above (see the note in the Claude Code section).
+> Same **28-skill default set** as above (see the note in the Claude Code section).
 >
 > **The `AGENTS.md` copy is the one step `setup.sh` does differently.** `setup.sh`
 > **marker-merges** that file: it backs up any existing `~/.config/opencode/AGENTS.md`,
@@ -649,10 +654,11 @@ cp -r skills/_shared \
       skills/sdd-* skills/review-* \
       skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
+      skills/kurama-report skills/systemic-issue-triage \
       ~/.codex/skills/
 ```
 
-> Same **24-skill default set** as above (see the note in the Claude Code section).
+> Same **28-skill default set** as above (see the note in the Claude Code section).
 
 **2. Add orchestrator instructions:**
 
@@ -686,6 +692,7 @@ cp -r skills/_shared \
       skills/sdd-* skills/review-* \
       skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
+      skills/kurama-report skills/systemic-issue-triage \
       .agents/skills/
 ```
 
@@ -832,7 +839,9 @@ in `setup.sh`; to refresh one, run
 `npm view <package> version` and update the pin in the script.
 
 > **`gentle-pi` is deliberately excluded.** The stack **never** installs `gentle-pi`.
-> `gentle-pi` is a rival, batteries-included Pi harness that ships its own orchestrator
+> `gentle-pi` and `gentle-engram` are third-party npm package names, as published on the
+> registry — identifiers, not endorsements.
+> `gentle-pi` is a competing, batteries-included Pi harness that ships its own orchestrator
 > and skill wiring — the same orchestration surface Kurama's Pi setup already owns.
 > Installing it alongside this setup would create a **direct conflict** over that
 > surface (two competing orchestrators fighting for `~/.pi/agent/AGENTS.md` and the

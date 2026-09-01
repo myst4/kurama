@@ -10591,7 +10591,7 @@ test_y_a_planted_reference_in_a_skill_body_is_caught() {
     printf 'The block is delimited by <!-- gentle-ai:sdd-orchestrator -->.\n' \
         > "$fake/skills/sdd-demo/SKILL.md"
     # The SAME string, in the one file that is allowed to name it.
-    printf 'GAI_MARKER_BEGIN="<!-- gentle-ai:sdd-orchestrator -->"\n' \
+    printf 'FOREIGN_MARKER_BEGIN="<!-- gentle-ai:sdd-orchestrator -->"\n' \
         > "$fake/scripts/setup.sh"
     local out
     out="$(y_origin_violations "$fake")"
@@ -14114,69 +14114,35 @@ tier_rows_are_complete() {
     return 0
 }
 
-# Resolve a ref for main's tip and echo it, or echo nothing. `origin/main` is the
-# local spelling; a CI checkout has none — actions/checkout fetches only the PR
-# ref, so the mutation check had no baseline and the three tests below failed on
-# ubuntu while passing locally. Fall back through the spellings that might exist,
-# then fetch one commit. Resolved once and cached, since a fetch is not free.
-BASELINE_REF=""
-BASELINE_REF_RESOLVED=0
-baseline_ref() {
-    if [ "$BASELINE_REF_RESOLVED" -eq 0 ]; then
-        BASELINE_REF_RESOLVED=1
-        local ref
-        for ref in origin/main refs/remotes/origin/main main; do
-            if git -C "$REPO_DIR" rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
-                BASELINE_REF="$ref"
-                break
-            fi
-        done
-        if [ -z "$BASELINE_REF" ] \
-            && git -C "$REPO_DIR" fetch --no-tags --depth=1 origin main >/dev/null 2>&1 \
-            && git -C "$REPO_DIR" rev-parse --verify --quiet FETCH_HEAD >/dev/null 2>&1; then
-            BASELINE_REF="FETCH_HEAD"
-        fi
-    fi
-    printf '%s' "$BASELINE_REF"
-}
+# REMOVED (#107): baseline_ref() and the three "this is new on my branch" guards
+# it fed — the two `assert_tier_rows_are_new_in` halves, the zero-prompt-bytes
+# diff against main, and the installer-wiring check. Same defect UNIT-T recorded
+# above when #115 merged: a mutation guard baselined on main's tip inverts the
+# moment the change it guards IS main. All three went red on the next branch —
+# two because main now satisfies the assertion, one because any later PR that
+# legitimately edits a prompt "spends prompt bytes" by that test's definition.
+# The assertions worth keeping are baseline-free and kept below: the tier rows
+# must be complete in README.md and docs/hooks.md, they must NOT appear in any
+# generated prompt, and setup.sh must install the gate plugin.
 
-assert_tier_rows_are_new_in() {
+assert_tier_rows_are_complete_in() {
     local rel="$1"
     tier_rows_are_complete "$REPO_DIR/$rel" || {
         echo "$rel has no enforced/advisory row for all five harnesses"; return 1; }
-
-    local ref
-    ref="$(baseline_ref)"
-    [ -n "$ref" ] || {
-        echo "no ref for main's tip (tried origin/main, main, a shallow fetch) — the mutation check has no baseline"
-        return 1; }
-
-    local baseline
-    baseline="$TEST_TMPDIR/baseline-$(basename "$rel")"
-    if ! git -C "$REPO_DIR" show "$ref:$rel" > "$baseline" 2>/dev/null; then
-        echo "could not read $ref:$rel — the mutation check has no baseline"
-        return 1
-    fi
-    [ -s "$baseline" ] || {
-        echo "$ref:$rel is empty — the mutation check has no baseline"; return 1; }
-    if tier_rows_are_complete "$baseline"; then
-        echo "$ref:$rel already satisfies this assertion — it does not test the change"
-        return 1
-    fi
     return 0
 }
 
 test_x_readme_states_the_enforcement_tier_per_harness() {
     # A user choosing a harness has to see, BEFORE installing, whether the two
     # gates are mechanism or prose there. The support matrix is where they look.
-    assert_tier_rows_are_new_in "README.md" || return 1
+    assert_tier_rows_are_complete_in "README.md" || return 1
     return 0
 }
 
 test_x_hooks_doc_states_the_enforcement_tier_per_harness() {
     # docs/hooks.md is the page that explains what the gates guarantee, so it is
     # the page that has to say where they do not.
-    assert_tier_rows_are_new_in "docs/hooks.md" || return 1
+    assert_tier_rows_are_complete_in "docs/hooks.md" || return 1
     return 0
 }
 
@@ -14195,19 +14161,17 @@ test_x_the_tier_statement_gives_a_reason_per_harness() {
     return 0
 }
 
-test_x_no_prompt_bytes_were_spent_on_the_tier_statement() {
+test_x_the_tier_statement_is_absent_from_every_prompt() {
     # The five generated orchestrator prompts are at their byte budget (omp has
     # tens of bytes of headroom), so the tier statement lives in docs and nowhere
-    # else. This pins that it stayed there.
-    local ref
-    ref="$(baseline_ref)"
-    [ -n "$ref" ] || {
-        echo "no ref for main's tip — cannot tell whether a prompt changed"; return 1; }
+    # else. Asserted against the prompts themselves rather than against a diff
+    # with main, so a later PR that legitimately edits a prompt still runs it.
     local f
     for f in "examples/omp/AGENTS.md" "examples/pi/AGENTS.md" "examples/opencode/AGENTS.md" \
-             "examples/claude-code/CLAUDE.md" "examples/codex/agents.md" "examples/_templates"; do
-        if ! git -C "$REPO_DIR" diff --quiet "$ref" -- "$f"; then
-            echo "$f changed — the prompt budget is exhausted; the tier statement belongs in docs"
+             "examples/claude-code/CLAUDE.md" "examples/codex/agents.md"; do
+        assert_file_exists "$REPO_DIR/$f" || return 1
+        if tier_rows_are_complete "$REPO_DIR/$f"; then
+            echo "$f carries the per-harness tier table — it belongs in docs, not in the prompt budget"
             return 1
         fi
     done
@@ -14332,25 +14296,12 @@ test_x_uninstall_removes_the_gates() {
     return 0
 }
 
-test_x_the_installer_wiring_is_new_on_this_branch() {
-    # Mutation guard for the three tests above: they would pass trivially if
-    # setup.sh had always installed these files. Baselined against main's tip,
-    # which must not mention the plugin at all.
-    local ref baseline
-    ref="$(baseline_ref)"
-    [ -n "$ref" ] || {
-        echo "no ref for main's tip — the mutation check has no baseline"; return 1; }
-    baseline="$TEST_TMPDIR/baseline-setup.sh"
-    git -C "$REPO_DIR" show "$ref:scripts/setup.sh" > "$baseline" 2>/dev/null || {
-        echo "could not read $ref:scripts/setup.sh"; return 1; }
-    [ -s "$baseline" ] || { echo "$ref:scripts/setup.sh is empty"; return 1; }
-
+test_x_setup_wires_the_opencode_gate_plugin() {
+    # The three installer tests above drive setup.sh end to end; this one pins
+    # the one string they all depend on, so a rename fails here by name instead
+    # of three directories deep in a farm run.
     grep -q 'kurama-sdd-gates' "$REPO_DIR/scripts/setup.sh" || {
         echo "setup.sh does not install the OpenCode gate plugin"; return 1; }
-    if grep -q 'kurama-sdd-gates' "$baseline"; then
-        echo "$ref:scripts/setup.sh already installs it — these tests prove nothing"
-        return 1
-    fi
     return 0
 }
 
@@ -14359,11 +14310,11 @@ run_test "the plugin is an adapter, not a second implementation" test_x_the_plug
 run_test "README states the enforcement tier per harness" test_x_readme_states_the_enforcement_tier_per_harness
 run_test "docs/hooks.md states the enforcement tier per harness" test_x_hooks_doc_states_the_enforcement_tier_per_harness
 run_test "each tier names the primitive it was decided on" test_x_the_tier_statement_gives_a_reason_per_harness
-run_test "the tier statement cost zero prompt bytes" test_x_no_prompt_bytes_were_spent_on_the_tier_statement
+run_test "the tier statement is absent from every prompt" test_x_the_tier_statement_is_absent_from_every_prompt
 run_test "setup installs the gates on OpenCode (jq-less, project scope)" test_x_setup_installs_the_gates_on_opencode
 run_test "a second setup run leaves the gates byte-identical" test_x_a_second_setup_run_leaves_the_gates_byte_identical
 run_test "uninstall removes the gates" test_x_uninstall_removes_the_gates
-run_test "the installer wiring is new on this branch" test_x_the_installer_wiring_is_new_on_this_branch
+run_test "setup wires the OpenCode gate plugin" test_x_setup_wires_the_opencode_gate_plugin
 
 probe_node_ts
 if [ "${#NODE_TS_CMD[@]}" -gt 0 ]; then

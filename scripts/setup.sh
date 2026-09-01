@@ -11,7 +11,7 @@ set -euo pipefail
 #   ./setup.sh                    # Interactive: detect + let user choose
 #   ./setup.sh --all              # Auto-detect + install for all found agents
 #   ./setup.sh --agent claude-code # Install for a specific agent
-#   ./setup.sh --non-interactive  # Used by external installers (e.g. gentle-ai)
+#   ./setup.sh --non-interactive  # Used by external installers and CI
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,8 +110,11 @@ WORKFLOW_NOTICE_FILES=""
 # --with-engram/--without-engram flags) whether to wire Engram as the memory
 # backend. With "yes" we ensure the binary (Homebrew on macOS with consent, or a
 # printed guide) and register the Engram MCP server into the client being set up,
-# replicating gentle-ai's per-client server shapes. With "no" the harness keeps
-# its built-in markdown persistence (openspec/.kurama) — mentioned in the summary.
+# in that client's own server shape. With "no" the harness keeps its built-in
+# markdown persistence (openspec/.kurama) — mentioned in the summary.
+#
+# The two constants below are Engram's own upstream locations: Engram is a
+# third-party tool Kurama integrates with, not part of this repo.
 ENGRAM_RELEASES_URL="https://github.com/Gentleman-Programming/engram/releases"
 ENGRAM_TAP="Gentleman-Programming/homebrew-tap"
 ENGRAM_BINARY_CHECKED=false   # ensure the binary probe/brew prompt runs at most once
@@ -176,9 +179,12 @@ setup_disable_group() {
 MARKER_BEGIN="<!-- BEGIN:kurama -->"
 MARKER_END="<!-- END:kurama -->"
 
-# gentle-ai-installer markers (detect to avoid duplication)
-GAI_MARKER_BEGIN="<!-- gentle-ai:sdd-orchestrator -->"
-GAI_MARKER_END="<!-- /gentle-ai:sdd-orchestrator -->"
+# A DIFFERENT installer's orchestrator markers. These two strings are foreign
+# literals — the exact comments another SDD installer writes into a prompt file —
+# kept verbatim so a re-sync REPLACES that block instead of appending a second
+# lifecycle claim below it. Kurama writes MARKER_BEGIN/MARKER_END, never these.
+FOREIGN_MARKER_BEGIN="<!-- gentle-ai:sdd-orchestrator -->"
+FOREIGN_MARKER_END="<!-- /gentle-ai:sdd-orchestrator -->"
 
 # (No pinned npm dependency: the background-agents plugin that required
 # `unique-names-generator` is no longer installed. See install_for_opencode.)
@@ -194,8 +200,13 @@ GAI_MARKER_END="<!-- /gentle-ai:sdd-orchestrator -->"
 #     npm view <pkg> version
 # and update the matching constant below.
 #
-# EXCLUSION — gentle-pi is deliberately NOT in this stack. gentle-pi is a rival
-# harness that overlaps and directly conflicts with Kurama's own orchestrator
+# `gentle-engram` and `gentle-pi` below are THIRD-PARTY npm package names, as
+# published on the registry. They are identifiers, not references: one names a
+# package this stack installs, the other names the package it must refuse to
+# install by name. Renaming either breaks the install.
+#
+# EXCLUSION — `gentle-pi` is deliberately NOT in this stack. It is a competing
+# Pi harness that overlaps and directly conflicts with Kurama's own orchestrator
 # rule and skills on Pi; installing it would fight Kurama for the same surface.
 # We never install it. Do not add it here.
 PI_PKG_GENTLE_ENGRAM_VERSION="0.1.10"
@@ -1326,14 +1337,14 @@ prompt_is_kurama_generated_copy() {
 # visible and hands the decision to /sdd-init, which asks how the two coexist.
 # ----------------------------------------------------------------------------
 
-# Print the content of the prompt file $1 that is NOT inside Kurama's or
-# gentle-ai's markers — i.e. what the PROJECT wrote. A file with no markers is
-# entirely foreign, which is exactly right for a first install.
+# Print the content of the prompt file $1 that is NOT inside Kurama's or the
+# foreign installer's markers — i.e. what the PROJECT wrote. A file with no
+# markers is entirely foreign, which is exactly right for a first install.
 prompt_foreign_content() {
     local file="$1"
     [ -f "$file" ] || return 0
     awk -v kb="$MARKER_BEGIN" -v ke="$MARKER_END" \
-        -v gb="$GAI_MARKER_BEGIN" -v ge="$GAI_MARKER_END" '
+        -v gb="$FOREIGN_MARKER_BEGIN" -v ge="$FOREIGN_MARKER_END" '
         $0 == kb || $0 == gb { skip = 1; next }
         $0 == ke || $0 == ge { skip = 0; next }
         !skip                { print }
@@ -1428,7 +1439,7 @@ $(receipt_rel "$prompt_path")"
         # from a manual edit, merge conflict, or external tool) would make the awk
         # rewrite below truncate everything after BEGIN. Refuse to touch the file.
         validate_markers "$prompt_path" "$MARKER_BEGIN" "$MARKER_END" "kurama"
-        validate_markers "$prompt_path" "$GAI_MARKER_BEGIN" "$GAI_MARKER_END" "gentle-ai"
+        validate_markers "$prompt_path" "$FOREIGN_MARKER_BEGIN" "$FOREIGN_MARKER_END" "foreign orchestrator"
 
         # #101: what the PROJECT already says, captured BEFORE the merge rewrites
         # the file. A wholesale copy of one of our own generated examples is not
@@ -1471,25 +1482,25 @@ $(receipt_rel "$prompt_path")"
                 rm -f "$cfile"
                 fail "Failed to rewrite $prompt_path (left unchanged)"; exit 1
             fi
-        elif grep -qF "$GAI_MARKER_BEGIN" "$prompt_path"; then
-            # gentle-ai markers exist — replace content between GAI markers with ours
+        elif grep -qF "$FOREIGN_MARKER_BEGIN" "$prompt_path"; then
+            # The foreign markers exist — replace the content between them with ours
             local cfile updated
             cfile="$(mktemp)"
             printf '%s\n' "$content" > "$cfile"
-            if updated=$(awk -v gai_begin="$GAI_MARKER_BEGIN" -v gai_end="$GAI_MARKER_END" \
+            if updated=$(awk -v foreign_begin="$FOREIGN_MARKER_BEGIN" -v foreign_end="$FOREIGN_MARKER_END" \
                 -v begin="$MARKER_BEGIN" -v end="$MARKER_END" -v cfile="$cfile" '
-                $0 == gai_begin {
+                $0 == foreign_begin {
                     print begin
                     while ((getline line < cfile) > 0) print line
                     close(cfile)
                     skip=1; next
                 }
-                $0 == gai_end { print end; skip=0; next }
+                $0 == foreign_end { print end; skip=0; next }
                 !skip         { print }
             ' "$prompt_path"); then
                 rm -f "$cfile"
                 printf '%s\n' "$updated" | atomic_replace --backup "$prompt_path"
-                ok "Orchestrator updated in $prompt_path (replaced gentle-ai section)"
+                ok "Orchestrator updated in $prompt_path (replaced a foreign orchestrator section)"
                 if [ -n "$foreign" ]; then
                     notice_pre_existing_workflow "$prompt_path" "$workflow_signals"
                 fi
@@ -1947,10 +1958,10 @@ $(receipt_rel "$config_file")"
 
     # Install the shared SDD phase prompt files. Both opencode.multi.json and any
     # named profile reference these via {file:./prompts/sdd/...} — a path relative
-    # to the opencode.json that contains it, which is what upstream gentle-ai emits
-    # (internal/components/sdd/prompts.go). The tilde form this used to carry came
-    # from upstream's PRD prose, not its code, and nothing verifies that OpenCode
-    # expands ~ inside {file:}. The relative form resolves because this flow is
+    # to the opencode.json that contains it, which is the form OpenCode itself
+    # resolves. The tilde form this used to carry came from a spec's prose rather
+    # than from working code, and nothing verifies that OpenCode expands ~ inside
+    # {file:}. The relative form resolves because this flow is
     # global-only: the config lands in $home/.config/opencode/opencode.json and the
     # prompts in $home/.config/opencode/prompts/sdd/, one directory below it.
     local prompts_src="$EXAMPLES_DIR/opencode/prompts/sdd"
@@ -2005,9 +2016,8 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
     # which every SDD agent entry already carries. The plugin is third-party code
     # (kdcokenny/opencode-background-agents, itself based on oh-my-opencode) that
     # was observed hanging the OpenCode TUI at startup — a black screen with no
-    # error on stdout or stderr. Upstream gentle-ai dropped it for the same
-    # reason. Users who want background execution should use OpenCode's own
-    # experimental switch instead, exported in their shell:
+    # error on stdout or stderr. Users who want background execution should use
+    # OpenCode's own experimental switch instead, exported in their shell:
     #     export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
     # See docs/sub-agents.md.
 
@@ -2045,9 +2055,9 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
 #
 # tui.json is a DIFFERENT registry from opencode.json — the latter lists SERVER
 # plugins, while the TUI process reads only tui.json's plugin[] (npm names or
-# absolute .tsx paths). The merge mirrors gentle-ai's ensureTUIPlugin: create the
-# file with its $schema when absent, append our path only when missing, and
-# preserve every existing entry. jq-only (never sed on JSON), backup + atomic.
+# absolute .tsx paths). The merge is additive: create the file with its $schema
+# when absent, append our path only when missing, and preserve every existing
+# entry. jq-only (never sed on JSON), backup + atomic.
 install_opencode_logo() {
     local home="$1"
     local src="$EXAMPLES_DIR/opencode/tui-plugins/kurama-logo.tsx"
@@ -2246,10 +2256,10 @@ npm:pi-btw@$PI_PKG_BTW_VERSION"
 # defaults to NO when non-interactive so external installers never surprise the
 # user. When enabled we ensure the binary (Homebrew on macOS with explicit
 # consent, else a printed guide — NEVER a silent network call) and register the
-# Engram MCP server into the client being configured, replicating the exact
-# per-client server shapes gentle-ai writes. All JSON edits go through jq (backup
-# + atomic) and degrade to guided manual steps when jq is missing — never sed on
-# JSON. Codex is TOML, upserted with a careful block replace. Every file written
+# Engram MCP server into the client being configured, in that client's own
+# server shape. All JSON edits go through jq (backup + atomic) and degrade to
+# guided manual steps when jq is missing — never sed on JSON. Codex is TOML,
+# upserted with a careful block replace. Every file written
 # is recorded in the receipt (engram_mcp[]).
 # ============================================================================
 
@@ -2294,12 +2304,11 @@ resolve_symlink_path() {
     printf '%s/%s' "$d" "${p##*/}"
 }
 
-# Resolve the most stable engram command string, mirroring gentle-ai's
-# resolveEngramCommand: prefer an absolute PATH hit, but collapse a Homebrew
-# install back to bare "engram" (its Cellar path changes on every upgrade, and
-# an absolute path in a PROJECT-scope .mcp.json/opencode.json is machine-specific
-# in a file the team shares). Falls back to "engram" when the binary is not yet
-# installed.
+# Resolve the most stable engram command string: prefer an absolute PATH hit,
+# but collapse a Homebrew install back to bare "engram" (its Cellar path changes
+# on every upgrade, and an absolute path in a PROJECT-scope .mcp.json or
+# opencode.json is machine-specific in a file the team shares). Falls back to
+# "engram" when the binary is not yet installed.
 #
 # #105: the Cellar match alone never fired. `command -v engram` returns the
 # SYMLINK Homebrew puts on PATH — /opt/homebrew/bin/engram — never the Cellar
@@ -2430,9 +2439,9 @@ $(receipt_rel "$file")"
     ENGRAM_MCP_WRITTEN=$((ENGRAM_MCP_WRITTEN + 1))
 }
 
-# Register the Engram MCP server for one client, replicating gentle-ai's exact
-# per-client shapes (inject.go). Pi needs nothing extra — the Pi package stack
-# (gentle-engram) already provides Engram there.
+# Register the Engram MCP server for one client, in that client's own config
+# shape. Pi needs nothing extra — the Pi package stack already provides Engram
+# there via `gentle-engram` (a third-party npm package name).
 # shellcheck disable=SC2016  # The jq filters below reference $cmd, a JQ variable bound
 # via --arg by engram_merge_json. Single quotes are required: expanding it in bash would
 # inline the path into the filter and break jq's own quoting.
