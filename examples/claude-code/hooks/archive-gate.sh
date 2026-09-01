@@ -43,78 +43,88 @@ if [ ! -t 0 ]; then
   payload="$(cat)"
 fi
 
-# Hook mode: a Task/Skill payload that is NOT an sdd-archive launch is none of
-# our business — allow it. (CLI mode has an empty payload and skips this.)
-if [ -n "$payload" ]; then
-  case "$payload" in
-    *sdd-archive*) : ;;
-    *)             exit 0 ;;
-  esac
-fi
-
-# --- override ---------------------------------------------------------------
-if [ "${KURAMA_ARCHIVE_OVERRIDE:-0}" = "1" ]; then
-  printf '%s\n' \
-    "archive-gate: KURAMA_ARCHIVE_OVERRIDE=1 — bypassing the verify-PASS gate and the content-binding check." \
-    "sdd-archive Step 0 requires the override REASON to be recorded verbatim in the archive report and its return envelope risks." >&2
-  exit 0
-fi
-
-# --- portable JSON string field extractor -----------------------------------
-# json_root_str <field> : the string value of a ROOT-level <field> and nothing
-# else. cwd — the only field this gate reads — is a root field of the hooks
-# contract, and the two extraction halves must not disagree about which one they
-# mean: an unanchored jq (`.. | objects`) walks the payload depth-first while a
-# textual scan walks it in serialization order, so a tool_input carrying its own
-# "cwd" (several tools take one) sends them to two different project roots — and
-# the gate then hunts for the verify report under the wrong one. Reading the key
-# at the ROOT only, in either half, removes the disagreement. The function body
-# below is kept byte-identical to orchestrator-write-guard.sh's copy — the two
-# hooks must read the payload the same way.
-json_root_str() {
+# --- portable JSON string field extractors ----------------------------------
+# json_root_str <field>  : the string value of a ROOT-level <field> and nothing
+#                          else. cwd is a root field of the hooks contract, and the
+#                          two extraction halves must not disagree about which one
+#                          they mean: an unanchored jq (`.. | objects`) walks the
+#                          payload depth-first while a textual scan walks it in
+#                          serialization order, so a tool_input carrying its own
+#                          "cwd" (several tools take one) sends them to two
+#                          different project roots — and the gate then hunts for the
+#                          verify report under the wrong one.
+# json_input_str <field> : the string value of a <field> that is a DIRECT key of
+#                          the payload's `tool_input` object — where the launch
+#                          IDENTITY the gate keys on lives.
+#
+# json_scoped_str below is kept byte-identical to orchestrator-write-guard.sh's
+# copy — the two hooks must read the payload the same way.
+json_scoped_str() {
   field="$1"
+  # "" -> the field is a key of the ROOT object. Otherwise the name of a ROOT key
+  # whose OBJECT value is searched instead (one level down, and only there).
+  scope="$2"
   [ -n "$payload" ] || return 0
   if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$payload" \
-      | jq -r --arg f "$field" '.[$f]? | strings' 2>/dev/null \
-      | head -n 1
+    if [ -z "$scope" ]; then
+      printf '%s' "$payload" \
+        | jq -r --arg f "$field" '.[$f]? | strings' 2>/dev/null \
+        | head -n 1
+    else
+      printf '%s' "$payload" \
+        | jq -r --arg f "$field" --arg s "$scope" '.[$s]? | objects | .[$f]? | strings' 2>/dev/null \
+        | head -n 1
+    fi
     return 0
   fi
+  if [ -z "$scope" ]; then want=1; else want=2; fi
   # No jq: split the payload on the quote character and walk the pieces — the scan
   # a character loop would do, at C speed (this hook runs on EVERY tool call and a
   # Write payload can be megabytes). Pieces OUTSIDE strings carry the brace/bracket
   # depth; pieces inside them carry none, so nothing within a string — a nested key,
-  # or file CONTENT that spells one out — can move it. "<field>" is accepted only as
-  # a key of the ROOT object (depth 1), wherever it sits in the KEY ORDER, and only
-  # a string value is returned: null, a number or an object reads as absent, exactly
-  # as the jq branch above returns it. A quote preceded by an odd number of
-  # backslashes is escaped and does not end its string. Escape sequences inside the
-  # value are NOT expanded — the fields read this way are a token and a path. awk
-  # seeds every variable to 0/"" on first use, so no BEGIN block is needed.
-  printf '%s' "$payload" | awk -v field="$field" '
+  # or file CONTENT that spells one out — can move it. "<field>" is accepted only at
+  # the target depth (`want`: 1 for a root key, 2 for a key of the `scope` object)
+  # and, when scoped, only while that object is open — so a same-named key in ANOTHER
+  # root object, in a nested object, or in an array element is never returned no
+  # matter where it sits in the KEY ORDER. Only a string value is returned: null, a
+  # number or an object reads as absent, exactly as the jq branch above returns it.
+  # A quote preceded by an odd number of backslashes is escaped and does not end its
+  # string. Escape sequences inside the value are NOT expanded — the fields read this
+  # way are a token and a path. `keep` also accumulates ROOT-level strings while
+  # scoped, because that is where the scope key itself is recognized. awk seeds every
+  # variable to 0/"" on first use, so no BEGIN block is needed.
+  printf '%s' "$payload" | awk -v field="$field" -v scope="$scope" -v want="$want" '
     {
       n = split($0, seg, "\"")
       for (k = 1; k <= n; k++) {
         s = seg[k]
+        inscope_ok = (scope == "" || inscope)
+        keep = (depth == want && inscope_ok) || (scope != "" && depth == 1)
         if (instr) {
-          if (depth == 1) { str = str s }        # only a root string can ever matter
+          if (keep) { str = str s }
         } else {
+          if (spend == 2) {                      # scope key matched: ":" then "{"
+            if (s ~ /^[ \t\r\n]*:[ \t\r\n]*\{[ \t\r\n]*$/) { inscope = 1; spend = 0 }
+            else if (s !~ /^[ \t\r\n]*$/)                  { spend = 0 }
+          }
           if (pend == 2) {                       # key matched: a colon must follow
             if (s ~ /^[ \t\r\n]*:[ \t\r\n]*$/) { pend = 1 }
             else if (s !~ /^[ \t\r\n]*$/)      { pend = 0 }
           } else if (pend == 1 && s !~ /^[ \t\r\n]*$/) { pend = 0 }
           t = s; depth += gsub(/[[{]/, "", t)
           t = s; depth -= gsub(/[]}]/, "", t)
+          if (depth <= 1) { inscope = 0 }        # the scope object closed again
         }
         if (k == n) { break }                    # no quote closes the last piece
         if (instr && match(s, /\\+$/) && RLENGTH % 2 == 1) {
-          if (depth == 1) { str = str "\"" }     # escaped quote: the string goes on
+          if (keep) { str = str "\"" }           # escaped quote: the string goes on
           continue
         }
         if (instr) {
           instr = 0
           if (pend == 1) { printf "%s", str; exit 0 }
-          pend = (depth == 1 && str == field) ? 2 : 0
+          pend  = (depth == want && inscope_ok && str == field) ? 2 : 0
+          spend = (scope != "" && depth == 1 && str == scope) ? 2 : 0
         } else {
           instr = 1; str = ""
         }
@@ -122,6 +132,57 @@ json_root_str() {
     }
   '
 }
+
+json_root_str() {
+  json_scoped_str "$1" ""
+}
+
+json_input_str() {
+  json_scoped_str "$1" "tool_input"
+}
+
+# --- hook mode: does this tool call LAUNCH sdd-archive? ---------------------
+# The gate is wired on Task|Skill, which fires for EVERY delegation in the session.
+# It used to decide with a raw substring test over the whole payload, so any call
+# that merely MENTIONED the phase — a prompt quoting the SDD phase list out of
+# CLAUDE.md, an agent instruction naming the pipeline — entered the gate and, on a
+# repo with nothing to archive, was blocked outright with a message describing a
+# situation the caller was not in ("no verify-report found for change '<unknown>'").
+#
+# What makes a call an archive launch is the INVOKED IDENTITY, never prose:
+#   Skill tool : tool_input.skill          (`/sdd-archive`)
+#   Task tool  : tool_input.subagent_type  (the shipped `sdd-archive` agent)
+#                tool_input.description    (the short label of a generic launch)
+# Free-form text — `prompt`, `args`, `content` — is deliberately NOT consulted: it
+# is the model's own prose, which is exactly what must not decide a gate. A launch
+# that carries no identity at all is still gated by sdd-archive's prose Step 0 and
+# by the CLI mode of this same script.
+#
+# (CLI mode has an empty payload and skips this entirely.)
+launch_is_sdd_archive() {
+  lsa_field=""
+  for lsa_field in skill subagent_type description; do
+    case "$(json_input_str "$lsa_field")" in
+      *sdd-archive*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+if [ -n "$payload" ]; then
+  launch_is_sdd_archive || exit 0
+fi
+
+# --- override ---------------------------------------------------------------
+# Deliberately AFTER the launch test: the notice below goes to stderr and the
+# model reads it, so it must be printed for an archive launch the override let
+# through — not for every unrelated Task/Skill call in the session.
+if [ "${KURAMA_ARCHIVE_OVERRIDE:-0}" = "1" ]; then
+  printf '%s\n' \
+    "archive-gate: KURAMA_ARCHIVE_OVERRIDE=1 — bypassing the verify-PASS gate and the content-binding check." \
+    "sdd-archive Step 0 requires the override REASON to be recorded verbatim in the archive report and its return envelope risks." >&2
+  exit 0
+fi
 
 # --- portable modification time (epoch seconds; 0 if unknown) ---------------
 # BSD/macOS stat exposes the mtime epoch as `-f %m`; GNU coreutils exposes it as
@@ -157,13 +218,23 @@ mtime() {
 compute_tree_hash() {
   th_root="$1"
   git -C "$th_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
-  th_index="$(mktemp 2>/dev/null)" || return 1
-  # git rejects a zero-byte index file ("index file smaller than expected"), so
-  # delete the file mktemp created and let git initialize a fresh empty index here.
-  rm -f "$th_index"
+  # git rejects a zero-byte index file ("index file smaller than expected"), so the
+  # index has to be a path that does NOT exist yet — which is why this used to
+  # `mktemp` a file and immediately `rm` it. Deleting a mktemp path and reusing the
+  # NAME throws away the exclusive-creation guarantee that made mktemp safe (CWE-377):
+  # any local user who learns the name can create it in the window before git does.
+  # A private 0700 directory keeps the guarantee AND the empty path: "$th_dir/index"
+  # has never existed, and nobody else can create it. The observable damage was not a
+  # redirected write — git reads the index first and locks with O_EXCL — but a
+  # SUPPRESSED check: git failed, compute_tree_hash returned nothing, the content
+  # binding degraded to "not computable", and a stale receipt archived.
+  th_dir="$(mktemp -d 2>/dev/null)" || return 1
+  trap 'rm -rf "$th_dir"' EXIT HUP INT TERM
+  th_index="$th_dir/index"
   GIT_INDEX_FILE="$th_index" git -C "$th_root" add -A -- . ':(exclude)openspec' ':(exclude).kurama' >/dev/null 2>&1
   th_hash="$(GIT_INDEX_FILE="$th_index" git -C "$th_root" write-tree 2>/dev/null)"
-  rm -f "$th_index"
+  rm -rf "$th_dir"
+  trap - EXIT HUP INT TERM
   [ -n "$th_hash" ] || return 1
   printf '%s' "$th_hash"
 }
@@ -234,7 +305,16 @@ fi
 if [ -z "$report" ]; then
   printf '%s\n' \
     "BLOCKED by kurama archive-gate: no verify-report found for change '${change:-<unknown>}'." \
-    "sdd-archive Step 0 refuses to archive without a verification report recording a PASS verdict." \
+    "sdd-archive Step 0 refuses to archive without a verification report recording a PASS verdict." >&2
+  # An empty change name is its own diagnosis: the gate found no change directory at
+  # all under this root. Say so, instead of leaving '<unknown>' to be read as a
+  # missing report for a change that does exist.
+  if [ -z "$change" ]; then
+    printf '%s\n' \
+      "No change could be resolved: neither openspec/changes/<name>/ nor .kurama/sdd/<name>/ holds one under '$root'." \
+      "Name it with KURAMA_CHANGE=<name> (or archive-gate.sh <name>) if a change does exist elsewhere." >&2
+  fi
+  printf '%s\n' \
     "Run sdd-verify first, or set KURAMA_ARCHIVE_OVERRIDE=1 with a reason recorded in the archive report." >&2
   exit 2
 fi

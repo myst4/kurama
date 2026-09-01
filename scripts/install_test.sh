@@ -9054,6 +9054,411 @@ test_l_session_identity_resolves_without_an_sdd_cycle() {
     return 0
 }
 
+
+# ===== UNIT-O (issues #93–#96) =====
+# The four hook findings from the v6.1.1 risk review. Three were real and are fixed
+# here; the fourth (#93) is pinned as the property it claimed was broken, because it
+# is not — see test_o_write_guard_reads_file_path_out_of_tool_input_only.
+#
+# Everything below drives the SHIPPED files under examples/claude-code/hooks/, the
+# exact bytes setup.sh copies onto a user's machine, through stdin.
+# ============================================================================
+
+# Echo hook $2's exit status over payload $3, through the jq-less farm at $1 when
+# $1 is non-empty and the ambient PATH (jq present) when it is empty. $4 is the
+# KURAMA_CHANGE the archive gate should assume ("" leaves it unset, which is what
+# makes the gate auto-detect).
+#
+# CLAUDE_PROJECT_DIR is pinned EMPTY rather than left unset: it is the FIRST source
+# the hooks consult for the project root, so an ambient value on the developer's or
+# CI machine would skip the payload-cwd path entirely. Echoes rather than returns
+# because a blocking hook exits 2, which a bare call would turn into an aborted body.
+o_hook_status() {
+    local bindir="$1" hook="$2" payload="$3" change="${4:-}" status=0
+    if [ -n "$bindir" ]; then
+        printf '%s' "$payload" | CLAUDE_PROJECT_DIR="" KURAMA_CHANGE="$change" \
+            PATH="$bindir" bash "$hook" > /dev/null 2>&1 || status=$?
+    else
+        printf '%s' "$payload" | CLAUDE_PROJECT_DIR="" KURAMA_CHANGE="$change" \
+            bash "$hook" > /dev/null 2>&1 || status=$?
+    fi
+    printf '%s' "$status"
+}
+
+# A PreToolUse Write payload for file $2 in project $1, whose content is $3.
+o_write_payload() {
+    printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"%s","content":"%s"}}' \
+        "$1" "$2" "$3"
+}
+
+# A PreToolUse Task payload in project $1: description $2, subagent_type $3, prompt $4.
+o_task_payload() {
+    printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{"description":"%s","subagent_type":"%s","prompt":"%s"}}' \
+        "$1" "$2" "$3" "$4"
+}
+
+# A PreToolUse Skill payload naming skill $2 with args $3, in project $1.
+o_skill_payload_with_args() {
+    printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"%s","args":"%s"}}' \
+        "$1" "$2" "$3"
+}
+
+# Fail unless the write guard reaches verdict $4 over payload $3 under BOTH parsers
+# — ambient jq and the jq-less farm at $1. $2 labels the payload in the message.
+# The payload is validated as JSON first: an unparseable one makes jq's extractor
+# return empty, which decides for the wrong reason and would pass vacuously.
+assert_o_guard_verdict_both_parsers() {
+    local bindir="$1" label="$2" payload="$3" want="$4"
+    if ! printf '%s' "$payload" | jq -e . > /dev/null 2>&1; then
+        echo "the '$label' payload is not valid JSON — it would decide for the wrong reason"
+        return 1
+    fi
+    assert_eq "$want" "$(o_hook_status "" "$WRITE_GUARD_HOOK" "$payload")" \
+        "with jq: $label" || return 1
+    assert_eq "$want" "$(o_hook_status "$bindir" "$WRITE_GUARD_HOOK" "$payload")" \
+        "without jq: $label" || return 1
+    return 0
+}
+
+test_o_write_guard_canonicalizes_before_the_exemption_globs() {
+    # #94. The exemption arms are GLOBS over a string, and the string used to be the
+    # raw concatenation of the root and whatever file_path said. ".kurama/../src/x"
+    # matches "$root"/.kurama/* on the literal bytes and resolves to repository code:
+    # the guard exempted precisely the main-thread write to repo code it exists to
+    # block, and the same worked through openspec/. The path is now canonicalized —
+    # lexically, because a Write CREATES its target and there is nothing on disk to
+    # resolve yet — before the case runs.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/canon"
+    make_active_cycle_repo "$repo"
+    mkdir -p "$repo/openspec/changes/add-widget"
+
+    # Non-vacuity: the honest verdicts this case is asserting deviations from.
+    assert_o_guard_verdict_both_parsers "$bindir" "honest write to repo code" \
+        "$(edit_payload "$repo" "src/widget.ts")" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "honest write to the .kurama marker" \
+        "$(edit_payload "$repo" ".kurama/sdd/add-widget/state.md")" "0" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "honest write to an openspec artifact" \
+        "$(edit_payload "$repo" "openspec/changes/add-widget/design.md")" "0" || return 1
+
+    # The bypass: an exempt prefix followed by "..", in every spelling.
+    assert_o_guard_verdict_both_parsers "$bindir" "relative .kurama/.. escape" \
+        "$(edit_payload "$repo" ".kurama/../src/widget.ts")" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "relative openspec/.. escape" \
+        "$(edit_payload "$repo" "openspec/../src/widget.ts")" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "absolute .kurama/.. escape" \
+        "$(edit_payload "$repo" "$repo/.kurama/../src/widget.ts")" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "escape that climbs twice and comes back" \
+        "$(edit_payload "$repo" ".kurama/sdd/../../src/widget.ts")" "2" || return 1
+
+    # …and canonicalization must not cost the exemption its OWN noisy spellings.
+    # "./" and "." segments are what a model writes without thinking about it, and
+    # before the fix they fell through to the guarded arm by accident of the glob.
+    assert_o_guard_verdict_both_parsers "$bindir" "dot segments inside an exempt path" \
+        "$(edit_payload "$repo" "./.kurama/./sdd/add-widget/state.md")" "0" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "a path that leaves .kurama and returns" \
+        "$(edit_payload "$repo" ".kurama/sdd/../sdd/add-widget/state.md")" "0" || return 1
+
+    # A ".." that climbs clean out of the project is still none of the guard's
+    # business — the fix must not turn "outside the repo" into a block.
+    assert_o_guard_verdict_both_parsers "$bindir" "a path that leaves the project entirely" \
+        "$(edit_payload "$repo" "../elsewhere/notes.md")" "0" || return 1
+    return 0
+}
+
+test_o_write_guard_resolves_symlinks_before_the_exemption_globs() {
+    # #94's other half. Lexical normalization alone still decides on a name: a
+    # symlink under .kurama/ keeps the exempt PREFIX while the write lands on
+    # repository code, so the longest EXISTING prefix is resolved with `cd -P` +
+    # `pwd -P` (macOS has neither `realpath -m` nor `readlink -f`).
+    #
+    # The root is resolved the same way, and that is not symmetry for its own sake:
+    # resolving only the target would make "$root"/* stop matching on any host whose
+    # project path crosses a symlink — /tmp -> /private/tmp on macOS, which is where
+    # this suite runs — and the guard would fall through to "outside the repo, allow".
+    # That is fail-OPEN, so the last assertion below pins it explicitly.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/symlink-guard"
+    make_active_cycle_repo "$repo"
+
+    # A symlink under the exempt directory pointing back at repository code.
+    ln -sfn "$repo/src" "$repo/.kurama/escape"
+    assert_o_guard_verdict_both_parsers "$bindir" "symlink under .kurama into repo code" \
+        "$(edit_payload "$repo" ".kurama/escape/widget.ts")" "2" || return 1
+
+    # The project reached through a symlinked root: same repo, same file, same
+    # verdict. If only one side of the glob were canonical this reads as "outside
+    # the repo" and the write is allowed.
+    local linkroot="$TEST_TMPDIR/symlink-guard-link"
+    ln -sfn "$repo" "$linkroot"
+    assert_o_guard_verdict_both_parsers "$bindir" "repo code reached through a symlinked root" \
+        "$(edit_payload "$linkroot" "src/widget.ts")" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "the marker reached through a symlinked root" \
+        "$(edit_payload "$linkroot" ".kurama/sdd/add-widget/state.md")" "0" || return 1
+    return 0
+}
+
+test_o_write_guard_reads_file_path_out_of_tool_input_only() {
+    # #93 claimed a payload could spoof file_path by spelling one out inside the
+    # Write CONTENT, and proposed swapping the read to json_root_str. Both halves of
+    # that are wrong, and this case pins why so the claim is not re-filed:
+    #
+    #   * content cannot spoof. Every quote inside a JSON string is serialized as
+    #     \" , which breaks the "<field>": "value" shape both extractors look for —
+    #     asserted below with the issue's own payload, under both parsers.
+    #   * json_root_str would read file_path at the ROOT, where it never is (it lives
+    #     in tool_input), so it would return empty and the guard would exit 0 on
+    #     EVERY write. The last block asserts the field is still read at all.
+    #
+    # What IS real, and what the fix closed, is a jq/no-jq DISAGREEMENT of exactly
+    # the class #70 was opened for: a same-named key in a NESTED object, serialized
+    # ahead of the real one, won the textual scan while jq returned the real value.
+    # file_path is now read as a direct key of tool_input by both halves.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/filepath-anchor"
+    make_active_cycle_repo "$repo"
+
+    # Non-vacuity: an honest exempt path IS honoured, so the blocks below are the
+    # guard refusing a spoof and not the guard having gone deaf to file_path.
+    assert_o_guard_verdict_both_parsers "$bindir" "an honest exempt file_path is honoured" \
+        "$(edit_payload "$repo" ".kurama/sdd/add-widget/state.md")" "0" || return 1
+
+    local content_spoof nested_spoof root_decoy edits_decoy
+    # The issue's payload: a fake pair inside content, serialized BEFORE the real key.
+    content_spoof='{"session_id":"s1","cwd":"'"$repo"'","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"content":"{\"file_path\": \"'"$repo"'/.kurama/scratch\"}","file_path":"src/widget.ts"}}'
+    # A nested OBJECT carrying the key — a real key, not text — ahead of the real one.
+    nested_spoof='{"session_id":"s1","cwd":"'"$repo"'","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"meta":{"file_path":"'"$repo"'/.kurama/scratch"},"file_path":"src/widget.ts"}}'
+    # A file_path at the ROOT must not outrank tool_input's, whichever comes first.
+    root_decoy='{"file_path":"'"$repo"'/.kurama/scratch","session_id":"s1","cwd":"'"$repo"'","hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/widget.ts"}}'
+    # …nor may one inside an array element, which is the shape MultiEdit carries.
+    edits_decoy='{"session_id":"s1","cwd":"'"$repo"'","hook_event_name":"PreToolUse","tool_name":"MultiEdit","tool_input":{"edits":[{"file_path":"'"$repo"'/.kurama/scratch","old_string":"a","new_string":"b"}],"file_path":"src/widget.ts"}}'
+
+    assert_o_guard_verdict_both_parsers "$bindir" "file_path spelled out inside content" \
+        "$content_spoof" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "file_path in a nested object, serialized first" \
+        "$nested_spoof" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "file_path at the payload root" \
+        "$root_decoy" "2" || return 1
+    assert_o_guard_verdict_both_parsers "$bindir" "file_path inside an edits[] element" \
+        "$edits_decoy" "2" || return 1
+    return 0
+}
+
+test_o_write_guard_decides_a_large_payload_promptly() {
+    # The guard runs on EVERY Edit/Write/MultiEdit, and a Write payload carries the
+    # whole file. The no-jq extractor is a segment walk precisely so it stays at C
+    # speed; a per-character shell or awk loop would turn a routine write into a
+    # multi-minute stall, and the canonicalization added for #94 must not put a
+    # per-byte pass back into the payload path (it works on the PATH, not the bytes).
+    #
+    # The bound is deliberately loose — this is a stall detector, not a benchmark.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/bigpayload"
+    make_active_cycle_repo "$repo"
+
+    local big
+    big="$(head -c 120000 /dev/zero | tr '\0' 'x')"
+    [ "${#big}" -ge 120000 ] || { echo "the 120KB content never got built (${#big} bytes)"; return 1; }
+
+    local payload started elapsed
+    payload="$(o_write_payload "$repo" "src/widget.ts" "$big")"
+
+    started=$(date +%s)
+    assert_eq "2" "$(o_hook_status "" "$WRITE_GUARD_HOOK" "$payload")" \
+        "with jq a 120KB Write to repo code must still be blocked" || return 1
+    assert_eq "2" "$(o_hook_status "$bindir" "$WRITE_GUARD_HOOK" "$payload")" \
+        "without jq a 120KB Write to repo code must still be blocked" || return 1
+    elapsed=$(( $(date +%s) - started ))
+    if [ "$elapsed" -gt 20 ]; then
+        echo "two 120KB payloads took ${elapsed}s — the payload scan is no longer linear"
+        return 1
+    fi
+    return 0
+}
+
+test_o_archive_gate_keys_on_the_launch_identity_not_the_payload_text() {
+    # #95. The gate decided whether a Task/Skill call was an archive launch with a
+    # raw substring test over the WHOLE payload, so any delegation that merely
+    # MENTIONED the phase — a prompt quoting the SDD phase list out of CLAUDE.md, a
+    # skill argument naming it — entered the gate and, with nothing to archive, was
+    # blocked outright. It is now keyed on the invoked identity: tool_input.skill,
+    # tool_input.subagent_type, tool_input.description. Free-form prose (prompt,
+    # args, content) is deliberately never consulted.
+    command -v jq >/dev/null 2>&1 || { echo "jq is required for the jq half of this case"; return 1; }
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/gate-identity"
+    make_active_cycle_repo "$repo"
+
+    local quoting args_mention real_skill real_agent real_desc
+    quoting="$(o_task_payload "$repo" "Fix the login bug" "general-purpose" \
+        "The SDD phases are sdd-explore, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify, sdd-archive. You are running NONE of them: just fix the login bug.")"
+    args_mention="$(o_skill_payload_with_args "$repo" "branch-pr" "open the PR before sdd-archive runs")"
+    real_skill="$(skill_payload "$repo" sdd-archive)"
+    real_agent="$(o_task_payload "$repo" "Close out the change" "sdd-archive" "Archive it.")"
+    real_desc="$(o_task_payload "$repo" "run sdd-archive" "general-purpose" "Archive it.")"
+
+    # There is no verify report anywhere, so a launch that reaches the gate BLOCKS.
+    # That is what makes the two pass-throughs meaningful rather than vacuous.
+    local p
+    for p in "$real_skill" "$real_agent" "$real_desc"; do
+        assert_eq "2" "$(o_hook_status "" "$ARCHIVE_GATE_HOOK" "$p")" \
+            "with jq a real sdd-archive launch must still be gated" || return 1
+        assert_eq "2" "$(o_hook_status "$bindir" "$ARCHIVE_GATE_HOOK" "$p")" \
+            "without jq a real sdd-archive launch must still be gated" || return 1
+    done
+
+    for p in "$quoting" "$args_mention"; do
+        assert_eq "0" "$(o_hook_status "" "$ARCHIVE_GATE_HOOK" "$p")" \
+            "with jq a launch that only MENTIONS the phase is not the gate's business" || return 1
+        assert_eq "0" "$(o_hook_status "$bindir" "$ARCHIVE_GATE_HOOK" "$p")" \
+            "without jq a launch that only MENTIONS the phase is not the gate's business" || return 1
+    done
+
+    # …and once the change really has a PASS, the real launches open the gate. Without
+    # this the case would also pass on a gate that blocks every archive forever.
+    write_verify_report "$repo" add-widget "PASS"
+    assert_eq "0" "$(o_hook_status "" "$ARCHIVE_GATE_HOOK" "$real_skill")" \
+        "a PASS verdict must still open the gate for a real launch" || return 1
+    assert_eq "0" "$(o_hook_status "$bindir" "$ARCHIVE_GATE_HOOK" "$real_agent")" \
+        "a PASS verdict must still open the gate without jq" || return 1
+    return 0
+}
+
+test_o_archive_gate_stays_quiet_on_a_repo_with_nothing_to_archive() {
+    # The exact shape #95 was filed from: a fresh clone right after sdd-init, where
+    # openspec/changes holds only archive/. The detection loop skips archive/, so no
+    # change resolved, and every Task/Skill call whose text happened to contain the
+    # phase name was blocked with "no verify-report found for change '<unknown>'" —
+    # a message describing a situation the caller was not in. Nothing here is an
+    # archive launch, so nothing may be blocked.
+    local repo="$TEST_TMPDIR/gate-freshclone"
+    make_git_repo "$repo"
+    mkdir -p "$repo/src" "$repo/openspec/changes/archive"
+    : > "$repo/openspec/changes/archive/.gitkeep"
+    printf 'x\n' > "$repo/src/app.ts"
+
+    local quoting
+    quoting="$(o_task_payload "$repo" "Fix the login bug" "general-purpose" \
+        "Phases: sdd-explore through sdd-verify, then sdd-archive. Just fix the login bug.")"
+    assert_eq "0" "$(o_hook_status "" "$ARCHIVE_GATE_HOOK" "$quoting")" \
+        "a fresh clone must not block an unrelated delegation that names the phase" || return 1
+
+    # A real launch in the same repo still blocks — and now says WHY it could not
+    # even name a change, instead of leaving '<unknown>' to be misread as a missing
+    # report for a change that exists.
+    HOOK_STATUS=0
+    run_hook "$ARCHIVE_GATE_HOOK" "$(skill_payload "$repo" sdd-archive)"
+    assert_eq "2" "$HOOK_STATUS" "a real archive launch with nothing to archive must still block" || {
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    printf '%s\n' "$HOOK_OUT" | grep -q 'No change could be resolved' || {
+        echo "the block never explains that no change was found at all:"
+        printf '%s\n' "$HOOK_OUT"; return 1; }
+    return 0
+}
+
+test_o_archive_gate_index_path_cannot_be_pre_empted() {
+    # #96 (CWE-377). compute_tree_hash used to mktemp a file, delete it so git would
+    # initialize a fresh index at that name, and let git recreate it — which throws
+    # away the exclusive-creation guarantee mktemp existed for: any local user who
+    # learns the name can create it in the window before git does.
+    #
+    # The consequence is not the redirected write the report assumed — modern git
+    # reads the index first and takes its lock with O_EXCL, so it FAILS instead. It
+    # is worse in kind: compute_tree_hash then returns nothing, the content binding
+    # degrades to "not computable", and a STALE receipt is archived. The gate that
+    # exists to catch an edit-after-PASS silently stops catching it.
+    #
+    # The race is made deterministic with two PATH shims: mktemp records the name it
+    # hands out for a PLAIN call (a `mktemp -d` call passes straight through), and rm
+    # plants a symlink at exactly that name right after deleting it — the attacker
+    # winning the window, every time. With the index inside a private mktemp -d
+    # directory there is no plain mktemp call to observe and no deleted name to
+    # re-create, so the binding still computes and the stale receipt still blocks.
+    local repo="$TEST_TMPDIR/gate-race"
+    make_active_cycle_repo "$repo"
+    write_verify_report "$repo" add-widget "PASS" "0000000000000000000000000000000000000000"
+
+    local shim="$TEST_TMPDIR/race-bin" slotf="$TEST_TMPDIR/race-slot" victim="$TEST_TMPDIR/race-victim"
+    rm -rf "$shim"; mkdir -p "$shim"
+    rm -f "$slotf"
+    printf 'the file the attacker points the name at\n' > "$victim"
+
+    local real_mktemp real_rm real_ln
+    real_mktemp="$(command -v mktemp)"
+    real_rm="$(command -v rm)"
+    real_ln="$(command -v ln)"
+
+    cat > "$shim/mktemp" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  case "\$a" in -*d*) exec "$real_mktemp" "\$@" ;; esac
+done
+p="\$("$real_mktemp" "\$@")" || exit 1
+printf '%s' "\$p" > "$slotf"
+printf '%s\n' "\$p"
+EOF
+    cat > "$shim/rm" <<EOF
+#!/usr/bin/env bash
+"$real_rm" "\$@"; rc=\$?
+slot=""
+[ -f "$slotf" ] && slot="\$(cat "$slotf")"
+if [ -n "\$slot" ]; then
+  for a in "\$@"; do
+    [ "\$a" = "\$slot" ] && "$real_ln" -s "$victim" "\$slot" 2>/dev/null
+  done
+fi
+exit \$rc
+EOF
+    chmod +x "$shim/mktemp" "$shim/rm"
+
+    local payload
+    payload="$(skill_payload "$repo" sdd-archive)"
+
+    # Non-vacuity: with no attacker at all the recorded hash is wrong, so the gate
+    # blocks on the stale receipt. That is the verdict the race must not be able to
+    # change.
+    local status=0
+    printf '%s' "$payload" | CLAUDE_PROJECT_DIR="" KURAMA_CHANGE=add-widget \
+        bash "$ARCHIVE_GATE_HOOK" > /dev/null 2>&1 || status=$?
+    assert_eq "2" "$status" "baseline: a Tree-Hash that does not match the tree must block" || return 1
+
+    status=0
+    printf '%s' "$payload" | CLAUDE_PROJECT_DIR="" KURAMA_CHANGE=add-widget \
+        PATH="$shim:$PATH" bash "$ARCHIVE_GATE_HOOK" > /dev/null 2>&1 || status=$?
+    assert_eq "2" "$status" "a pre-empted throwaway index must not suppress the content binding" || {
+        if [ -f "$slotf" ]; then
+            echo "  the index name handed out (and then re-creatable): $(cat "$slotf")"
+        fi
+        return 1; }
+
+    # The shims only fire on a PLAIN mktemp call, so their silence IS the property:
+    # the throwaway index name was never handed out to be pre-empted.
+    if [ -f "$slotf" ]; then
+        echo "compute_tree_hash still takes a plain mktemp path it has to delete first"
+        return 1
+    fi
+    return 0
+}
+
 echo -e "${BOLD}UNIT-L (issues #73, #102): session identity — persona, name, sdd-learn${NC}"
 run_test "persona absent installs a byte-identical tree" test_l_persona_absent_installs_a_byte_identical_tree
 run_test "neutral and absent are the same declared no-op" test_l_neutral_and_absent_are_the_same_declared_no_op
@@ -9552,6 +9957,17 @@ run_test "sdd-brainstorm is a well-formed, registered skill" test_m_brainstorm_i
 run_test "the ledger is a declared artifact in both conventions" test_m_the_ledger_is_a_declared_artifact_in_both_conventions
 run_test "the issue Decisions comment is offered, never automatic" test_m_the_issue_decisions_comment_is_offered_never_automatic
 run_test "sdd-ff announces the gate it bypasses" test_m_sdd_ff_announces_the_bypass
+
+echo ""
+
+echo -e "${BOLD}UNIT-O (issues #93–#96): the two shipped hooks${NC}"
+run_test "write guard canonicalizes the path before the exemption globs (#94)" test_o_write_guard_canonicalizes_before_the_exemption_globs
+run_test "write guard resolves symlinks on both sides of the globs (#94)" test_o_write_guard_resolves_symlinks_before_the_exemption_globs
+run_test "write guard reads file_path out of tool_input only (#93)" test_o_write_guard_reads_file_path_out_of_tool_input_only
+run_test "write guard decides a 120KB payload promptly (jq and awk)" test_o_write_guard_decides_a_large_payload_promptly
+run_test "archive gate keys on the launch identity, not the payload text (#95)" test_o_archive_gate_keys_on_the_launch_identity_not_the_payload_text
+run_test "archive gate stays quiet on a repo with nothing to archive (#95)" test_o_archive_gate_stays_quiet_on_a_repo_with_nothing_to_archive
+run_test "archive gate's throwaway index cannot be pre-empted (#96)" test_o_archive_gate_index_path_cannot_be_pre_empted
 
 echo ""
 

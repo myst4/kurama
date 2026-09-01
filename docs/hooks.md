@@ -34,6 +34,21 @@ an `openspec/changes/<name>/state.yaml` outside `archive/`, or a
 `.kurama/sdd/<name>/state.md` without an `archive-report.md`. The moment a change is
 archived, the guard steps aside.
 
+**The exemptions are decided on the resolved path, not the spelling.** The exempt
+arms are globs, so a raw path defeats them: `.kurama/../app/models/foo.rb` matches
+`.kurama/*` on the literal string and lands on repository code. Both the target and
+the project root are therefore canonicalized first — `.` and `..` are resolved
+*lexically* (a `Write` creates its target, so there may be nothing on disk to
+resolve yet, and there is no portable resolver to reach for: macOS ships neither
+`realpath -m` nor `readlink -f`), and symlinks are then resolved on the longest
+*existing* prefix with `cd -P` + `pwd -P`, so a symlink under `.kurama/` cannot keep
+an exempt prefix while the write lands elsewhere. Both sides of every glob go
+through the same steps: canonicalizing only the target would break `"$root"/*` on
+any host whose project path crosses a symlink (`/tmp` → `/private/tmp` on macOS) and
+the guard would fall through to "outside the repo, allow" — fail-open. Where the two
+steps disagree (a symlinked directory followed by `..`) the lexical answer is kept,
+which keeps the path inside the repo and therefore guarded.
+
 Both markers are on disk in **every** artifact-store mode. `.kurama/sdd/<name>/state.md`
 used to appear only when Engram was unreachable, so in the flagship configuration
 (Claude Code + Engram) state lived in Engram alone, no filesystem marker existed, and this
@@ -44,6 +59,20 @@ markers** — harness infrastructure written in every mode, like `.kurama/skill-
 writing `archive-report.md` is what retires the cycle; nothing else clears the guard.
 
 ### 2. Archive gate (no PASS, no archive)
+
+**What makes the gate engage is the invoked identity, never prose.** The gate is
+wired as a `PreToolUse` hook on `Task`/`Skill`, which fires for *every* delegation in
+the session, so it has to tell an archive launch from everything else. It reads three
+fields, and only these three: `tool_input.skill` (a `/sdd-archive` invocation),
+`tool_input.subagent_type` (the shipped `sdd-archive` agent), and
+`tool_input.description` (the short label of a generic launch). Free-form text —
+`prompt`, `args`, `content` — is deliberately not consulted: it is the model's own
+prose, which is exactly what must not decide a gate. It used to be, as a raw
+substring test over the whole payload, and any delegation that merely *mentioned*
+`sdd-archive` — a prompt quoting the phase list out of `CLAUDE.md` — entered the gate
+and, on a repo with nothing to archive, was blocked outright with a message
+describing a situation the caller was not in. A launch that carries no identity at
+all is still covered by `sdd-archive`'s prose Step 0 and by this script's CLI mode.
 
 `sdd-archive` Step 0 says: never archive a change whose verification report is
 missing or whose verdict is `FAIL`. That is the single most consequential gate in
@@ -70,10 +99,11 @@ still the code that earned it. Nothing stopped someone from passing verification
 then editing a file before archiving — the stale `PASS` would sail through. The gap is
 now closed by binding the receipt to the tree. `sdd-verify` (Step 6b) stamps a
 `Tree-Hash` in the report's **Content Binding** section: the hash of the reviewed tree,
-computed over a *throwaway* git index (`GIT_INDEX_FILE` points at a temp file, so the
-real index is never touched) with the `openspec/` artifact store and `.kurama/` harness
-state excluded. Step 0 of `sdd-archive` — and the `archive-gate.sh` hook — recompute
-that hash with the **identical** procedure and refuse the archive when it no longer
+computed over a *throwaway* git index (`GIT_INDEX_FILE` points at an `index` file inside
+a private `mktemp -d` directory, so the real index is never touched and the throwaway
+name is one no other local user can pre-empt) with the `openspec/` artifact store and
+`.kurama/` harness state excluded. Step 0 of `sdd-archive` — and the `archive-gate.sh`
+hook — recompute that hash with the **identical** procedure and refuse the archive when it no longer
 matches: the tree changed after verification, so the receipt is **STALE** and
 `sdd-verify` must be re-run. The two exclusions are what make this stable rather than
 noisy: writing the verify report and moving the change folder during archive are
