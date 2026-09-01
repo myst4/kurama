@@ -15,7 +15,9 @@ and cannot be talked out of it. Where the official Claude Code skills guidance s
 The shipped hooks live in
 [`examples/claude-code/hooks/`](../examples/claude-code/hooks/) with a
 [README](../examples/claude-code/hooks/README.md) covering installation and the
-exact settings snippet.
+exact settings snippet. They also run on **OpenCode**, through a thin plugin
+adapter — see [Enforcement tiers](#enforcement-tiers--what-each-harness-actually-guarantees)
+for which harness enforces which gate, and why.
 
 ## The two gates
 
@@ -140,21 +142,69 @@ produce a PASS. The hooks close the two failure modes that are *purely structura
 — the orchestrator taking a shortcut, and an unverified archive — and leave the
 judgement calls to the parts of the system designed to make them.
 
-## Per-harness applicability
+## Enforcement tiers — what each harness actually guarantees
 
-Hooks are a platform capability, so how far these gates reach depends on the harness.
+"Supports 5 harnesses" is true for installation, skills, agents and the SDD flow.
+It has never been true for **enforcement**, and that difference is the single
+biggest asymmetry between the five. A user installing on Codex today would
+reasonably assume the archive gate protects them; it does not. So every harness
+carries an explicit tier, and you can read it before you install.
 
-| Harness | Native hook support | How the gates apply |
-|---------|---------------------|---------------------|
-| **Claude Code** | Yes — `PreToolUse` (and other events) via `settings.json`. | Ships here. Wire `hooks.json`; both gates run automatically. |
-| **OpenCode** | Partial — plugin lifecycle, not a generic pre-tool gate. | The delegate-only rule stays **prose** here: the shipped `opencode.single.json` grants the orchestrator `write`, `edit` and `bash` (all `true`), so nothing mechanically stops it from editing code — only the orchestrator instructions do. The archive gate can run as `archive-gate.sh <change>` from a command wrapper. |
-| **Codex CLI / Pi / omp** | No general-purpose tool-gate hook today. | Run the gates **manually / in CI**: `archive-gate.sh <change>` before closing a change, and the write guard's spirit stays prose (the orchestrator instructions). |
+Two tiers, and nothing in between:
 
-Because the scripts gate purely by **stdin JSON in, exit code out**, they are not
-Claude-Code-specific: any harness that can run a command before a tool call, or any
-CI step, can reuse them unchanged. On harnesses without a native pre-tool hook, the
-same rules remain enforced the original way — by the orchestrator instructions and
-by human/CI review — which is the fallback the whole framework is designed around.
+- **Enforced (hook-backed)** — the gate is a mechanism. The harness runs a
+  deterministic check before the tool call and the call does not happen if the
+  check refuses. The model cannot forget it or argue with it.
+- **Advisory (prose)** — the same rule exists, in the orchestrator instructions.
+  A model can drop it under compaction, in a long session, or when it is in a
+  hurry. Nothing stops the tool call.
+
+| Harness | Write guard | Archive gate | Primitive it rests on |
+|---------|-------------|--------------|-----------------------|
+| **Claude Code** | **Enforced** | **Enforced** | `PreToolUse` hooks wired in `settings.json`; exit 2 blocks the call and stderr goes back to the model. |
+| **OpenCode** | **Enforced** | **Enforced** | The `tool.execute.before` plugin hook. Its declared return type is `Promise<void>`, so a returned value can never deny — **throwing** is the veto, and it works because OpenCode awaits the hook *before* the tool body and does not catch what it throws. Ships as [`examples/opencode/plugins/kurama-sdd-gates.ts`](../examples/opencode/plugins/kurama-sdd-gates.ts). |
+| **Pi** | Advisory | Advisory | A veto primitive **does** exist and is verified — `pi.on("tool_call", …)` may return `{ block: true, reason }` — but neither gate ports cleanly yet. See the note below. |
+| **omp** | Advisory | Advisory | Same as Pi: `tool_call` with `{ block: true, reason }` is honoured by the runtime (it is also how omp reports an extension that timed out). Same blockers. |
+| **Codex** | Advisory | Advisory | No pre-tool event to hook. The Codex hooks surface in use is `SessionStart` in `~/.codex/hooks.json` — a lifecycle event, not a tool gate. Codex also runs skills **inline** rather than as sub-agents, so the orchestrator/executor boundary the write guard enforces is not expressible there at all. |
+
+**Why Pi and omp are advisory even though the primitive exists.** Two things are
+missing, and both are about the *gates*, not the harness:
+
+- The write guard's whole job is to separate the **main thread** from a
+  **delegated writer** — it blocks the first and waves the second through. On
+  Claude Code that discriminator is the payload's root `agent_id`; on OpenCode it
+  is the session's `parentID`. Pi's `tool_call` event carries `toolName`,
+  `input` and a context with `cwd`, and no agent identity. Without a
+  discriminator the guard would block every write during a cycle — including the
+  delegated writer's — which is a gate that fails on the happy path, and those
+  teach the model to switch them off.
+- The archive gate needs a **launch to intercept**. It fires on the Task/Skill
+  call that starts `sdd-archive`. Pi has no skill-invocation tool: skills are
+  injected into the prompt, so there is no tool call carrying the identity
+  `sdd-archive` to gate. Gating the *effect* instead (the write that moves the
+  change folder) is possible, but it is different decision logic — a second
+  implementation, which is exactly what the OpenCode port was designed to avoid.
+
+Neither is a dead end; both are follow-up work with a verified primitive waiting
+for them. What matters here is that the table says **advisory** today rather than
+implying coverage that does not exist.
+
+**The scripts themselves are not Claude-Code-specific.** They gate purely by
+**stdin JSON in, exit code out**, which is why the OpenCode port is a ~200-line
+adapter and not a rewrite: it translates the event into the same payload, runs
+the same script, and turns exit 2 back into a thrown error. Any harness that can
+run a command before a tool call — or any CI step — can reuse them unchanged:
+`archive-gate.sh <change>` also runs standalone, which is the recommended fallback
+on the advisory harnesses.
+
+**One implementation, two harnesses.** The decision logic for both gates lives in
+`examples/claude-code/hooks/*.sh` and nowhere else. The OpenCode plugin does not
+re-implement active-cycle detection, the path exemptions, the verdict parser or
+the Content Binding hash — a second copy would drift silently while both harnesses
+went on reporting "enforced". `scripts/install_test.sh` (`UNIT-X`) pins this two
+ways: a parity suite that feeds both sides the same scenarios and requires
+identical block/allow decisions, and a structural check that the plugin contains
+none of the gate literals.
 
 ## Limits worth stating plainly
 
