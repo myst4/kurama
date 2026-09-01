@@ -171,6 +171,7 @@ Every phase MUST return a structured envelope to the orchestrator:
 - `next_recommended`: the next SDD phase to run, or "none"
 - `risks`: risks discovered, fallbacks used, or hybrid reconciliation notes; "None" if there are none
 - `skill_resolution`: how skills were loaded — `injected` (received Project Standards from orchestrator), `fallback-registry` (self-loaded from registry), `fallback-path` (loaded via SKILL: Load path), or `none` (no skills loaded). This field is REQUIRED in every envelope.
+- `key_learnings`: the envelope's CLOSING section — 1-5 gotchas, edge cases, or non-obvious decisions this phase discovered. Omitted entirely when the phase found nothing non-obvious. Shape and rules below.
 
 Example:
 
@@ -183,3 +184,46 @@ Example:
 **Skill Resolution**: injected — 3 skills (react-19, typescript, tailwind-4)
 (other values: `fallback-registry`, `fallback-path`, or `none — no registry found`)
 ```
+
+### Key Learnings — the envelope's closing section
+
+Close the final report message with a `## Key Learnings` section: a **numbered list of 1-5
+items**, each a gotcha, an edge case, or a non-obvious decision this phase discovered. A memory
+engine extracts these **verbatim**, with no model re-reading them, so the shape below is a
+contract and not style advice:
+
+- Each item is a **standalone factual sentence of at least 20 characters and 4 words**. Those
+  two numbers are Engram's **extraction thresholds**, not a readability preference: an item
+  under either one is dropped silently, and nobody is told. Do not "simplify" them away.
+- Write each item so it survives on its own — **what** was learned, **why it matters**, and
+  **where** it lives (repo-relative path, module, or artifact key). The reader is a future
+  session with no memory of this cycle.
+- **Omit the whole section when the phase learned nothing non-obvious.** An empty or padded
+  section is noise that dilutes every real learning around it. Omission is a correct return,
+  never a contract violation — no phase is ever blocked for having no learnings.
+- **Never restate the phase's main output.** `executive_summary` already says what was done;
+  a learning is what the next person would otherwise rediscover the hard way.
+- **Never write a secret, a token, or an absolute machine path.** These lines are persisted
+  and re-read across sessions and machines; keep every path repo-relative.
+
+This applies to the **final text response to the orchestrator** — not to intermediate tool
+output, and not to the artifact body persisted in Section C.
+
+```markdown
+## Key Learnings
+1. `sdd-verify` reads the test runner from the pipeline settings, not from the repo lockfile, so a monorepo with two runners verifies only the configured one.
+2. A MODIFIED delta block must carry every scenario of the requirement it modifies; a partial block deletes the omitted scenarios at archive time (`skills/_shared/openspec-convention.md`).
+```
+
+**How this relates to the two memory stores.** Key Learnings feeds BOTH and replaces NEITHER —
+the boundary between the four stores is the table in `docs/persistence.md`:
+
+- **Engram** captures the section **passively**, for **one developer's** cross-session recall.
+  Machine-local, never committed, no curation step: it is simply there next session.
+- **`sdd-learn`** curates the **team's** committed `MEMORY.md` at cycle close, and these items
+  are its richest raw input. It still applies its own admission test ("would a teammate waste
+  an hour rediscovering this?"), so a learning written here is a *candidate*, not an entry.
+
+So a phase writes its learnings once and both stores are served. Skipping the section costs the
+developer their passive recall AND leaves `sdd-learn` reconstructing the cycle from artifacts
+that, by the rule above, deliberately do not contain it.

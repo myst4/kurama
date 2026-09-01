@@ -43,13 +43,17 @@ manual copy step is needed:
 
 ### Sub-Agent Result Contract
 
-Every sub-agent returns a structured envelope (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`) to the orchestrator. The canonical field list, description, and example live in [`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md), Section D — see it there instead of duplicating it here.
+Every sub-agent returns a structured envelope (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`) to the orchestrator, closed by a `## Key Learnings` section. The canonical field list, description, and example live in [`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md), Section D — see it there instead of duplicating it here.
+
+**Key Learnings** is that closing section: 1-5 numbered items, each a gotcha, an edge case, or a non-obvious decision the phase discovered, written as a standalone sentence (at least 20 characters and 4 words — Engram's extraction thresholds, not style advice) that names *what*, *why it matters*, and *where*. It is **omitted entirely** when the phase found nothing non-obvious, it never restates `executive_summary`, and it never carries a secret or an absolute machine path. It applies to the phase's final text response, not to intermediate tool output or to the persisted artifact body. The same section serves the two memory stores without replacing either — Engram captures it passively for one developer, and `sdd-learn` curates the team's committed `MEMORY.md` from it at cycle close; the boundary between the four stores is the table in [docs/persistence.md](persistence.md#memorymd--durable-team-knowledge).
 
 ### Sub-Agent Context Protocol
 
 Sub-agents start with a **fresh context**. The canonical injection and fallback protocol — how the orchestrator resolves the registry, matches skills, injects compact rules as `## Project Standards (auto-resolved)`, and how sub-agents report `skill_resolution` back — lives in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md); this section only summarizes it: if no `## Project Standards` block arrives, sub-agents fall back to registry lookup or explicit `SKILL: Load` paths.
 
 Sub-agents are also instructed to save discoveries, decisions, and bug fixes to engram automatically (non-SDD sub-agents) or via the mandatory persist step (SDD phases).
+
+The same contract closes the cycle it opens: once the envelope has been read, validated and synthesized, the orchestrator **reaps the sub-agent** — a delegation is not complete while a finished agent is still holding its context in the agent list. On Claude Code that is the shutdown request to the named teammate; on a harness with no termination primitive it is holding no reference to the agent and saying so. The single exception, and the way to declare it, is in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) → *Step 5*: keep an agent alive only while you still intend to send it a follow-up message, and name that intent when you decide it.
 
 ---
 

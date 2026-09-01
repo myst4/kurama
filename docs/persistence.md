@@ -139,6 +139,17 @@ installs it has no access to a single line of it. `MEMORY.md` travels through
 git, so a teammate without Engram loses nothing from it. That is the whole
 reason it exists as a separate file rather than as more Engram artifacts.
 
+**Where the raw material comes from.** Every SDD phase closes its return
+envelope with a `## Key Learnings` section — 1-5 gotchas, edge cases or
+non-obvious decisions found during that phase, omitted entirely when there
+were none (see
+[sdd-phase-common.md](../skills/_shared/sdd-phase-common.md) → Section D).
+That one section feeds the last two stores in the table and replaces neither:
+**Engram** captures it passively, for the developer who ran the cycle, while
+**`sdd-learn`** reads it as the freshest input when it curates `MEMORY.md` at
+cycle close — still subject to the admission test below, so a learning is a
+candidate for the team's file, never an automatic entry in it.
+
 **What goes in it** — non-obvious discoveries, gotchas and failure modes,
 conventions the team established, decisions together with the rationale behind
 them, and the reason a surprising piece of code is the way it is. **What does

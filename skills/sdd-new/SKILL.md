@@ -157,3 +157,6 @@ delegations are skipped.
   `skills/_shared/sdd-phase-common.md`; surface its `executive_summary` and `next_recommended`.
 - Pass the brainstorm ledger downstream by reference when one exists; an absent ledger is normal and
   never blocks a phase.
+- Reap each phase agent as soon as you have synthesized its envelope — the delegation is not
+  complete until the agent is shut down, and the only reason to keep one alive is a follow-up
+  message you name when you decide it (`skills/_shared/skill-resolver.md` → *Step 5*).
