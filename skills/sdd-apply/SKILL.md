@@ -105,9 +105,63 @@ FOR EACH TASK:
 └── Note any issues or deviations
 ```
 
+### Step 3c: Hard Gate (All Modes) — Work Unit Evidence
+
+**This gate runs in EVERY mode and with `tdd.enabled` true OR false.** It is the floor of
+execution evidence. With TDD off — the default — nothing else in this phase forces you to run
+anything, so a work unit could be marked complete on your word alone. This block is what makes
+"done" auditable, and `sdd-verify` audits it (its Step 2a).
+
+A **work unit** is the smallest group of tasks you complete and mark together — in practice the
+batch the orchestrator assigned you inside ONE phase. A batch spanning several phases produces
+one block per phase.
+
+Before marking ANY task of a work unit complete, run the checks and record all three fields:
+
+| Field | What goes in it |
+|-------|-----------------|
+| **Test** | The smallest command that proves THIS unit, verbatim, AND its exact result — exit code plus pass/fail counts, or the verbatim last lines of its output. |
+| **Harness** | The harness/runtime the unit actually ran under — the project's real integration path (dev server + request, CLI invocation, migration run, the built binary), with its exact result. |
+| **Rollback** | The rollback boundary: exactly what to revert to undo THIS unit and nothing else — the commit, the file list, or the migration step to reverse. |
+
+Record it under the unit's tasks, in whichever artifact this mode uses to mark completion
+(`tasks.md` for `openspec`/`hybrid`; the tasks artifact content for `engram`):
+
+```markdown
+- [x] 2.1 Add `ValidateToken()` to `internal/auth/service.go`
+- [x] 2.2 Wire the validator into `internal/server/router.go`
+
+**Work Unit Evidence — Phase 2 (2.1-2.2)**
+- Test: `go test ./internal/auth -run TestValidateToken` -> exit 0, 4 passed / 0 failed
+- Harness: `go run ./cmd/api` + `curl -sf localhost:8080/healthz` -> `200 OK`
+- Rollback: revert `internal/auth/service.go`, `internal/auth/service_test.go`, `internal/server/router.go` (commit `a1b2c3d`)
+```
+
+Rules for the block:
+
+- **`N/A` is valid ONLY with a reason on the same line** — `N/A - no test infra configured in
+  this project`, `N/A - doc-only unit, nothing executable changed`, `N/A - library change with
+  no runtime boundary`. A bare `N/A`, an empty field, or an omitted line is a GAP, not an
+  answer, and `sdd-verify` audits it as one.
+- **Never claim a pass without the command that produced it.** "tests pass" with nothing
+  recorded is exactly the claim this gate exists to stop.
+- **Never fabricate output.** Record what the command actually printed. If you did not run it,
+  write `N/A - not run` plus the reason rather than inventing a result.
+- **Rollback never takes `N/A`.** A unit that changed files always has a revertible boundary —
+  name the files, the commit, or the migration step to reverse.
+- **Do NOT mark a unit's tasks complete when the focused test command or an applicable harness
+  FAILED.** Fix it inside this batch, or return `partial`/`blocked` per **Section D** naming the
+  failure. Marking `[x]` over a red result is the failure mode this gate forbids.
+- **This block SUPPLEMENTS the TDD module — it never replaces it and never competes with it.**
+  When `tdd.enabled` is true, the full RED → GREEN → REFACTOR evidence from
+  `skills/tdd/SKILL.md` stays exactly as it is and this block is recorded IN ADDITION. Nothing
+  about this gate depends on `tdd.enabled`, and TDD being off never lowers it.
+
 ### Step 4: Mark Tasks Complete
 
-Update `tasks.md` — change `- [ ]` to `- [x]` for completed tasks:
+Update `tasks.md` — change `- [ ]` to `- [x]` for completed tasks, and land the Step 3c
+**Work Unit Evidence** block for the unit in the SAME edit. The mark and its evidence travel
+together: never write an `[x]` this batch without the block that backs it.
 
 ```markdown
 ## Phase 1: Foundation
@@ -115,6 +169,11 @@ Update `tasks.md` — change `- [ ]` to `- [x]` for completed tasks:
 - [x] 1.1 Create `internal/auth/middleware.go` with JWT validation
 - [x] 1.2 Add `AuthConfig` struct to `internal/config/config.go`
 - [ ] 1.3 Add auth routes to `internal/server/server.go`  ← still pending
+
+**Work Unit Evidence — Phase 1 (1.1-1.2)**
+- Test: `go test ./internal/auth ./internal/config` -> exit 0, 11 passed / 0 failed
+- Harness: `N/A - no runtime boundary yet; routes are wired in 1.3`
+- Rollback: revert `internal/auth/middleware.go`, `internal/config/config.go` (commit `9f1c204`)
 ```
 
 ### Step 5: Persist Progress
@@ -129,8 +188,14 @@ Update `tasks.md` — change `- [ ]` to `- [x]` for completed tasks:
    `mem_search` → `mem_get_observation`; openspec/hybrid: read the progress file). An absent
    artifact means this is the first batch — an empty baseline, not an error.
 2. **Merge** — union the prior batch's completed/pending task states with this batch's results.
-   A task an earlier batch marked complete STAYS complete.
+   A task an earlier batch marked complete STAYS complete, and every earlier unit's **Work Unit
+   Evidence** block is carried forward VERBATIM. Evidence is append-only: add this batch's
+   blocks, never rewrite, summarize, or drop an earlier one.
 3. **Write back** — persist the merged whole under the same `topic_key`.
+4. **Read back** — re-read the persisted tasks artifact and confirm that every task you are
+   about to report complete is actually `[x]` there AND carries its Work Unit Evidence block.
+   Your internal todo list is NOT completion evidence; only the persisted artifact is. Report
+   any task that did not land as `partial`, naming it.
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `apply-progress`
@@ -147,6 +212,10 @@ Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Pop
 - **Mode** — TDD or Standard
 - **Completed Tasks** — checklist of tasks finished this batch
 - **Files Changed** — table of File | Action (Created/Modified) | What Was Done
+- **Work Unit Evidence** (ALL modes — mandatory, NEVER omitted) — one Step 3c block per work
+  unit completed this batch: Test command + exact result, Harness + exact result, Rollback
+  boundary, each `N/A` carrying its reason. This field does not depend on `tdd.enabled` and it
+  supplements the **Tests (TDD)** field below rather than replacing it — in TDD mode both appear.
 - **Tests** (TDD mode only, omit if standard mode) — the per-task RED/GREEN/REFACTOR evidence
   table in the canonical format from `skills/tdd/SKILL.md` (Task/scenario ID | Test File |
   RED fail output | GREEN pass | REFACTOR). Follow that skill's format; do not invent a new one.
@@ -164,6 +233,16 @@ Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Pop
 - If you discover the design is wrong or incomplete, NOTE IT in your return summary — don't silently deviate
 - If a task is blocked by something unexpected, STOP and return a `blocked` envelope per **Section D** naming the blocker, instead of guessing
 - NEVER implement tasks that weren't assigned to you
+- ALWAYS record the Step 3c **Work Unit Evidence** block before marking a work unit's tasks
+  complete — in EVERY mode, with `tdd.enabled` true or false. Test command + exact result,
+  harness/runtime + exact result, and the rollback boundary. `N/A` counts only when it states
+  its reason; a bare `N/A` or an omitted line is a gap
+- NEVER mark a unit complete when its focused test command or an applicable harness FAILED, and
+  NEVER claim a pass without recording the command that produced it — return `partial`/`blocked`
+  instead
+- The Work Unit Evidence block SUPPLEMENTS the TDD module and never substitutes for it: with
+  `tdd.enabled` true, RED / GREEN / REFACTOR evidence stays mandatory and this block is written
+  in addition
 - NEVER blind-overwrite `apply-progress` — read the existing artifact FIRST, merge this batch's task states into it, and write the merged whole (read-merge-write); a `topic_key` upsert replaces, it does not append, so a blind save erases earlier batches' completions
 - Skill loading is handled in Step 1 — follow any loaded skills strictly when writing code
 - Apply any `rules.apply` from `openspec/config.yaml`

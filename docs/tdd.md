@@ -15,6 +15,16 @@ later** — the module is there when you want it, inert until you flip the switc
 See [Enabling TDD later](#enabling-tdd-later) for the mid-stream path and
 [Installation vs activation](#installation-vs-activation) for the on-disk side.
 
+> **Work Unit Evidence is always on; this module stacks on top of it.** Independently of TDD
+> and of `tdd.enabled`, `sdd-apply` must record a **Work Unit Evidence** block for every work
+> unit before marking its tasks complete — the focused test/check command and its exact result,
+> the harness/runtime it ran under (each `N/A` only ever with a stated reason), and the rollback
+> boundary — and `sdd-verify` audits those blocks in every mode, at WARNING level and up to
+> CRITICAL when a unit that touched code claims passing tests with no command. Enabling TDD
+> never replaces that block: RED → GREEN → REFACTOR evidence and the scenario→test traceability
+> audit are added on top of it, and their own findings stay WARNING-level. Disabling TDD removes
+> the cycle, never the evidence.
+
 The module core is language-agnostic. The RED → GREEN → REFACTOR protocol,
 anti-patterns, and evidence format live in one place:
 [skills/tdd/SKILL.md](../skills/tdd/SKILL.md). Per-runner commands live in

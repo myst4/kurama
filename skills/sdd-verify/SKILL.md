@@ -74,6 +74,52 @@ Read tasks.md
 └── Flag: CRITICAL if core tasks incomplete, WARNING if cleanup tasks incomplete
 ```
 
+### Step 2a: Work Unit Evidence Audit (ALL modes — never conditional)
+
+`sdd-apply` records a **Work Unit Evidence** block for every work unit BEFORE marking its tasks
+complete (its Step 3c: the focused test/check command and its exact result, the harness/runtime
+it ran under, and the rollback boundary). Audit those blocks here. This step runs in EVERY mode
+and is **independent of `compliance_mode` and of `tdd.enabled`** — a project with TDD off is
+precisely where this block is the ONLY execution evidence that exists.
+
+Read the tasks artifact and the apply report / `apply-progress`, then for each work unit whose
+tasks are marked `[x]`:
+
+```
+FOR EACH work unit marked complete:
+├── Is there a Work Unit Evidence block at all?
+├── Test: a verbatim command AND its exact result (exit code, pass/fail counts, or output lines)?
+├── Harness: a command and result, or an `N/A` that STATES its reason?
+├── Rollback: a named boundary (commit, file list, or migration step to reverse)?
+└── Did this unit touch code, or only docs/config? (apply report's Files Changed table,
+    cross-checked against the change's actual diff — this is what selects the severity below)
+```
+
+| Finding on a unit marked `[x]` | Severity |
+|--------------------------------|----------|
+| No Work Unit Evidence block at all | **WARNING** — **CRITICAL** when the unit touched code |
+| A claimed pass ("tests pass", "all green", a bare ✅) with no command recorded | **WARNING** — **CRITICAL** when the unit touched code |
+| `N/A` on Test or Harness with no stated reason | **WARNING** |
+| Rollback boundary missing, or `N/A` (never a valid answer there) | **WARNING** |
+| A recorded command whose recorded result is a FAILURE | **CRITICAL** in both compliance modes — contrary evidence is never softened |
+
+The floor is WARNING: an unevidenced `[x]` is never merely a suggestion. The CRITICAL cases are
+the two where the report asserts something it cannot back — code changed with no command at all,
+or code changed and tests claimed passing with no command — plus a recorded failure sitting under
+a checked box.
+
+Record the findings in the report's **Work Unit Evidence Audit** section (Step 8).
+
+**How this composes with the TDD audit (Step 6a).** Both run; neither replaces the other, and
+neither is skipped because the other ran. This step asks *was anything executed at all, and can
+this unit be undone* — mandatory in every mode, and CRITICAL at its worst. Step 6a asks *was the
+test written FIRST, and does it trace to a MUST scenario* — only when `tdd.enabled`, and capped
+at WARNING. With TDD on you run BOTH over the same apply report: Step 6a's RED-evidence check
+adds scenario→test traceability ON TOP of this block, so a unit can satisfy this gate (it ran
+something and recorded the result) and still earn a Step 6a "test-after detected" WARNING. Never
+downgrade a CRITICAL here to a WARNING on the grounds that the TDD audit's findings are capped
+there — they are different properties with different severities.
+
 ### Step 3: Check Correctness (Static Specs Match)
 
 For EACH spec requirement and scenario, search the codebase for structural evidence:
@@ -399,6 +445,19 @@ Return to the orchestrator the same content you wrote to `verify-report.md`:
 
 ---
 
+### Work Unit Evidence Audit
+_(ALL modes, never conditional — independent of `compliance_mode` and `tdd.enabled`. Step 2a. Findings are WARNING, and CRITICAL when a unit that touched code carries no command or claims a pass without one, or when a recorded result is a failure under an `[x]`.)_
+
+| Work unit | Test command + result | Harness | Rollback boundary | Finding |
+|-----------|-----------------------|---------|-------------------|---------|
+| Phase 2 (2.1-2.2) | `go test ./internal/auth -run TestValidateToken` -> exit 0, 4/0 | `curl -sf :8080/healthz` -> 200 | `internal/auth/service.go` +2 files (`a1b2c3d`) | ✅ complete |
+| Phase 3 (3.1) | (none recorded) | (none) | (none) | ❌ CRITICAL — code touched, no command |
+| Phase 4 (4.1) | `N/A - doc-only unit` | `N/A - no runtime boundary` | `docs/tdd.md` | ✅ complete (N/A with reason) |
+
+{List every unit whose evidence is missing or incomplete; "All units evidenced" when none}
+
+---
+
 ### TDD Audit
 _(only when `tdd.enabled`; all findings are WARNING — never CRITICAL — and independent of compliance mode)_
 
@@ -471,6 +530,8 @@ Also surface the same hash to the orchestrator in the return envelope so it is s
 - ALWAYS execute tests when a test runner resolves — in `behavioral` mode, static analysis alone is not verification
 - In `behavioral` mode, a spec scenario is only COMPLIANT when a test that covers it has PASSED, and a MUST scenario with no passing test is CRITICAL
 - In `static` mode, a scenario with structural evidence is COMPLIANT (static) and a missing test is a WARNING, not a blocker; a test that exists but FAILS stays CRITICAL in both modes
+- ALWAYS run the **Work Unit Evidence Audit** (Step 2a) in EVERY mode — it is independent of `compliance_mode` and of `tdd.enabled`, and it is never skipped. A unit marked `[x]` with no evidence block, or with a claimed pass and no recorded command, is a WARNING at minimum and CRITICAL when that unit touched code; a rollback boundary that is missing or `N/A` is a WARNING; a recorded command whose recorded result is a FAILURE under an `[x]` is CRITICAL in both compliance modes
+- Step 2a and Step 6a COMPOSE, they do not substitute: with `tdd.enabled` true both run over the same apply report, the TDD audit adding scenario → test traceability and RED evidence on top of the always-on evidence block. Never skip one because the other ran, and never downgrade a Step 2a CRITICAL because TDD-audit findings are capped at WARNING
 - When `tdd.enabled` resolves true (Step 6a — same precedence as `compliance_mode`), run the two TDD-audit checks (scenario → test traceability for MUST scenarios; RED evidence in the apply report). Missing either is a WARNING labeled "test-after detected" — NEVER CRITICAL, and independent of `compliance_mode`. When `tdd.enabled` is false, skip Step 6a entirely
 - Detect the test runner via `skills/_shared/test-runners.md` (Step 5b) — the single runner table shared with `sdd-apply` and `skills/tdd`
 - Stamp a **Content Binding** receipt (Step 6b): a `Tree-Hash` computed over a THROWAWAY git index (`GIT_INDEX_FILE` temp file — never the real index), excluding `openspec/` and `.kurama/`. Record it in the report's Content Binding section AND surface it in the return envelope (`Reviewed-Tree: {tree_hash}`) so the orchestrator stamps it into the state artifact. sdd-archive Step 0 and the archive-gate hook recompute it and block on a mismatch (STALE — re-run sdd-verify). Keep the pathspec byte-identical across all three
