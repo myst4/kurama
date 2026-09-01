@@ -220,8 +220,9 @@ Two independent things, easy to conflate:
   include it in the default set. Remove it with
   `install.sh --without optional` if you never want the module on disk — module
   selection is an `install.sh` flag; `setup.sh` has no `--without` and rejects it.
-  `kanban-github` is now the only member of the `optional` group, so the flag drops
-  exactly that one skill (`go-testing` moved to the opt-in `lang` group).
+  The `optional` group holds five skills — `kanban-github`, `sdd-learn`,
+  `sdd-brainstorm`, `kurama-report` and `systemic-issue-triage` — so the flag drops
+  all five, not just the board.
 - **Activating the board** turns board sync on for a *specific project* via the
   explicit `kanban.enabled` flag, and requires a configured `gh`. Installing the
   module never activates it; the flag starts `false` everywhere, and no project state

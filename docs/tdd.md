@@ -151,12 +151,12 @@ as separate skills and reach sub-agents as compact rules through the skill
 registry — the orchestrator injects the relevant rules into the phase prompt, so a
 sub-agent gets, say, Go idioms without loading a whole skill file.
 
-[go-testing](../skills/go-testing/SKILL.md) is the reference example: table-driven
-tests, golden files, `t.TempDir()`, and TUI/teatest patterns for Go. Future
-plugins (e.g. `vitest-testing`, `pytest-testing`) follow the same shape — a
-focused, language-scoped patterns skill in the optional install group, discovered
-and compacted by the registry. The `tdd` core provides the cycle; the plugin
-provides the language's idioms.
+Kurama ships none of them, on purpose: a skill named after one ecosystem is a
+privilege the other ecosystems never get. Write your own — `vitest-testing`,
+`pytest-testing`, whatever your stack calls for — as a focused, language-scoped
+patterns skill, and drop it anywhere the registry scans. The `tdd` core supplies
+the cycle; your skill supplies the idioms, and the two meet in the phase prompt
+without either one knowing about the other.
 
 ## Installation vs activation
 
@@ -167,8 +167,8 @@ Two independent things, easy to conflate:
   `setup.sh` and `install.sh` both include it in the
   default set. Remove it with `setup.sh --without tdd` if you never want the module
   on disk — `setup.sh` owns `--with`/`--without` module selection, and `install.sh`
-  forwards those flags to it. (The language-pattern plugins like `go-testing` live in the separate
-  opt-in `lang` group.)
+  forwards those flags to it. (No language-pattern plugin ships with Kurama; yours
+  arrives through the skill registry instead of through a group flag.)
 - **Activating TDD** turns the RED → GREEN → REFACTOR cycle on for a *specific
   project* via the explicit `tdd.enabled` flag above. Installing the module never
   activates it; the flag starts `false` everywhere, and existing test files never

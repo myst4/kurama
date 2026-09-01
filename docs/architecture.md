@@ -161,8 +161,8 @@ kurama/
 ├── .claude-plugin/                    ← Claude Code plugin packaging (alternative to manual copy)
 │   ├── plugin.json                    ← name/version (from VERSION)/description/skills path
 │   └── marketplace.json               ← Single-entry marketplace example for `/plugin marketplace add`
-├── skills/                            ← 29 skill files (28 installed by default) + shared conventions
-│   ├── manifest.json                  ← Declares every skill (group: sdd-core | quality | review | optional | tdd | lang) + per-harness install targets; installers read this instead of a hardcoded list. `lang` is OFF by default — a default install carries no language-specific knowledge
+├── skills/                            ← 28 skill files (all installed by default) + shared conventions
+│   ├── manifest.json                  ← Declares every skill (group: sdd-core | quality | review | optional | tdd) + per-harness install targets; installers read this instead of a hardcoded list. Every group ships by default, and none of them carries language-specific knowledge
 │   ├── _shared/                       ← Shared conventions (referenced by all skills) + shipped helper scripts
 │   │   └── build-skill-registry.sh   ← Writes .kurama/skill-registry.md (index only, no model in the loop)
 │   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: the canonical DAG, change-size path, Phase I/O table, and Sections A-D (skill loading, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
@@ -187,7 +187,6 @@ kurama/
 │   ├── sdd-archive/SKILL.md
 │   ├── skill-registry/SKILL.md       ← Runs _shared/build-skill-registry.sh (writes .kurama/skill-registry.md)
 │   ├── judgment-day/SKILL.md         ← Dual blind review + fix loop
-│   ├── go-testing/SKILL.md           ← Go test patterns (`lang` group, OFF by default — opt in with `install.sh --with lang`)
 │   ├── skill-creator/SKILL.md        ← Creates new skills from templates
 │   ├── tdd/SKILL.md                  ← RED-GREEN-REFACTOR module (`tdd` group, installed by default; activation stays opt-in per project — opt out with `install.sh --without tdd`)
 │   ├── issue-creation/SKILL.md       ← GitHub issue creation workflow

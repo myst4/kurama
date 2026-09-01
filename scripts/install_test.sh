@@ -52,9 +52,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All 28 expected default skills (sdd-core + quality + review + optional + tdd).
-# The `lang` group (per-language pattern skills, e.g. go-testing) is OFF by default:
-# Kurama is stack-agnostic and ships no language knowledge in a default install.
+# All 28 expected default skills (sdd-core + quality + review + optional + tdd) —
+# which is also every skill in the tree, since #125 deleted the last per-language
+# pattern skill and the `lang` group that held it. Kurama is stack-agnostic and
+# ships no language knowledge at any flag; a user's own language skills arrive
+# through the skill registry, never through a manifest group.
 # The tdd and kanban-github modules ship by default now; installing either does NOT
 # activate it (TDD stays opt-in per project; the kanban board stays opt-in via
 # kanban.enabled and requires a configured gh — never probed here). The `optional`
@@ -1062,7 +1064,7 @@ test_manifest_exists_and_parses() {
         python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$MANIFEST_FILE" > /dev/null 2>&1 \
             || { echo "manifest.json failed python parse"; return 1; }
     fi
-    grep -q '"go-testing"' "$MANIFEST_FILE" || { echo "manifest missing go-testing"; return 1; }
+    grep -q '"skill-creator"' "$MANIFEST_FILE" || { echo "manifest missing skill-creator"; return 1; }
     grep -q '"judgment-day"' "$MANIFEST_FILE" || { echo "manifest missing judgment-day"; return 1; }
     return 0
 }
@@ -1092,16 +1094,16 @@ test_install_writes_install_manifest() {
 test_default_install_includes_optional_groups() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     if [ -d "$HOME/.claude/skills/go-testing" ]; then
-        echo "go-testing is in the opt-in lang group and must NOT install by default"; return 1
+        echo "go-testing was deleted in #125 and must never install again"; return 1
     fi
     assert_dir_exists "$HOME/.claude/skills/kanban-github" || return 1   # optional group ships kanban-github too
     assert_dir_exists "$HOME/.claude/skills/judgment-day" || return 1
     return 0
 }
 
-test_without_optional_excludes_go_testing() {
-    # The optional group holds FIVE skills now; go-testing moved to the opt-in `lang`
-    # group, so --without optional drops those five, landing 23.
+test_without_optional_excludes_optional_group() {
+    # The optional group holds FIVE skills, so --without optional drops those five,
+    # landing 23 out of the 28-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --without optional > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/kanban-github" ]; then
@@ -1217,23 +1219,27 @@ test_without_tdd_excludes_tdd() {
     assert_eq "27" "$count" "Expected 27 skills with --without tdd"
 }
 
-test_lang_group_is_opt_in() {
-    # Kurama ships no language knowledge by default: the `lang` group (go-testing)
-    # must be absent from a default install and present only with --with lang.
+test_lang_group_no_longer_exists() {
+    # #125 deleted go-testing and the `lang` group with it. The wrapper must reject
+    # the flag rather than accept it as a no-op: a no-op would let an install command
+    # keep claiming it adds Go patterns long after the file stopped existing.
+    if bash "$INSTALL_SCRIPT" --agent claude-code --with lang > /dev/null 2>&1; then
+        echo "install.sh --with lang must exit non-zero (the lang group is gone)"
+        return 1
+    fi
+    # The rejection must not have installed a partial tree behind itself, and a
+    # plain install must still land the full default set.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/go-testing" ]; then
-        echo "go-testing must NOT install by default (lang group is opt-in)"
+        echo "go-testing must not exist on disk after any install"
         return 1
     fi
-    bash "$INSTALL_SCRIPT" --agent claude-code --with lang > /dev/null 2>&1
-    assert_dir_exists "$base/go-testing" || return 1
-    assert_file_not_empty "$base/go-testing/SKILL.md" || return 1
-    # sdd-core is untouched by the opt-in.
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "29" "$count" "Expected 29 skills with --with lang (28 default + go-testing)"
+    assert_eq "${#EXPECTED_SKILLS[@]}" "$count" \
+        "A default install lands the whole tree now — there is no opt-in group left to add"
 }
 
 test_with_tdd_includes_tdd() {
@@ -5368,7 +5374,7 @@ run_test "--version prints the version" test_version_flag
 run_test "--version exits with code 0" test_version_exits_zero
 run_test "Install writes an install manifest" test_install_writes_install_manifest
 run_test "Default install includes optional groups" test_default_install_includes_optional_groups
-run_test "--without optional excludes the group's five skills (23 skills)" test_without_optional_excludes_go_testing
+run_test "--without optional excludes the group's five skills (23 skills)" test_without_optional_excludes_optional_group
 run_test "--without quality excludes judgment-day (27 skills)" test_without_quality_excludes_judgment_day
 run_test "--without quality --without optional (22 skills)" test_without_both_groups
 run_test "--without sdd-core is rejected" test_reject_without_required_group
@@ -5377,7 +5383,7 @@ echo ""
 echo -e "${BOLD}TDD module (default-on group)${NC}"
 run_test "Default install includes tdd (28 skills)" test_default_install_includes_tdd
 run_test "--without tdd excludes tdd (27 skills)" test_without_tdd_excludes_tdd
-run_test "lang group is opt-in (--with lang adds go-testing)" test_lang_group_is_opt_in
+run_test "the lang group no longer exists (--with lang is rejected)" test_lang_group_no_longer_exists
 run_test "--with tdd is idempotent (28 skills)" test_with_tdd_includes_tdd
 run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_round_trip
 echo ""
@@ -7387,12 +7393,18 @@ test_g_setup_without_rejects_required_group() {
     return 0
 }
 
-test_g_setup_with_lang_adds_language_skills() {
-    bash "$SETUP_SCRIPT" --agent claude-code --with lang --non-interactive > /dev/null 2>&1
-    assert_dir_exists "$HOME/.claude/skills/go-testing" || return 1
-    local count
-    count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "29" "$count" "setup.sh --with lang lands 29 skills" || return 1
+test_g_setup_with_rejects_unknown_group() {
+    # setup.sh owns group validation; install.sh only forwards. `lang` is the name
+    # #125 retired, and it has to fail exactly like any other name that was never a
+    # group — with the surviving four listed, so the message says what to pass.
+    local out
+    if out=$(bash "$SETUP_SCRIPT" --agent claude-code --with lang --non-interactive 2>&1); then
+        echo "setup.sh --with lang must exit non-zero (the lang group is gone)"; return 1
+    fi
+    printf '%s' "$out" | grep -q "Unknown skill group: lang" || {
+        echo "setup.sh did not name the rejected group: $out"; return 1; }
+    printf '%s' "$out" | grep -q "quality, review, optional, tdd" || {
+        echo "setup.sh did not list the four surviving groups: $out"; return 1; }
     return 0
 }
 
@@ -7534,7 +7546,7 @@ test_g_setup_missing_examples_fails_loud_before_write() {
 echo -e "${BOLD}UNIT-G (issue #38) — collapse install.sh into setup.sh${NC}"
 run_test "setup.sh --without review is a full review-free setup" test_g_setup_without_review_is_a_full_review_free_setup
 run_test "setup.sh --without sdd-core is rejected" test_g_setup_without_rejects_required_group
-run_test "setup.sh --with lang adds language skills (29)" test_g_setup_with_lang_adds_language_skills
+run_test "setup.sh rejects an unknown group by name" test_g_setup_with_rejects_unknown_group
 run_test "setup.sh --without review re-install prunes stale review" test_g_setup_reinstall_without_review_prunes
 run_test "wrapper --agent maps to the full setup.sh install" test_g_wrapper_agent_maps_to_full_setup
 run_test "wrapper all-global installs all five (no detection)" test_g_wrapper_all_global_installs_five_unconditionally
@@ -12165,7 +12177,7 @@ test_u_clone_copy_does_not_index_kuramas_own_sources() {
     u_make_fixture "$w"
 
     # setup.sh and update.sh run the builder FROM THE CLONE. skills/ there holds
-    # sources, including groups a default install excludes (`lang`/go-testing) —
+    # sources, including groups an install can exclude (`--without review`) —
     # indexing them advertises skills the project does not have, at paths inside
     # somebody else's checkout. skills/manifest.json sits beside _shared/ in the
     # clone and never travels to an install, which is the distinction the script
