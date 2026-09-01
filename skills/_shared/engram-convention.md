@@ -18,6 +18,7 @@ scope:     project
 
 | Artifact Type | Produced By | Description |
 |---------------|-------------|-------------|
+| `brainstorm` | sdd-brainstorm | Decision ledger from the `sdd-new` brainstorm gate (optional) |
 | `explore` | sdd-explore | Exploration analysis |
 | `proposal` | sdd-propose | Change proposal |
 | `spec` | sdd-spec | Delta specifications (all domains concatenated) |

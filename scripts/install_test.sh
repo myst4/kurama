@@ -52,15 +52,18 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All 25 expected default skills (sdd-core + quality + review + optional + tdd).
+# All 26 expected default skills (sdd-core + quality + review + optional + tdd).
 # The `lang` group (per-language pattern skills, e.g. go-testing) is OFF by default:
 # Kurama is stack-agnostic and ships no language knowledge in a default install.
 # The tdd and kanban-github modules ship by default now; installing either does NOT
 # activate it (TDD stays opt-in per project; the kanban board stays opt-in via
-# kanban.enabled and requires a configured gh — never probed here).
+# kanban.enabled and requires a configured gh — never probed here). The `optional`
+# group now holds THREE skills — kanban-github, sdd-learn and sdd-brainstorm (#104) —
+# so every `--without optional` count below moves by three, not by one.
 EXPECTED_SKILLS=(
     sdd-apply
     sdd-archive
+    sdd-brainstorm
     sdd-design
     sdd-explore
     sdd-init
@@ -332,7 +335,7 @@ test_claude_code_skill_count() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Claude Code"
+    assert_eq "26" "$count" "Expected exactly 26 skills for Claude Code"
 }
 
 # ============================================================================
@@ -348,7 +351,7 @@ test_opencode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for OpenCode"
+    assert_eq "26" "$count" "Expected exactly 26 skills for OpenCode"
 }
 
 test_opencode_commands() {
@@ -382,7 +385,7 @@ test_codex_skill_count() {
     bash "$INSTALL_SCRIPT" --agent codex > /dev/null 2>&1
     local count
     count=$(find "$HOME/.codex/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Codex"
+    assert_eq "26" "$count" "Expected exactly 26 skills for Codex"
 }
 
 # ============================================================================
@@ -405,7 +408,7 @@ test_project_local_skill_count() {
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
     local count
     count=$(find "$project/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for project-local"
+    assert_eq "26" "$count" "Expected exactly 26 skills for project-local"
 }
 
 # ============================================================================
@@ -427,7 +430,7 @@ test_custom_path_skill_count() {
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     local count
     count=$(find "$custom/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for custom path"
+    assert_eq "26" "$count" "Expected exactly 26 skills for custom path"
 }
 
 # ============================================================================
@@ -450,7 +453,7 @@ test_all_global() {
 
 test_all_global_total_skill_count() {
     bash "$INSTALL_SCRIPT" --agent all-global > /dev/null 2>&1
-    # 5 targets x 25 skills = 125 SKILL.md files
+    # 5 targets x 26 skills = 130 SKILL.md files
     local total=0
     for dir in \
         "$HOME/.claude/skills" \
@@ -460,10 +463,10 @@ test_all_global_total_skill_count() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "25" "$count" "Expected 25 skills in $dir" || return 1
+        assert_eq "26" "$count" "Expected 26 skills in $dir" || return 1
         total=$((total + count))
     done
-    assert_eq "125" "$total" "Expected 125 total SKILL.md files across all targets"
+    assert_eq "130" "$total" "Expected 130 total SKILL.md files across all targets"
 }
 
 test_all_global_opencode_commands() {
@@ -485,7 +488,7 @@ test_idempotent_claude_code() {
     assert_all_skills_installed "$HOME/.claude/skills"
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills after double install"
+    assert_eq "26" "$count" "Expected exactly 26 skills after double install"
 }
 
 test_idempotent_opencode() {
@@ -494,7 +497,7 @@ test_idempotent_opencode() {
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
     local skill_count
     skill_count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$skill_count" "Expected exactly 25 skills after double install" || return 1
+    assert_eq "26" "$skill_count" "Expected exactly 26 skills after double install" || return 1
     local cmd_count
     cmd_count=$(find "$HOME/.config/opencode/commands" -name "sdd-*.md" | wc -l | tr -d ' ')
     assert_eq "9" "$cmd_count" "Expected exactly 9 commands after double install"
@@ -511,7 +514,7 @@ test_idempotent_all_global() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "25" "$count" "Expected 25 skills in $dir after double install" || return 1
+        assert_eq "26" "$count" "Expected 26 skills in $dir after double install" || return 1
     done
 }
 
@@ -578,8 +581,8 @@ test_output_shows_done_message() {
 test_output_shows_install_count() {
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "25 skills installed" || {
-        echo "Output missing '25 skills installed' message"
+    echo "$output" | grep -q "26 skills installed" || {
+        echo "Output missing '26 skills installed' message"
         return 1
     }
 }
@@ -746,7 +749,7 @@ test_setup_installs_default_skill_set() {
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "setup.sh should install the 25 default skills"
+    assert_eq "26" "$count" "setup.sh should install the 26 default skills"
 }
 
 test_setup_includes_tdd() {
@@ -1107,18 +1110,27 @@ test_without_optional_excludes_go_testing() {
         echo "kanban-github should be excluded by --without optional"
         return 1
     fi
-    # The `optional` group holds TWO skills now (#73 added sdd-learn). Naming both
-    # is what keeps the total below honest: drop only one of them while some other
-    # group silently gains a skill and the count is still 23.
+    # The `optional` group holds THREE skills now (#73 added sdd-learn, #104 added
+    # sdd-brainstorm). Naming all three is what keeps the total below honest: drop
+    # only some of them while another group silently gains a skill and the arithmetic
+    # still lands on the same number.
     if [ -d "$base/sdd-learn" ]; then
         echo "sdd-learn should be excluded by --without optional"
+        return 1
+    fi
+    if [ -d "$base/sdd-brainstorm" ]; then
+        echo "sdd-brainstorm should be excluded by --without optional"
         return 1
     fi
     assert_dir_exists "$base/judgment-day" || return 1   # quality group still on
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected 23 skills with --without optional (25 default - kanban-github - sdd-learn)"
+    # Expressed against EXPECTED_SKILLS, not the literal 23: 25 - 2 and 26 - 3 are both
+    # 23, so a hardcoded 23 would have passed unchanged on the pre-#104 tree and proved
+    # nothing about the third skill leaving the group.
+    assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 3 ))" "$count" \
+        "Expected the default set minus the optional group's THREE skills (kanban-github, sdd-learn, sdd-brainstorm)"
 }
 
 test_without_quality_excludes_judgment_day() {
@@ -1131,7 +1143,7 @@ test_without_quality_excludes_judgment_day() {
     assert_dir_exists "$base/kanban-github" || return 1         # optional group still on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected 24 skills with --without quality (25 default - judgment-day)"
+    assert_eq "25" "$count" "Expected 25 skills with --without quality (26 default - judgment-day)"
 }
 
 test_without_both_groups() {
@@ -1140,9 +1152,13 @@ test_without_both_groups() {
     if [ -d "$base/judgment-day" ]; then echo "judgment-day should be excluded"; return 1; fi
     if [ -d "$base/kanban-github" ]; then echo "kanban-github should be excluded"; return 1; fi
     if [ -d "$base/sdd-learn" ]; then echo "sdd-learn should be excluded"; return 1; fi
+    if [ -d "$base/sdd-brainstorm" ]; then echo "sdd-brainstorm should be excluded"; return 1; fi
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "22" "$count" "Expected 22 skills with both optional groups excluded (25 default - judgment-day - kanban-github - sdd-learn)"
+    # Same reason as --without optional above: 25 - 3 and 26 - 4 are both 22, so the
+    # literal would survive the change untouched.
+    assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 4 ))" "$count" \
+        "Expected the default set minus judgment-day and the optional group's three skills"
 }
 
 test_reject_without_required_group() {
@@ -1159,7 +1175,7 @@ test_reject_without_required_group() {
 
 test_default_install_includes_tdd() {
     # The tdd group is now default-on: a plain install ships skills/tdd as part of
-    # the 25-skill default set. Installing the module does NOT activate TDD —
+    # the 26-skill default set. Installing the module does NOT activate TDD —
     # activation stays opt-in per project.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local base="$HOME/.claude/skills"
@@ -1168,7 +1184,7 @@ test_default_install_includes_tdd() {
     assert_file_not_empty "$base/tdd/SKILL.md" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Default install must include tdd (25 skills)"
+    assert_eq "26" "$count" "Default install must include tdd (26 skills)"
 }
 
 test_without_tdd_excludes_tdd() {
@@ -1185,7 +1201,7 @@ test_without_tdd_excludes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "24" "$count" "Expected 24 skills with --without tdd"
+    assert_eq "25" "$count" "Expected 25 skills with --without tdd"
 }
 
 test_lang_group_is_opt_in() {
@@ -1204,12 +1220,12 @@ test_lang_group_is_opt_in() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "Expected 26 skills with --with lang (25 default + go-testing)"
+    assert_eq "27" "$count" "Expected 27 skills with --with lang (26 default + go-testing)"
 }
 
 test_with_tdd_includes_tdd() {
     # tdd is default-on, so --with tdd is idempotent: skills/tdd ships and the
-    # count stays at the 25-skill default set.
+    # count stays at the 26-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --with tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     assert_dir_exists "$base/tdd" || return 1
@@ -1221,7 +1237,7 @@ test_with_tdd_includes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected 25 skills with --with tdd (default set already includes tdd)"
+    assert_eq "26" "$count" "Expected 26 skills with --with tdd (default set already includes tdd)"
 }
 
 test_with_tdd_uninstall_round_trip() {
@@ -1264,7 +1280,7 @@ test_omp_skill_count() {
     bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
     local count
     count=$(find "$HOME/.omp/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for omp"
+    assert_eq "26" "$count" "Expected exactly 26 skills for omp"
 }
 
 test_omp_writes_install_manifest() {
@@ -1396,7 +1412,7 @@ test_pi_skill_count() {
     bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
     local count
     count=$(find "$HOME/.pi/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "25" "$count" "Expected exactly 25 skills for Pi"
+    assert_eq "26" "$count" "Expected exactly 26 skills for Pi"
 }
 
 test_pi_writes_install_manifest() {
@@ -1688,7 +1704,7 @@ test_without_review_excludes_lenses() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "20" "$count" "Expected 20 skills with --without review (25 default - 5 lenses)"
+    assert_eq "21" "$count" "Expected 21 skills with --without review (26 default - 5 lenses)"
 }
 
 # ============================================================================
@@ -5234,35 +5250,35 @@ run_test "Unknown option exits non-zero" test_invalid_option
 echo ""
 
 echo -e "${BOLD}Claude Code${NC}"
-run_test "Installs all 25 skills to ~/.claude/skills" test_install_claude_code
-run_test "Exactly 25 SKILL.md files" test_claude_code_skill_count
+run_test "Installs all 26 skills to ~/.claude/skills" test_install_claude_code
+run_test "Exactly 26 SKILL.md files" test_claude_code_skill_count
 echo ""
 
 echo -e "${BOLD}OpenCode${NC}"
-run_test "Installs all 25 skills to ~/.config/opencode/skills" test_install_opencode
-run_test "Exactly 25 SKILL.md files" test_opencode_skill_count
+run_test "Installs all 26 skills to ~/.config/opencode/skills" test_install_opencode
+run_test "Exactly 26 SKILL.md files" test_opencode_skill_count
 run_test "Installs 9 command files" test_opencode_commands
 echo ""
 
 echo -e "${BOLD}Codex${NC}"
-run_test "Installs all 25 skills to ~/.codex/skills" test_install_codex
-run_test "Exactly 25 SKILL.md files" test_codex_skill_count
+run_test "Installs all 26 skills to ~/.codex/skills" test_install_codex
+run_test "Exactly 26 SKILL.md files" test_codex_skill_count
 echo ""
 
 echo -e "${BOLD}Project-local${NC}"
-run_test "Installs all 25 skills to ./skills/" test_install_project_local
-run_test "Exactly 25 SKILL.md files" test_project_local_skill_count
+run_test "Installs all 26 skills to ./skills/" test_install_project_local
+run_test "Exactly 26 SKILL.md files" test_project_local_skill_count
 echo ""
 
 echo -e "${BOLD}Custom path${NC}"
 run_test "Installs to arbitrary custom path" test_custom_path
-run_test "Exactly 25 SKILL.md files" test_custom_path_skill_count
+run_test "Exactly 26 SKILL.md files" test_custom_path_skill_count
 run_test "Handles deeply nested custom path" test_nested_custom_path
 echo ""
 
 echo -e "${BOLD}All-global${NC}"
 run_test "Installs to all 5 global targets" test_all_global
-run_test "125 total SKILL.md files (5x25)" test_all_global_total_skill_count
+run_test "130 total SKILL.md files (5x26)" test_all_global_total_skill_count
 run_test "Also installs OpenCode commands" test_all_global_opencode_commands
 echo ""
 
@@ -5301,7 +5317,7 @@ run_test "Balanced marker updates in place + writes backup" test_setup_balanced_
 echo ""
 
 echo -e "${BOLD}setup.sh manifest-driven install + receipt${NC}"
-run_test "setup.sh installs the 25 default skills" test_setup_installs_default_skill_set
+run_test "setup.sh installs the 26 default skills" test_setup_installs_default_skill_set
 run_test "setup.sh includes the default tdd module" test_setup_includes_tdd
 run_test "setup.sh writes an install manifest (receipt)" test_setup_writes_install_manifest
 run_test "uninstall.sh cleans a setup.sh install" test_setup_uninstall_round_trip
@@ -5338,16 +5354,16 @@ run_test "--without sdd-core is rejected" test_reject_without_required_group
 echo ""
 
 echo -e "${BOLD}TDD module (default-on group)${NC}"
-run_test "Default install includes tdd (25 skills)" test_default_install_includes_tdd
+run_test "Default install includes tdd (26 skills)" test_default_install_includes_tdd
 run_test "--without tdd excludes tdd (24 skills)" test_without_tdd_excludes_tdd
 run_test "lang group is opt-in (--with lang adds go-testing)" test_lang_group_is_opt_in
-run_test "--with tdd is idempotent (25 skills)" test_with_tdd_includes_tdd
+run_test "--with tdd is idempotent (26 skills)" test_with_tdd_includes_tdd
 run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_round_trip
 echo ""
 
 echo -e "${BOLD}Pi agent (P5 installer wiring)${NC}"
-run_test "install.sh --agent omp installs 25 skills" test_install_omp
-run_test "Exactly 25 SKILL.md files for omp" test_omp_skill_count
+run_test "install.sh --agent omp installs 26 skills" test_install_omp
+run_test "Exactly 26 SKILL.md files for omp" test_omp_skill_count
 run_test "omp install writes an install manifest" test_omp_writes_install_manifest
 run_test "omp honors PI_CODING_AGENT_DIR relocation" test_omp_honors_relocated_agent_base
 run_test "setup.sh --agent omp merges the orchestrator prompt" test_setup_omp_writes_orchestrator
@@ -5355,8 +5371,8 @@ run_test "omp installs its 17 native agents" test_omp_installs_native_agents
 run_test "omp agents follow the omp task-agent contract" test_omp_agents_use_the_omp_contract
 run_test "omp installs RULES.md sticky rules" test_omp_installs_sticky_rules
 run_test "omp install/uninstall round-trip is clean" test_omp_uninstall_round_trip
-run_test "install.sh --agent pi installs 25 skills" test_install_pi
-run_test "Exactly 25 SKILL.md files for Pi" test_pi_skill_count
+run_test "install.sh --agent pi installs 26 skills" test_install_pi
+run_test "Exactly 26 SKILL.md files for Pi" test_pi_skill_count
 run_test "Pi install writes an install manifest" test_pi_writes_install_manifest
 run_test "setup.sh --agent pi writes orchestrator to ~/.pi/agent/AGENTS.md" test_setup_pi_writes_orchestrator
 echo ""
@@ -7339,7 +7355,7 @@ test_g_setup_without_review_is_a_full_review_free_setup() {
     assert_dir_exists "$base/judgment-day" || return 1    # quality still on
     local count
     count=$(find "$base" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "20" "$count" "full setup --without review lands 20 skills" || return 1
+    assert_eq "21" "$count" "full setup --without review lands 21 skills" || return 1
     # A genuinely full setup: Claude Code hooks were still installed.
     assert_file_exists "$HOME/.claude/settings.json" || return 1
     return 0
@@ -7357,7 +7373,7 @@ test_g_setup_with_lang_adds_language_skills() {
     assert_dir_exists "$HOME/.claude/skills/go-testing" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "26" "$count" "setup.sh --with lang lands 26 skills" || return 1
+    assert_eq "27" "$count" "setup.sh --with lang lands 27 skills" || return 1
     return 0
 }
 
@@ -7379,7 +7395,7 @@ test_g_setup_reinstall_without_review_prunes() {
 # --- (b) install.sh wrapper maps each documented flag onto setup.sh --------------
 
 test_g_wrapper_agent_maps_to_full_setup() {
-    # install.sh --agent NAME runs the SAME full setup.sh install (25 skills) and
+    # install.sh --agent NAME runs the SAME full setup.sh install (26 skills) and
     # writes setup.sh's slug-tool receipt with the setup-only keys — proof the full
     # installer ran through the delegate, not install.sh's old skills-only path.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
@@ -7400,7 +7416,7 @@ test_g_wrapper_all_global_installs_five_unconditionally() {
     for d in "$HOME/.claude/skills" "$HOME/.config/opencode/skills" "$HOME/.codex/skills" \
              "$HOME/.pi/agent/skills" "$HOME/.omp/agent/skills"; do
         local c; c=$(find "$d" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-        assert_eq "25" "$c" "all-global must install 25 skills into $d" || return 1
+        assert_eq "26" "$c" "all-global must install 26 skills into $d" || return 1
     done
     return 0
 }
@@ -7411,7 +7427,7 @@ test_g_wrapper_forwards_group_flags() {
     [ -d "$HOME/.claude/skills/review-risk" ] && { echo "--without review not forwarded through the wrapper"; return 1; }
     local count
     count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "20" "$count" "wrapper --without review lands 20 skills" || return 1
+    assert_eq "21" "$count" "wrapper --without review lands 21 skills" || return 1
     return 0
 }
 
@@ -8461,6 +8477,8 @@ echo ""
 #   * `sdd-learn` ships in the manifest's `optional` group, which is in setup.sh's
 #     default active set — so it installs by default, and every skill count in
 #     this file moved 24 -> 25 for it (120 -> 125 across the five global targets).
+#     #104's `sdd-brainstorm` joins the same group and moved them again, 25 -> 26
+#     (125 -> 130). The group now drops THREE skills under `--without optional`.
 #
 # NOTE on the control run. A "byte-identical to before the feature" case invites
 # `git show main:examples/claude-code/CLAUDE.md` as its control, but
@@ -8609,12 +8627,28 @@ tracked_files_containing() {
 # validate_skills.sh's own frontmatter rule: the file must open with `---` on line
 # 1 and close the fence later. A file that opens a fence and never closes it has
 # no frontmatter at all, rather than a frontmatter that is the whole file.
+#
+# One awk pass, NOT `head -1 | grep -q` + `tail -n +2 | grep -q`, and the reason is
+# not style. The fence closes near the TOP of a SKILL.md, so `grep -q` matches and
+# exits while `tail` still has the whole body to write. Once the file exceeds the
+# pipe buffer (~16KB on macOS before it grows), `tail` blocks, takes SIGPIPE, and
+# exits 141 — which `set -o pipefail` promotes to the pipeline's status. The helper
+# then reports "the fence never closes" about a file whose fence plainly closes on
+# line 15, and it does so DETERMINISTICALLY above that size.
+#
+# It had never fired because every skill was under the buffer: sdd-learn is 13.9KB
+# and returns 0, sdd-brainstorm is 22.2KB and returned 141 every single time. The
+# awk below is the same logic as validate_skills.sh's own frontmatter_fence_closed
+# — deliberately, so the test helper and the shipped gate cannot drift — and it
+# reads the file directly, so there is no pipe to break.
 skill_frontmatter_fence_closed() {
     local file="$1"
     [ -f "$file" ] || return 1
-    head -1 "$file" | grep -q '^---[[:space:]]*$' || return 1
-    tail -n +2 "$file" | grep -q '^---[[:space:]]*$' || return 1
-    return 0
+    awk '
+        NR == 1 && $0 !~ /^---[[:space:]]*$/ { exit }
+        NR > 1 && /^---[[:space:]]*$/         { closed = 1; exit }
+        END { exit (closed ? 0 : 1) }
+    ' "$file"
 }
 
 # Print the YAML frontmatter of $1 — the lines strictly between the opening and
@@ -9028,6 +9062,496 @@ run_test "the user's name never lands in a committed file" test_l_user_name_neve
 run_test "session identity resolves without an SDD cycle (#102)" test_l_session_identity_resolves_without_an_sdd_cycle
 run_test "sdd-learn installs by default (optional group)" test_l_sdd_learn_installs_by_default
 run_test "sdd-learn is a well-formed, registered skill" test_l_sdd_learn_is_a_well_formed_registered_skill
+
+
+# ============================================================================
+# UNIT-M (issue #104): the brainstorm gate and Kurama's own interview skill
+#
+# The gap #104 closed: `sdd-new` ran init -> explore -> propose -> gate, so the
+# FIRST time a human decided anything was AFTER a proposal existed, with the
+# approach already picked by a sub-agent. Kurama also declared a `brainstorming`
+# pairing in three places, all of them pointing at SUB-AGENTS — and brainstorming
+# is dialogue, which a sub-agent cannot conduct because there is no human on the
+# other side of its session. Same shape as #102: the right instruction on the
+# wrong layer.
+#
+# Four properties break silently and are pinned here:
+#
+#   * The gate must sit BEFORE the explore delegation. A gate that fires after
+#     the artifacts are written is not a gate, and a plain grep for its heading
+#     cannot tell the difference — so ordering is checked structurally.
+#   * `sdd-brainstorm` must never write a spec, code, or a doc under
+#     `docs/superpowers/`. That is precisely why superpowers' skill was NOT
+#     adopted as the engine: it owns its own artifacts and hands off to
+#     `writing-plans`, bypassing `sdd-propose`. Ours inheriting that behavior
+#     would recreate the #101 collision from the inside.
+#   * The three misplaced declarations must score ZERO. Leaving one behind means
+#     a sub-agent still believes it may run a question round.
+#   * No `/sdd-brainstorm` command line in any of the five prompts. A command
+#     line costs ~100-150 B per prompt and `omp` had 97 B of headroom, so the
+#     skill is reached from the gate and by trigger, never by a listed command.
+#     That is a budget DECISION, not an omission — it needs a guard or the next
+#     person "fixes" it.
+# ============================================================================
+
+# Print the 1-based line number of the first line of $2 matching ERE $1, or nothing.
+# Ordering assertions use this instead of a whole-file grep: "the gate is somewhere
+# in the file" is the exact claim that would survive the gate being moved after the
+# explore delegation, which is the regression this section exists to catch.
+#
+# awk rather than `grep -nE | head -1 | cut`, for the same reason as
+# skill_frontmatter_fence_closed above: `head -1` closes the pipe under `grep` as
+# soon as the first match lands, and under `set -o pipefail` that SIGPIPE becomes
+# the status of a command substitution running under `set -e`.
+heading_line() {
+    awk -v re="$1" '$0 ~ re { print NR; exit }' "$2" 2>/dev/null
+}
+
+# Fail unless heading ERE $2 appears strictly before heading ERE $3 in file $1.
+# Both must be found: two missing headings would otherwise compare as "" < "",
+# and an empty-vs-empty comparison is the classic vacuous pass.
+assert_heading_precedes() {
+    local file="$1" first="$2" second="$3" what="$4"
+    local a b
+    a="$(heading_line "$first" "$file")"
+    b="$(heading_line "$second" "$file")"
+    if [ -z "$a" ]; then
+        echo "  ${file##*/}: no heading matched $first — $what cannot be checked"
+        return 1
+    fi
+    if [ -z "$b" ]; then
+        echo "  ${file##*/}: no heading matched $second — $what cannot be checked"
+        return 1
+    fi
+    if [ "$a" -ge "$b" ]; then
+        echo "  ${file##*/}: $what — the first heading is at line $a, the second at line $b"
+        return 1
+    fi
+    return 0
+}
+
+test_m_sdd_new_gates_before_it_explores() {
+    # (a) STRUCTURAL, not a string grep. What would make a grep-based version pass
+    # for the wrong reason: the gate text present but relocated below the explore
+    # delegation, which is functionally identical to having no gate at all. Line
+    # ORDER is the property, so line order is what is compared — and both headings
+    # are required to exist before the comparison is trusted.
+    local f="$REPO_DIR/skills/sdd-new/SKILL.md"
+    assert_file_exists "$f" || return 1
+    assert_file_not_empty "$f" 2000 || return 1
+
+    assert_heading_precedes "$f" '^### 1\.5\. Brainstorm gate' '^### 2\. Explore' \
+        "the brainstorm gate must run BEFORE the explore delegation" || return 1
+    assert_heading_precedes "$f" '^### 2\. Explore' '^### 2\.5\. Approach gate' \
+        "the approach gate must come after exploration produced the approaches" || return 1
+    assert_heading_precedes "$f" '^### 2\.5\. Approach gate' '^### 3\. Propose' \
+        "the approach gate must stop the cycle BEFORE sdd-propose is delegated" || return 1
+
+    # The heading alone is not the gate. Each clause below is a decision #104 took
+    # that a heading-only edit would silently drop.
+    local flat
+    flat="$(flatten_file "$f")"
+    assert_matches "$flat" 'gh issue view' \
+        "the gate reads the issue BODY before classifying (that is where vague requests come from)" || return 1
+    assert_matches "$flat" 'vague' \
+        "the gate names the vague classification" || return 1
+    assert_matches "$flat" 'auto.{0,120}vague.{0,80}(stops|stop)' \
+        "in auto a vague request STOPS at the gate — ambiguity resolves before artifacts are written" || return 1
+    assert_matches "$flat" 'sdd-brainstorm/SKILL\.md.{0,40}INLINE' \
+        "the gate runs sdd-brainstorm INLINE, not as a sub-agent" || return 1
+    assert_matches "$flat" 'sdd/\{change-name\}/brainstorm' \
+        "the gate names the ledger's topic key so it can be passed downstream by reference" || return 1
+    assert_matches "$flat" '(does not resolve|not resolve).{0,80}(continue|Explore)' \
+        "an absent optional module degrades to a note, never a blocked cycle" || return 1
+    # The brainstorm round may delegate a real sdd-explore to answer what the code can
+    # answer. Step 2 running a second full exploration over the same change would pay
+    # twice and produce two approach tables free to disagree.
+    assert_matches "$flat" 'do NOT run a second exploration' \
+        "step 2 reuses an exploration the brainstorm round already produced" || return 1
+    assert_matches "$flat" 'refinement pass' \
+        "the alternative to a second full exploration" || return 1
+    return 0
+}
+
+test_m_brainstorm_never_writes_a_spec_or_a_parallel_artifact() {
+    # (b) The skill's whole reason for existing over superpowers' is that its output
+    # is an SDD artifact. What would make this pass for the wrong reason: running the
+    # negative assertions over a file that does not exist, or over an empty string —
+    # both match nothing and read as a pass. The file is size-checked first, and a
+    # positive control proves the haystack is really the skill body.
+    local f="$REPO_DIR/skills/sdd-brainstorm/SKILL.md"
+    assert_file_exists "$f" || return 1
+    assert_file_not_empty "$f" 3000 || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    # Positive control for the haystack itself.
+    assert_matches "$flat" 'decision ledger' \
+        "the extracted body is really sdd-brainstorm (control for the negatives below)" || return 1
+
+    assert_not_matches "$flat" 'docs/superpowers' \
+        "a spec tree parallel to openspec/ — the second source of truth #101 is about" || return 1
+    assert_not_matches "$flat" 'writing-plans' \
+        "a handoff that bypasses sdd-propose" || return 1
+    assert_not_matches "$flat" 'openspec/changes/\{change-name\}/(proposal|design|tasks)\.md' \
+        "any change-folder artifact other than brainstorm.md — those belong to their phases" || return 1
+
+    # The prohibitions must be stated, not merely obeyed by omission: this file is a
+    # prompt, and a rule it does not carry is a rule the model never sees.
+    assert_matches "$flat" 'never (write|produce).{0,120}(code|spec)' \
+        "the explicit ban on writing code or a spec" || return 1
+    assert_matches "$flat" 'never invoke.{0,40}implementation skill' \
+        "the explicit ban on invoking an implementation skill" || return 1
+    assert_matches "$flat" 'SDD owns the work lifecycle' \
+        "the invariant that the only exit is the SDD pipeline" || return 1
+    return 0
+}
+
+test_m_brainstorm_carries_its_distinguishing_mechanics() {
+    # The bar #104 set is "much better than superpowers' brainstorming for a VAGUE
+    # request". Each clause here is one of the differences that bar names; a skill
+    # that lost any of them would still install, still lint, and still read fine.
+    local f="$REPO_DIR/skills/sdd-brainstorm/SKILL.md"
+    assert_file_exists "$f" || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    # 1. Explore BEFORE the first question — superpowers asks first and explores later.
+    assert_matches "$flat" 'never ask the human what the repo can answer' \
+        "the explore-instead-of-ask rule" || return 1
+    # 2. A ledger with STATE. All four states, or the anti-invention device is partial.
+    local st
+    for st in resolved open contradicted deferred; do
+        assert_matches "$flat" "\`$st\`" "the ledger state \`$st\`" || return 1
+    done
+    assert_matches "$flat" 'deferred.{0,200}(never|not) (filled in|invented|resolved)' \
+        "the rule that a decision nobody made is deferred, never filled in" || return 1
+    # 3. Options at a FORK, with a marked recommendation — and an open question left open.
+    #    The `.{1,3}` spans the en dash in "2-4" as one CHARACTER in a UTF-8 locale and as
+    #    three BYTES under LC_ALL=C, which is what CI runs with. A bare `.` matches only on
+    #    the first of those, and would turn this into a silent skip on the machine that
+    #    matters most.
+    assert_matches "$flat" '2.{1,3}4 concrete options' \
+        "2-4 concrete options rather than a generic yes/no" || return 1
+    assert_matches "$flat" 'recommended' \
+        "the marked recommendation" || return 1
+    assert_matches "$flat" 'options only at a real fork' \
+        "options belong to forks with trade-offs, not to every question" || return 1
+    assert_matches "$flat" 'ask it open' \
+        "a genuinely open question is asked open, never turned into a menu" || return 1
+    assert_matches "$flat" 'verify a premise before you build on it' \
+        "never accept a claim about the codebase without checking it" || return 1
+    # 4. Decomposition as the first check.
+    assert_matches "$flat" 'decomposition' \
+        "the decomposition check" || return 1
+    # 5. A readiness test plus a round cap — not relentlessness, and not padding either.
+    #    Both halves of the budget rule are pinned: the 3-4 NORM and the 7 CEILING. Keeping
+    #    only the ceiling is how "aim for three" quietly becomes "ask seven every time".
+    assert_matches "$flat" 'readiness test' \
+        "the readiness test that ends the interview" || return 1
+    assert_matches "$flat" 'seven questions in one round, STOP' \
+        "the hard stop at seven — it stops and asks, it does not merely check in" || return 1
+    assert_matches "$flat" 'aim for three or four' \
+        "3-4 questions as the NORM, so the cap is not read as a target" || return 1
+    assert_matches "$flat" 'ceiling for a tangled request, never the target' \
+        "seven stated as a ceiling rather than a quota" || return 1
+    assert_matches "$flat" 'cannot name the branch it resolves, do not ask it' \
+        "every question must resolve a named ledger branch" || return 1
+    # 6. One question per turn, through the harness's own primitive where it exists.
+    assert_matches "$flat" 'one question per turn' \
+        "the one-question-per-turn rule" || return 1
+    assert_matches "$flat" 'AskUserQuestion' \
+        "the Claude Code question primitive" || return 1
+    assert_matches "$flat" 'OpenCode the .question. tool' \
+        "the OpenCode question primitive" || return 1
+    # 7. The Language Domain Contract split: questions in the user's language, ledger in English.
+    assert_matches "$flat" "user's language.{0,120}neutral English" \
+        "questions in the user's language, the ledger in neutral English" || return 1
+    # 8. Persisted as its own artifact, in all three modes.
+    assert_matches "$flat" 'sdd/\{change-name\}/brainstorm' \
+        "the engram topic key" || return 1
+    assert_matches "$flat" 'openspec/changes/\{change-name\}/brainstorm\.md' \
+        "the openspec path" || return 1
+    assert_matches "$flat" 'hybrid.{0,80}both' \
+        "the hybrid rule (both stores)" || return 1
+    # 9. It runs inline. This is the property that made the old pairing impossible.
+    assert_matches "$flat" '(run it inline|Run INLINE)' \
+        "the inline-execution rule" || return 1
+    assert_matches "$flat" 'never launch it as a sub-agent' \
+        "the ban on delegating a dialogue skill" || return 1
+    return 0
+}
+
+test_m_the_misplaced_pairing_scores_zero() {
+    # (c) + (d). The three declarations #104 found, all pointing at sub-agents. What
+    # would make this pass for the wrong reason: three greps over three files that do
+    # not exist, or over a file whose content changed shape so the pattern could never
+    # match anything. Every file is existence- and size-checked, and each one carries a
+    # positive control proving the haystack is the real document.
+    local explore="$REPO_DIR/skills/sdd-explore/SKILL.md"
+    local propose="$REPO_DIR/skills/sdd-propose/SKILL.md"
+    local companions="$REPO_DIR/docs/companion-skills.md"
+    local f flat
+    for f in "$explore" "$propose" "$companions"; do
+        assert_file_exists "$f" || return 1
+        assert_file_not_empty "$f" 1000 || return 1
+    done
+
+    flat="$(flatten_file "$explore")"
+    assert_matches "$flat" 'Step 3: Investigate the Codebase' \
+        "sdd-explore's real body (control)" || return 1
+    assert_not_matches "$flat" 'brainstorming-type skill' \
+        "the sub-agent brainstorming pairing in sdd-explore" || return 1
+    assert_matches "$flat" 'you are a sub-agent, and there is no user on the other side' \
+        "the reason the pairing was removed, stated where it used to live" || return 1
+
+    flat="$(flatten_file "$propose")"
+    assert_matches "$flat" 'Change Size' \
+        "sdd-propose's real body (control)" || return 1
+    assert_not_matches "$flat" 'brainstorming-type skill' \
+        "the sub-agent brainstorming pairing in sdd-propose" || return 1
+
+    # (d) The docs table row. The row form is what is banned — the file still DISCUSSES
+    # brainstorming, on purpose, so a bare word match would be wrong in both directions.
+    flat="$(flatten_file "$companions")"
+    assert_matches "$flat" 'systematic-debugging' \
+        "the three surviving pairings (control)" || return 1
+    # The dots stand in for the row's backticks: a literal backtick inside a
+    # single-quoted ERE is what SC2016 flags, and the class is not what is being
+    # asserted here anyway — the ROW SHAPE is.
+    if grep -qE '^\|[[:space:]]*.brainstorming.[[:space:]]*\|' "$companions"; then
+        echo "  docs/companion-skills.md still pairs brainstorming in the table:"
+        grep -nE '^\|[[:space:]]*.brainstorming.[[:space:]]*\|' "$companions" | head -2 | awk '{ print "    " $0 }'
+        return 1
+    fi
+    assert_matches "$flat" 'sdd-brainstorm' \
+        "the replacement note naming Kurama's own skill" || return 1
+    # The other three rows stay — this was a removal of ONE row, not of the table.
+    local row
+    for row in 'systematic-debugging' 'verification-before-completion' 'receiving-code-review'; do
+        grep -qE "^\|[[:space:]]*.$row.[[:space:]]*\|" "$companions" \
+            || { echo "  docs/companion-skills.md lost the $row pairing row"; return 1; }
+    done
+    return 0
+}
+
+test_m_no_command_line_and_every_prompt_under_budget() {
+    # (e) + (f). One test because they are one decision: the skill is reached from the
+    # gate and by trigger rather than by a listed command BECAUSE a command line costs
+    # ~100-150 B in each of five prompts and omp had 97 B of headroom.
+    #
+    # What would make this pass for the wrong reason: a missing or truncated prompt
+    # matches no pattern at all, so "no /sdd-brainstorm anywhere" reads as a pass over
+    # an empty file. Two guards: every prompt is size-floored, and `/sdd-learn` is
+    # asserted PRESENT as a positive control — it is the other optional-group skill and
+    # it DOES carry a command line, so the grep provably finds one when there is one.
+    local f flat bytes
+    for f in "$REPO_DIR/examples/claude-code/CLAUDE.md" \
+             "$REPO_DIR/examples/pi/AGENTS.md" \
+             "$REPO_DIR/examples/codex/agents.md" \
+             "$REPO_DIR/examples/opencode/AGENTS.md" \
+             "$REPO_DIR/examples/omp/AGENTS.md"; do
+        assert_file_exists "$f" || return 1
+        assert_file_not_empty "$f" 15000 || return 1
+        flat="$(flatten_file "$f")"
+
+        # Positive control: a command line IS findable by this grep.
+        assert_matches "$flat" '/sdd-learn' \
+            "${f##*/examples/}: the /sdd-learn command line (control for the ban below)" || return 1
+        assert_not_matches "$flat" '/sdd-brainstorm' \
+            "${f##*/examples/}: a /sdd-brainstorm command line — the budget decision #104 took" || return 1
+
+        # The one prompt edit the feature was allowed: the human-gate list.
+        assert_matches "$flat" 'human gates \(brainstorm,' \
+            "${f##*/examples/}: the brainstorm gate in the human-gate list" || return 1
+        assert_matches "$flat" 'vague request stops at the brainstorm gate' \
+            "${f##*/examples/}: the auto-mode rule that a vague request still stops" || return 1
+
+        bytes=$(wc -c < "$f" | tr -d ' ')
+        if [ "$bytes" -gt 24000 ]; then
+            echo "  ${f##*/examples/} is ${bytes}B — past the 24KB orchestrator prompt budget"
+            return 1
+        fi
+    done
+    return 0
+}
+
+test_m_brainstorm_installs_by_default() {
+    # `sdd-brainstorm` joins the manifest's `optional` group, which is in setup.sh's
+    # default active set — so a plain install ships it with no flag.
+    #
+    # What would make this pass for the wrong reason: asserting only that the directory
+    # exists, which an empty leftover directory satisfies. The file is size-checked and
+    # the total is pinned to EXPECTED_SKILLS, so adding the skill without moving the
+    # counts cannot slip through.
+    bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
+    local base="$HOME/.claude/skills"
+    assert_dir_exists "$base/sdd-brainstorm" || return 1
+    assert_file_exists "$base/sdd-brainstorm/SKILL.md" || return 1
+    assert_file_not_empty "$base/sdd-brainstorm/SKILL.md" 3000 || return 1
+    assert_eq "${#EXPECTED_SKILLS[@]}" "$(count_skill_files "$base")" \
+        "the default set must be exactly the EXPECTED_SKILLS list, sdd-brainstorm included" || return 1
+    return 0
+}
+
+test_m_brainstorm_is_a_well_formed_registered_skill() {
+    # Installed is not the same as loadable: a SKILL.md whose frontmatter fence never
+    # closes, or whose name:/description: are empty, is dead weight in every harness.
+    # validate_skills.sh is the shipped gate for exactly that, so it is RUN here rather
+    # than reimplemented — but running it proves nothing about sdd-brainstorm unless
+    # sdd-brainstorm is registered in the manifest it walks, which is asserted first.
+    assert_file_exists "$MANIFEST_FILE" || return 1
+    grep -q '"sdd-brainstorm"' "$MANIFEST_FILE" \
+        || { echo "sdd-brainstorm is not registered in skills/manifest.json — validate_skills.sh never sees it"; return 1; }
+    grep -q 'skills/sdd-brainstorm/' "$REPO_DIR/AGENTS.md" \
+        || { echo "sdd-brainstorm is missing from the AGENTS.md skill table"; return 1; }
+
+    local src="$REPO_DIR/skills/sdd-brainstorm/SKILL.md"
+    assert_file_exists "$src" || return 1
+    skill_frontmatter_fence_closed "$src" \
+        || { echo "skills/sdd-brainstorm/SKILL.md: the frontmatter fence never closes"; return 1; }
+    local fm
+    fm="$(skill_frontmatter "$src")"
+    printf '%s\n' "$fm" | grep -qE '^name:[[:space:]]*sdd-brainstorm[[:space:]]*$' \
+        || { echo "skills/sdd-brainstorm/SKILL.md: frontmatter 'name:' is not sdd-brainstorm"; return 1; }
+    printf '%s\n' "$fm" | grep -qE '^description:[[:space:]]*[^[:space:]]' \
+        || { echo "skills/sdd-brainstorm/SKILL.md: frontmatter 'description:' is missing or empty"; return 1; }
+    # A folded scalar (`description: >`) satisfies the rule above with an empty body,
+    # so the continuation has to carry real text of its own.
+    if printf '%s\n' "$fm" | grep -qE '^description:[[:space:]]*[>|][-+0-9]*[[:space:]]*$'; then
+        printf '%s\n' "$fm" | grep -qE '^[[:space:]]+[^[:space:]]' \
+            || { echo "skills/sdd-brainstorm/SKILL.md: 'description:' folds into an empty block"; return 1; }
+    fi
+    # The description is how every harness routes a natural-language request to this
+    # skill. Without the triggers it is installed and unreachable.
+    local fm_flat
+    fm_flat="$(printf '%s\n' "$fm" | tr '\n' ' ')"
+    local trig
+    for trig in 'brainstorm' 'grill me' 'stress-test this plan' 'hagamos brainstorming' 'no sé bien qué quiero'; do
+        case "$fm_flat" in
+            *"$trig"*) ;;
+            *) echo "skills/sdd-brainstorm/SKILL.md: the description is missing the \"$trig\" trigger"; return 1 ;;
+        esac
+    done
+
+    local output status=0
+    output=$(bash "$VALIDATE_SCRIPT" 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "validate_skills.sh exited $status with sdd-brainstorm registered:"
+        printf '%s\n' "$output" | grep -a 'FAIL' | head -5
+        return 1
+    fi
+    return 0
+}
+
+test_m_the_ledger_is_a_declared_artifact_in_both_conventions() {
+    # The ledger is written by the ORCHESTRATOR, inline, which is exactly the kind of
+    # writer that drifts away from the convention files nobody made it read. Both
+    # convention files are the canonical homes for "where does this artifact live",
+    # and `sdd-propose` is the phase that has to find it — so all three are pinned
+    # together, against the SAME literal key.
+    #
+    # What would make this pass for the wrong reason: matching the word "brainstorm"
+    # anywhere in a long file. The literal artifact key and the literal path are what
+    # is asserted, since only those are what a reader would actually act on.
+    local osc="$REPO_DIR/skills/_shared/openspec-convention.md"
+    local egc="$REPO_DIR/skills/_shared/engram-convention.md"
+    local propose="$REPO_DIR/skills/sdd-propose/SKILL.md"
+    local f
+    for f in "$osc" "$egc" "$propose"; do
+        assert_file_exists "$f" || return 1
+        assert_file_not_empty "$f" 1000 || return 1
+    done
+
+    grep -qF 'openspec/changes/{change-name}/brainstorm.md' "$osc" \
+        || { echo "openspec-convention.md never names the brainstorm.md path"; return 1; }
+    grep -qF 'brainstorm.md' "$osc" \
+        || { echo "openspec-convention.md's change-folder tree is missing brainstorm.md"; return 1; }
+    grep -qE '^\|[[:space:]]*.brainstorm.[[:space:]]*\|[[:space:]]*sdd-brainstorm' "$egc" \
+        || { echo "engram-convention.md's artifact-type table is missing the brainstorm type"; return 1; }
+
+    local flat
+    flat="$(flatten_file "$propose")"
+    assert_matches "$flat" 'sdd/\{change-name\}/brainstorm' \
+        "sdd-propose reading the ledger by its topic key" || return 1
+    assert_matches "$flat" 'deferred.{0,200}(Risks|Open Questions)' \
+        "the rule that a deferred decision becomes a risk / open question" || return 1
+    assert_matches "$flat" 'assumed:' \
+        "the rule that an unresolved success criterion is written as assumed:" || return 1
+    assert_matches "$flat" 'never (silently resolved|promote a .deferred. decision)' \
+        "the ban on promoting a deferred decision to resolved" || return 1
+    return 0
+}
+
+test_m_the_issue_decisions_comment_is_offered_never_automatic() {
+    # Mauro's flow is issue-driven: most vague requests arrive as a ticket on a board.
+    # Closing that loop is worth a lot — and it is also the one place this skill writes
+    # somewhere other people read, so it is the one place an unattended write would be a
+    # real incident. `auto` must NOT be an exception: `auto` waives the orchestrator's
+    # internal gates, never an outward-facing action.
+    #
+    # What would make this pass for the wrong reason: matching the word "issue", which a
+    # skill this size contains for a dozen unrelated reasons. The offer, the approval, the
+    # auto carve-out and the direction of truth are each asserted as their own clause.
+    local f="$REPO_DIR/skills/sdd-brainstorm/SKILL.md"
+    assert_file_exists "$f" || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    assert_matches "$flat" 'gh issue comment' \
+        "the concrete command that posts the Decisions comment" || return 1
+    assert_matches "$flat" 'approval-gated, and it is never automatic' \
+        "the comment is offered and approved, never posted on its own" || return 1
+    assert_matches "$flat" 'never automatic.{0,40}auto.{0,20}included' \
+        "auto does NOT waive the approval — it is an outward-facing write" || return 1
+    assert_matches "$flat" 'ticket.{0,200}truth' \
+        "the direction of truth: the issue is the ticket, the artifacts are the truth" || return 1
+    assert_matches "$flat" 'never an input to a later phase' \
+        "a tracker comment never flows back into the pipeline" || return 1
+    return 0
+}
+
+test_m_sdd_ff_announces_the_bypass() {
+    # `sdd-ff` starts at propose: it never explored and now it never brainstorms either.
+    # That is a legitimate fast path — the user typing /sdd-ff is asserting they know what
+    # they want — but an ACCIDENTAL bypass and an explicit one look identical from the
+    # inside, and only the notice tells them apart.
+    #
+    # What would make this pass for the wrong reason: matching "brainstorm" anywhere in
+    # sdd-ff, which the notice's own condition mentions. The assertions below pin the three
+    # separable properties instead — the notice text, the escape hatch it names, and the
+    # fact that it is a notice rather than a prompt (a question here would break `auto`,
+    # which sdd-ff always implies).
+    local f="$REPO_DIR/skills/sdd-ff/SKILL.md"
+    assert_file_exists "$f" || return 1
+    assert_file_not_empty "$f" 2000 || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    assert_matches "$flat" 'propose .{0,20}\(spec' \
+        "sdd-ff's real phase list (control: this is the fast-forward skill)" || return 1
+    assert_matches "$flat" 'No exploration or brainstorm exists' \
+        "the one-line notice printed when neither artifact exists" || return 1
+    assert_matches "$flat" 'Use ./sdd-new' \
+        "the notice names /sdd-new as the way to get the gate" || return 1
+    assert_matches "$flat" 'notice, not a question' \
+        "it never stops the run — sdd-ff always implies auto" || return 1
+    assert_matches "$flat" 'When either artifact exists, say nothing' \
+        "the notice does not fire when the gate already happened" || return 1
+    return 0
+}
+
+echo -e "${BOLD}UNIT-M (issue #104): brainstorm gate + sdd-brainstorm${NC}"
+run_test "sdd-new gates BEFORE it explores (structural)" test_m_sdd_new_gates_before_it_explores
+run_test "sdd-brainstorm never writes a spec or a parallel artifact" test_m_brainstorm_never_writes_a_spec_or_a_parallel_artifact
+run_test "sdd-brainstorm carries its distinguishing mechanics" test_m_brainstorm_carries_its_distinguishing_mechanics
+run_test "the misplaced brainstorming pairing scores zero" test_m_the_misplaced_pairing_scores_zero
+run_test "no /sdd-brainstorm command line; all five prompts under budget" test_m_no_command_line_and_every_prompt_under_budget
+run_test "sdd-brainstorm installs by default (optional group)" test_m_brainstorm_installs_by_default
+run_test "sdd-brainstorm is a well-formed, registered skill" test_m_brainstorm_is_a_well_formed_registered_skill
+run_test "the ledger is a declared artifact in both conventions" test_m_the_ledger_is_a_declared_artifact_in_both_conventions
+run_test "the issue Decisions comment is offered, never automatic" test_m_the_issue_decisions_comment_is_offered_never_automatic
+run_test "sdd-ff announces the gate it bypasses" test_m_sdd_ff_announces_the_bypass
 
 echo ""
 

@@ -157,7 +157,7 @@ The orchestrator reads `tdd.enabled` once per session and propagates `tdd: true|
 
 The orchestrator reads `execution_mode` once per session and propagates it alongside the other pipeline settings it forwards to each phase — `compliance_mode` and `tdd`. A value the orchestrator explicitly propagates always wins over the project config / `sdd-init/{project}` settings bundle, which win over the default `supervised`.
 
-`execution_mode: supervised | auto` — `supervised` (default) stops at the human gates (post-propose, verify FAIL, pre-archive) and asks for a decision; `auto` advances automatically, halting only on `status: blocked` or a verify FAIL. In BOTH modes, `sdd-archive` is never auto-run — it always requires an explicit go-ahead. `/sdd-ff` always runs the remaining phases in `auto` regardless of the configured value.
+`execution_mode: supervised | auto` — `supervised` (default) stops at the human gates (brainstorm, post-propose, verify FAIL, pre-archive) and asks for a decision; `auto` advances automatically, halting only on `status: blocked` or a verify FAIL. In BOTH modes, `sdd-archive` is never auto-run and a vague request stops at the brainstorm gate — both always require an explicit go-ahead. `/sdd-ff` always runs the remaining phases in `auto` regardless of the configured value.
 
 ### Kanban Module (optional)
 

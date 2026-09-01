@@ -20,6 +20,7 @@ openspec/
     ├── archive/             <- Completed changes (YYYY-MM-DD-{change-name}/)
     └── {change-name}/       <- Active change folder
         ├── state.yaml       <- DAG state (survives compaction)
+        ├── brainstorm.md    <- (optional) decision ledger from the sdd-new brainstorm gate
         ├── exploration.md   <- (optional) from sdd-explore
         ├── proposal.md      <- from sdd-propose (carries ## Change Size; for a `small`
         │                       change also ## Spec (inline) and ## Design (inline), and
@@ -38,6 +39,7 @@ openspec/
 |-------|----------------|------|
 | orchestrator | Creates/Updates | `openspec/changes/{change-name}/state.yaml` |
 | sdd-init | Creates | `openspec/config.yaml`, `openspec/specs/`, `openspec/changes/`, `openspec/changes/archive/` |
+| sdd-brainstorm | Creates (optional) | `openspec/changes/{change-name}/brainstorm.md` (decision ledger; written INLINE by the orchestrator at the `sdd-new` brainstorm gate) |
 | sdd-explore | Creates (optional) | `openspec/changes/{change-name}/exploration.md` |
 | sdd-propose | Creates | `openspec/changes/{change-name}/proposal.md` (carries `## Change Size`; for `small`, also `## Spec (inline)` and `## Design (inline)`) |
 | sdd-spec | Creates | `openspec/changes/{change-name}/specs/{domain}/spec.md` (`standard` only) |
@@ -51,6 +53,7 @@ openspec/
 ## Reading Artifacts
 
 ```
+Brainstorm: openspec/changes/{change-name}/brainstorm.md
 Proposal:   openspec/changes/{change-name}/proposal.md
 Specs:      openspec/changes/{change-name}/specs/  (all domain subdirectories)
 Design:     openspec/changes/{change-name}/design.md

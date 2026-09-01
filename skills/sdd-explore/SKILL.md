@@ -47,7 +47,7 @@ Parse what the user wants to explore:
 - Is this a new feature? A bug fix? A refactor?
 - What domain does it touch?
 
-If the skill registry exposes a brainstorming-type skill, you MAY run it for the product-question round — optional, never required.
+If the orchestrator passed a brainstorm ledger reference (`sdd/{change-name}/brainstorm`, or `openspec/changes/{change-name}/brainstorm.md`), read it: its `resolved` decisions are the frame for this investigation, and its `deferred` ones name what is worth looking into. It is OPTIONAL upstream — an absent ledger is normal and never blocks you. You do NOT run the question round yourself: you are a sub-agent, and there is no user on the other side of your session.
 
 ### Step 3: Investigate the Codebase
 

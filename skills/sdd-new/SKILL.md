@@ -39,16 +39,84 @@ propagated value always wins over any stale value in `config.yaml` or the contex
 `execution_mode` (`supervised` | `auto`, default `supervised`) decides how the proposal gate below
 behaves.
 
+### 1.5. Brainstorm gate
+
+Before you delegate anything, decide how specified the request actually is — and let the user
+override that call. This is the first human gate of the cycle, and it exists because a proposal
+written from an ambiguous request is a well-formatted guess.
+
+**Read the source first.** When the request names an issue (`#N`, a GitHub URL, "hagamos este
+issue"), read its body with `gh issue view <N> --comments` before classifying — that is where
+vague requests come from, and classifying the one-line ask instead of the issue is the same as
+not classifying at all. `gh` is Bash for state, so this stays inline.
+
+**Assess** the request — from the issue body, the natural-language ask, or the args — against
+four questions:
+
+1. Does it state a success criterion — something observable that says it is done?
+2. Does it name the flow, module, or files it changes?
+3. Does it touch ONE subsystem, or several independent ones?
+4. Does its own wording leave a fork open ("faster", "cleaner", "algo así")?
+
+Two or more misses → **vague**. Otherwise **clear**.
+
+**Announce the classification in ONE line with its reason**, then ask ONE question with the
+recommendation marked — the native question primitive per the Preflight's *Rendering* rule
+(`AskUserQuestion` on Claude Code, `question` on OpenCode), two options plus its free text:
+
+> This reads as **vague** — no success criterion, and "make it faster" could mean three
+> different things. → **Brainstorm first (recommended)** / Go straight to explore → propose
+
+For a **clear** request, present the mirror image with *Go straight to explore → propose*
+recommended.
+
+**By `execution_mode`:**
+
+- **`supervised`** (default): always ask, both readings.
+- **`auto`**: a **vague** request STOPS here and asks anyway — ambiguity has to resolve BEFORE
+  artifacts are written, so this is a human gate like the implementation boundary, not a
+  supervised-only prompt. A **clear** request passes through with a one-line note; do not ask.
+
+If the user chooses to brainstorm, follow `skills/sdd-brainstorm/SKILL.md` **INLINE** — it is
+dialogue, and a sub-agent has no human on the other side. It returns a decision ledger persisted
+at `sdd/{change-name}/brainstorm` (`openspec/changes/{change-name}/brainstorm.md` in
+openspec/hybrid). `sdd-brainstorm` ships in the `optional` group: if it does not resolve, say so
+in one line and continue to Explore — never block the cycle on an optional module.
+
 ### 2. Explore
 
+**First, check whether the exploration already happened.** `sdd-brainstorm` may have delegated a
+full `sdd-explore` mid-round to answer a question the code could answer, and that run produced a
+real artifact. Look for `sdd/{change-name}/explore` (or `openspec/changes/{change-name}/exploration.md`)
+before delegating anything:
+
+- **Artifact present** — do NOT run a second exploration. Either pass it by reference and go
+  straight to step 2.5, or delegate ONE refinement pass that receives both the existing exploration
+  and the ledger and is told what is still unanswered. Two full explorations of the same change
+  cost twice and produce two approach tables that can disagree.
+- **No artifact** — delegate `sdd-explore` normally. Light inline reads during the brainstorm round
+  (1–3 files) produce no artifact and require nothing here.
+
 Delegate `sdd-explore` for `<change-name>` to investigate the codebase and compare approaches. Inject
-the resolved mode and any auto-resolved Project Standards. Present the exploration summary to the user.
+the resolved mode and any auto-resolved Project Standards. When step 1.5 produced a ledger, pass it
+by reference (`sdd/{change-name}/brainstorm`) as OPTIONAL upstream context — never inline its body.
+Present the exploration summary to the user.
+
+### 2.5. Approach gate
+
+`sdd-explore` returns 2–3 approaches with a recommendation. Do NOT delegate `sdd-propose` in the
+same breath as the exploration summary: present the approaches with their trade-offs and the
+recommendation marked, and ask ONE question — which one. This applies to clear requests too. The
+approach is a decision, and a sub-agent picking it unobserved is exactly the gate this step holds.
+
+In **`auto`**: take the recommendation and say which one in one line; do not ask.
 
 ### 3. Propose
 
 Delegate `sdd-propose` to turn the exploration into a proposal (intent, scope, approach, rollback).
-Pass the proposal's upstream (`sdd/{change-name}/explore`) by reference — the sub-agent reads it from
-the backend; do not inline artifact bodies into the prompt.
+Pass the proposal's upstream (`sdd/{change-name}/explore`, and `sdd/{change-name}/brainstorm` when a
+ledger exists) by reference — the sub-agent reads them from the backend; do not inline artifact
+bodies into the prompt. Name the approach chosen at step 2.5 in the prompt.
 
 ### 4. Proposal gate
 
@@ -71,10 +139,21 @@ delegations are skipped.
 ## Rules
 
 - You are the ORCHESTRATOR here. Delegate every phase; never execute exploration or proposal work inline.
+  The ONE exception is `sdd-brainstorm` at step 1.5: it is dialogue, so it runs inline like this skill.
+- Classify the request at the brainstorm gate BEFORE exploring, and read the issue body first when the
+  request names an issue. In `supervised` always ask; in `auto` a **vague** request still stops there
+  and a **clear** one passes through.
+- Never delegate `sdd-propose` in the same breath as the exploration summary — the approach pick is a
+  stop in `supervised`; in `auto` take the recommendation and say so.
+- Never explore twice. If the brainstorm round already produced an `explore` artifact, reuse it or
+  delegate a refinement pass — never a second full exploration of the same change.
 - Resolve and propagate pipeline settings once; the propagated value wins on conflict.
 - Pass upstream artifacts by reference (topic key / path), not by inlining their content.
 - Honor `execution_mode` at the proposal gate: in `supervised` (default) stop and wait for explicit
   user go-ahead; in `auto` fast-forward into planning (`spec ‖ design → tasks`), stopping at the
-  implementation boundary. The implementation boundary and archive stay gated in both modes.
+  implementation boundary. The implementation boundary and archive stay gated in both modes, and so
+  does the brainstorm gate for a request classified vague.
 - Honor the return envelope: each delegated phase returns the **Section D** envelope from
   `skills/_shared/sdd-phase-common.md`; surface its `executive_summary` and `next_recommended`.
+- Pass the brainstorm ledger downstream by reference when one exists; an absent ledger is normal and
+  never blocks a phase.

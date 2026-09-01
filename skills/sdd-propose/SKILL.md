@@ -18,6 +18,8 @@ You are a sub-agent responsible for creating PROPOSALS. You take the exploration
 From the orchestrator:
 - Change name (e.g., "add-dark-mode")
 - Exploration analysis (from sdd-explore) OR direct user description
+- OPTIONALLY, a brainstorm ledger reference (`sdd/{change-name}/brainstorm`) from the
+  orchestrator's brainstorm gate — see *Step 3c* below
 - Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
@@ -26,7 +28,7 @@ From the orchestrator:
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
-- **engram**: Read `sdd/{change-name}/explore` (optional) and `sdd-init/{project}` (optional). Save artifact as `sdd/{change-name}/proposal`.
+- **engram**: Read `sdd/{change-name}/explore` (optional), `sdd/{change-name}/brainstorm` (optional) and `sdd-init/{project}` (optional). Save artifact as `sdd/{change-name}/proposal`.
 - **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
 - Never force `openspec/` creation unless user requested file-based persistence or mode is `hybrid`.
@@ -80,9 +82,29 @@ and `sdd-design` delegations. The information is collapsed, never omitted — `s
 `sdd-archive` still receive everything they require, and the inline delta spec is what
 `sdd-archive` merges into the main specs.
 
-### Step 4: Write proposal.md
+### Step 3c: Read the Brainstorm Ledger (when one exists)
 
-If the skill registry exposes a brainstorming-type skill, you MAY run it for the product-question round — optional, never required.
+The orchestrator's brainstorm gate may have produced a decision ledger before you were launched
+(`sdd/{change-name}/brainstorm` in engram, `openspec/changes/{change-name}/brainstorm.md` in
+openspec/hybrid). It is OPTIONAL upstream: a clear request never had one, and its absence is
+normal and never blocks you.
+
+When it exists, map it — it is the record of what a human actually decided, and the proposal is
+where those decisions become binding:
+
+| Ledger state | Where it goes in the proposal |
+|---|---|
+| `resolved` | `## Intent` and `## Scope` — this is settled input, state it as such |
+| `deferred` | `## Risks` (with the ledger's stated consequence) and `## Open Questions`, **named as deferred** |
+| `contradicted` | `## Open Questions` — an unresolved conflict is not a decision |
+| assumptions | `## Open Questions`, each with what would falsify it |
+| constraints | `## Scope` → Out of Scope, or `## Risks`, whichever the constraint binds |
+
+**Never promote a `deferred` decision to resolved.** The ledger recorded that nobody decided it;
+writing it into `## Intent` as settled fact launders a guess into a requirement, and every
+downstream phase then treats it as given. Carry the word *deferred* into the proposal text.
+
+### Step 4: Write proposal.md
 
 Every proposal ends with a `## Change Size` section. A `small` proposal additionally carries
 `## Spec (inline)` and `## Design (inline)` — see the template after this one.
@@ -131,10 +153,17 @@ Reference the recommended approach from exploration if available.}
 
 - {External dependency or prerequisite, if any}
 
+## Open Questions
+
+- {Deferred decision — deferred at brainstorm: {reason}; consequence if the guess is wrong}
+- {Assumption nobody confirmed — falsified by {what}}
+- {none, when every question was resolved}
+
 ## Success Criteria
 
 - [ ] {How do we know this change succeeded?}
 - [ ] {Measurable outcome}
+- [ ] `assumed:` {criterion the ledger did not resolve — also listed under Open Questions}
 
 ## Change Size
 
@@ -219,7 +248,12 @@ Both `sdd-spec` and `sdd-design` are valid next phases per the DAG in `skills/_s
 - If the change directory already exists with a proposal, READ it first and UPDATE it
 - Keep the proposal CONCISE - it's a thinking tool, not a novel
 - Every proposal MUST have a rollback plan
-- Every proposal MUST have success criteria
+- Every proposal MUST have success criteria. A success criterion the brainstorm ledger did NOT
+  resolve is written with an `assumed:` prefix and ALSO listed under `## Open Questions` — an
+  invented criterion that reads as agreed is worse than a missing one, because `sdd-verify`
+  audits against it
+- A `deferred` ledger decision reaches the proposal as `## Risks` / `## Open Questions`, named as
+  deferred — never silently resolved
 - Use concrete file paths in "Affected Areas" when possible
 - Apply any `rules.proposal` from `openspec/config.yaml`
 - **Size budget**: Proposal artifact MUST be under 400 words. Use bullet points and tables over prose. Headers organize, not explain.
