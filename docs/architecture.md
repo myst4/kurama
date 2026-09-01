@@ -163,7 +163,8 @@ kurama/
 │   └── marketplace.json               ← Single-entry marketplace example for `/plugin marketplace add`
 ├── skills/                            ← 25 skill files (24 installed by default) + shared conventions
 │   ├── manifest.json                  ← Declares every skill (group: sdd-core | quality | review | optional | tdd | lang) + per-harness install targets; installers read this instead of a hardcoded list. `lang` is OFF by default — a default install carries no language-specific knowledge
-│   ├── _shared/                       ← Shared conventions (referenced by all skills)
+│   ├── _shared/                       ← Shared conventions (referenced by all skills) + shipped helper scripts
+│   │   └── build-skill-registry.sh   ← Writes .kurama/skill-registry.md (index only, no model in the loop)
 │   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: the canonical DAG, change-size path, Phase I/O table, and Sections A-D (skill loading, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
 │   │   ├── orchestrator-sdd-protocol.md ← Orchestrator session protocol loaded on demand when a cycle starts: SDD Session Preflight, Entry Routing, Automatic Mode Gatekeeper. Extracted from the orchestrator prompt so a non-SDD session never pays for it
 │   │   ├── review-ledger-contract.md  ← Lens selection triage (the orchestrator's decision procedure) + the shared blocking/ledger rules every review lens obeys
@@ -184,7 +185,7 @@ kurama/
 │   ├── sdd-apply/SKILL.md            ← v2.0: TDD workflow support
 │   ├── sdd-verify/SKILL.md           ← v2.0: Real test execution + spec compliance matrix
 │   ├── sdd-archive/SKILL.md
-│   ├── skill-registry/SKILL.md       ← Scans skills + conventions, writes .kurama/skill-registry.md
+│   ├── skill-registry/SKILL.md       ← Runs _shared/build-skill-registry.sh (writes .kurama/skill-registry.md)
 │   ├── judgment-day/SKILL.md         ← Dual blind review + fix loop
 │   ├── go-testing/SKILL.md           ← Go test patterns (`lang` group, OFF by default — opt in with `install.sh --with lang`)
 │   ├── skill-creator/SKILL.md        ← Creates new skills from templates
@@ -227,6 +228,6 @@ kurama/
 
 # Generated in target projects (not in this repo):
 .kurama/
-├── skill-registry.md                  ← Auto-generated skill catalog for sub-agents
+├── skill-registry.md                  ← Skill INDEX for sub-agents, built by skills/_shared/build-skill-registry.sh
 └── sdd/{change-name}/                 ← Engram fallback store (unavailable-at-start or mid-cycle mem_save failure)
 ```

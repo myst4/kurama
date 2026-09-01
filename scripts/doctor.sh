@@ -12,6 +12,8 @@ set -uo pipefail
 # Checks:
 #   - receipt present, and each recorded file exists (missing = FAIL) + drift
 #     vs the current repo source (WARN)
+#   - the shipped skill-registry builder is installed and executable (#106) —
+#     /skill-registry and /sdd-init run it and have no fallback scan
 #   - installed version (receipt) vs the repo VERSION
 #   - orchestrator prompt markers balanced (BEGIN/END)
 #   - Claude Code hooks present in settings.json (claude-code)
@@ -395,6 +397,54 @@ EOF
     fi
 }
 
+# ============================================================================
+# #106: the shipped skill-registry builder
+#
+# skills/_shared/build-skill-registry.sh is what writes .kurama/skill-registry.md
+# — the ONLY surface a delegation resolves `## Project Standards (skills to
+# load)` from. The `skill-registry` skill and sdd-init Step 4 run that script and
+# have NO model-scan fallback, on purpose: two implementations of one scan is the
+# drift upstream shipped. So a missing or non-executable copy is not cosmetic —
+# the next /skill-registry stops and says so, and until then every delegation
+# runs blind to the repo's conventions.
+#
+# check_receipt_files would report this as "1 of N recorded file(s) MISSING",
+# which is true and says nothing about what broke. This names it. The install's
+# _shared directory is derived from the receipt rather than re-resolved per
+# harness, so one lookup covers global and project scope and the several
+# harnesses that share one skills dir.
+# ============================================================================
+check_skill_registry_builder() {
+    local receipt_dir="$1"
+    local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
+    local dirs d builder
+
+    dirs="$(manifest_json_array "$manifest" "files" \
+        | awk '/(^|\/)_shared\/[^\/]+$/ { sub(/\/[^\/]*$/, ""); print }' \
+        | awk 'NF && !seen[$0]++')"
+    # No _shared entries at all: an empty or pre-_shared receipt, already
+    # reported by check_receipt_files. Nothing to locate the builder against.
+    [ -n "$dirs" ] || return 0
+
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        builder="$receipt_dir/$d/build-skill-registry.sh"
+        if [ ! -f "$builder" ]; then
+            bad "skill-registry builder missing: $d/build-skill-registry.sh"
+            note "  /skill-registry and /sdd-init run this script and have NO fallback scan,"
+            note "  so until it is back every delegation resolves without project standards."
+            note "  Fix: run update.sh (or re-run setup.sh) for this target."
+        elif [ ! -x "$builder" ]; then
+            bad "skill-registry builder is not executable: $d/build-skill-registry.sh"
+            note "  chmod +x it, or re-run setup.sh / update.sh — both set the bit."
+        else
+            pass "skill-registry builder installed: $d/build-skill-registry.sh"
+        fi
+    done <<DIRS
+$dirs
+DIRS
+}
+
 check_version() {
     local manifest="$1"
     local installed repo icommit rcommit
@@ -730,30 +780,51 @@ EOF
 # minute between setup.sh finishing and the user typing /sdd-init. What was wrong
 # was doctor saying nothing, not doctor exiting 0.
 # ============================================================================
+# True when .kurama/ holds anything sdd-init would have put there — that is, any
+# entry other than skill-registry.md, which setup.sh writes on its own since #106.
+kurama_dir_has_init_output() {
+    local dir="$1" entry base
+    [ -d "$dir" ] || return 1
+    for entry in "$dir"/* "$dir"/.[!.]*; do
+        [ -e "$entry" ] || continue
+        base="${entry##*/}"
+        [ "$base" = "skill-registry.md" ] && continue
+        return 0
+    done
+    return 1
+}
+
 check_initialized() {
     local receipt_dir="$1" scope="$2"
     [ "$scope" = "project" ] || return 0
 
-    # `sdd-init` writes .kurama/skill-registry.md in EVERY persistence mode (see
-    # skills/sdd-init/SKILL.md Step 4), and openspec/config.yaml in the openspec
-    # and hybrid modes. Either one proves the phase ran; requiring config.yaml
-    # alone would report every engram-mode project as uninitialized.
+    # `sdd-init` writes openspec/config.yaml in the openspec and hybrid modes,
+    # and a .kurama/ settings bundle in every mode. Either proves the phase ran;
+    # requiring config.yaml alone would report every engram-mode project as
+    # uninitialized.
     if [ -f "$receipt_dir/openspec/config.yaml" ]; then
         pass "initialized: openspec/config.yaml is the settings home"
         return 0
     fi
-    if [ -f "$receipt_dir/.kurama/skill-registry.md" ]; then
-        pass "initialized: .kurama/ carries the skill registry (engram-mode settings live in Engram)"
-        return 0
-    fi
-    if [ -d "$receipt_dir/.kurama" ] && [ -n "$(ls -A "$receipt_dir/.kurama" 2>/dev/null)" ]; then
+    # #106: skill-registry.md is NO LONGER evidence that sdd-init ran. It used to
+    # be, because only sdd-init Step 4 produced it — a nine-minute sub-agent scan.
+    # It is a script now, and setup.sh runs it at install time, so accepting it
+    # here would grade every FRESH install "initialized" and re-open the exact
+    # silent-partial-success #101 closed. Everything else under .kurama/ is still
+    # sdd-init's own output, so it still counts.
+    if kurama_dir_has_init_output "$receipt_dir/.kurama"; then
         pass "initialized: .kurama/ settings bundle present"
         return 0
     fi
 
     soft "installed, never initialized; run /sdd-init"
-    note "  no openspec/config.yaml and no .kurama/ settings bundle — the install is on disk"
-    note "  but no SDD cycle can run: there is no artifact_store.mode, execution_mode or tdd setting."
+    note "  no openspec/config.yaml and nothing under .kurama/ but the skill registry — the"
+    note "  install is on disk, but no SDD cycle can run: there is no artifact_store.mode,"
+    note "  execution_mode or tdd setting."
+    note "  (#106: setup.sh writes .kurama/skill-registry.md at install time, so that file on"
+    note "  its own is no longer evidence that init ran. If you chose engram persistence AND"
+    note "  already ran /sdd-init, the settings live in Engram, which doctor cannot read —"
+    note "  re-running /sdd-init is harmless either way.)"
 }
 
 check_tooling() {
@@ -851,6 +922,7 @@ TOOLS
     fi
 
     check_receipt_files "$receipt_dir" "$tools"
+    check_skill_registry_builder "$receipt_dir"
     check_version "$manifest"
     check_markers "$tools" "$scope" "$receipt_dir"
     check_hooks "$tools" "$scope" "$receipt_dir"

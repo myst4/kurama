@@ -94,8 +94,9 @@ baseline when starting a new change.
 `.kurama/` is written in every mode — it is harness
 infrastructure, not an SDD project artifact:
 
-- `.kurama/skill-registry.md` — the scanned skill + convention registry (see
-  [docs/sub-agents.md](sub-agents.md)).
+- `.kurama/skill-registry.md` — the skill + convention INDEX, built by
+  `skills/_shared/build-skill-registry.sh` at install, at re-sync, and by
+  `/sdd-init` / `/skill-registry` (see [docs/sub-agents.md](sub-agents.md)).
 - `.kurama/sdd/{change-name}/` — the Engram fallback store, used when Engram is
   unreachable at cycle start (whole-cycle degradation, see above) or when a
   mid-cycle `mem_save` fails after one retry (single-artifact fallback write,

@@ -21,11 +21,13 @@ for any creative work.
 
 There is nothing to wire up. superpowers installs as ordinary `*/SKILL.md` files in a
 user-level skills directory (e.g. `~/.claude/skills/`), which is exactly where
-[`skill-registry`](../skills/skill-registry/SKILL.md) already scans. If superpowers is
-installed, the registry indexes its process skills into `.kurama/skill-registry.md` on
-the next build, and the orchestrator resolves them by trigger like any other skill —
-**no manifest edits, no config flags, no per-project setup**. If it is not installed,
-the registry simply finds nothing and the phases behave exactly as before.
+[`build-skill-registry.sh`](../skills/_shared/build-skill-registry.sh) — the script
+[`skill-registry`](../skills/skill-registry/SKILL.md) runs — already scans. If
+superpowers is installed, the registry indexes its process skills into
+`.kurama/skill-registry.md` on the next build, and the orchestrator resolves them by
+trigger like any other skill — **no manifest edits, no config flags, no per-project
+setup**. If it is not installed, the registry simply finds nothing and the phases behave
+exactly as before.
 
 ## Recommended pairings
 

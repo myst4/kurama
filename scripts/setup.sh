@@ -891,17 +891,37 @@ install_skills() {
     info "Installing skills → $target_dir"
     mkdir -p "$target_dir"
 
-    # Copy _shared
+    # Copy _shared — the conventions (*.md) AND the shipped helper scripts
+    # (*.sh). #106 put build-skill-registry.sh there because the registry is now
+    # built by a script instead of a sub-agent, and #89 lands lint-spec.sh beside
+    # it. A GLOB, deliberately, not a name list: the next shipped helper travels
+    # without anybody remembering to touch this loop.
+    #
+    # Every copied file is recorded in the receipt exactly like the .md ones, so
+    # uninstall.sh removes them, doctor.sh checks them for presence and drift
+    # (resolve_source already maps */_shared/* back to the repo source), and
+    # update.sh re-syncs them. prune_stale_skills only ever touches "*/SKILL.md"
+    # entries, so these are never mistaken for a deselected skill.
     local shared_src="$SKILLS_SRC/_shared"
     local shared_target="$target_dir/_shared"
     if [ -d "$shared_src" ]; then
         mkdir -p "$shared_target"
-        local shared_file
-        for shared_file in "$shared_src"/*.md; do
+        local shared_file shared_base
+        for shared_file in "$shared_src"/*.md "$shared_src"/*.sh; do
             [ -f "$shared_file" ] || continue
-            cp "$shared_file" "$shared_target/"
+            shared_base="$(basename "$shared_file")"
+            make_writable "$shared_target/$shared_base"
+            cp "$shared_file" "$shared_target/$shared_base"
+            # A helper the skills invoke has to be RUNNABLE. cp keeps an existing
+            # destination's mode and gives a fresh copy the source mode masked by
+            # the umask, so neither path can be relied on for the +x bit — and a
+            # non-executable build-skill-registry.sh is a broken install that
+            # looks perfectly healthy in a file listing.
+            case "$shared_base" in
+                *.sh) chmod +x "$shared_target/$shared_base" ;;
+            esac
             RECEIPT_FILES="$RECEIPT_FILES
-$(receipt_rel "$shared_target/$(basename "$shared_file")")"
+$(receipt_rel "$shared_target/$shared_base")"
         done
         ok "_shared conventions"
     fi
@@ -2494,6 +2514,61 @@ setup_agent() {
 }
 
 # ============================================================================
+# #106: the project skill registry
+#
+# .kurama/skill-registry.md is the ONLY resolution surface for the
+# `## Project Standards (skills to load)` block every delegation carries — with
+# no registry, skill-resolver.md's step 4 fires and every phase runs blind to the
+# repo's conventions. It used to be built by a sub-agent: 12-13 minutes and
+# 45 KB in a real repo, 63% of it per-skill summaries #82 had already demoted to
+# an opt-in fallback. It is now skills/_shared/build-skill-registry.sh, and an
+# install is exactly the moment to run it: the set of installed skills just
+# changed by definition.
+#
+# Only a NAMED target is ever built. TARGET_PATH is the validated repo root in
+# project scope and empty in a plain global install, so a global run never writes
+# .kurama/ into whatever directory the user happened to be standing in. The
+# script keeps its own root guard (never / or $HOME, and a project marker
+# required) on top of that, and reports a refusal as exit 0.
+#
+# There is deliberately no model-scan fallback anywhere: a missing builder is a
+# broken install, so say so here rather than silently shipping a target whose
+# every delegation will run without project standards.
+# ============================================================================
+SKILL_REGISTRY_LINE=""
+
+refresh_skill_registry() {
+    local builder="$SKILLS_SRC/_shared/build-skill-registry.sh"
+    [ -n "$TARGET_PATH" ] || return 0
+
+    if [ ! -f "$builder" ]; then
+        warn "skills/_shared/build-skill-registry.sh is missing — no skill registry was built"
+        info "Sub-agent delegations will run WITHOUT project standards until it is."
+        info "Re-clone Kurama and re-run this command; doctor.sh reports the same finding."
+        SKILL_REGISTRY_LINE="missing"
+        return 0
+    fi
+
+    local out status=0
+    out="$(bash "$builder" --root "$TARGET_PATH" 2>&1)" || status=$?
+    if [ "$status" -ne 0 ]; then
+        warn "The skill registry could not be built for $TARGET_PATH — the rest of the install stands"
+        printf '%s\n' "$out" | awk 'NF { print "      " $0 }'
+        SKILL_REGISTRY_LINE="failed"
+        return 0
+    fi
+
+    if [ -f "$TARGET_PATH/.kurama/skill-registry.md" ]; then
+        ok "${out:-skill registry written}"
+        SKILL_REGISTRY_LINE="$out"
+    elif [ -n "$out" ]; then
+        # The builder's own root guard refused the target and said why.
+        info "$out"
+    fi
+    return 0
+}
+
+# ============================================================================
 # Summary
 # ============================================================================
 
@@ -2530,6 +2605,18 @@ show_summary() {
             echo -e "  ${YELLOW}!${NC} ${BOLD}.gitignore${NC}: not a git repo — skipped" ;;
         unbalanced|failed)
             echo -e "  ${YELLOW}!${NC} ${BOLD}.gitignore${NC}: Kurama block NOT written — see the note above" ;;
+    esac
+
+    # #106: the skill registry the delegations resolve from. Named here for the
+    # same reason as the .gitignore line — it is the one moment somebody is
+    # looking at what the install just produced.
+    case "$SKILL_REGISTRY_LINE" in
+        ""|missing|failed) ;;
+        *) echo -e "  ${GREEN}✓${NC} ${BOLD}Skill registry${NC}: ${SKILL_REGISTRY_LINE#skill-registry: }" ;;
+    esac
+    case "$SKILL_REGISTRY_LINE" in
+        missing|failed)
+            echo -e "  ${YELLOW}!${NC} ${BOLD}Skill registry${NC}: NOT built — delegations will run without project standards" ;;
     esac
 
     # #101: a prompt file that already carried the project's own workflow. Named
@@ -2855,6 +2942,10 @@ else
 fi
 
 if [[ ${#INSTALLED_AGENTS[@]} -gt 0 ]]; then
+    # #106: build the skill registry ONCE, after every harness has landed — the
+    # scan reads the skills dirs, so running it per agent would rebuild the same
+    # file N times from a tree that only stops moving here.
+    refresh_skill_registry
     show_summary
 else
     echo ""

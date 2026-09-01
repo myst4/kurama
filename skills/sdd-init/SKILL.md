@@ -73,11 +73,11 @@ Read the project to understand:
   now installs by default (manifest group `tdd`), but it can still be absent — someone may
   have excluded it with `--without tdd` — so activation without the module on disk would
   leave `sdd-apply`/`sdd-tasks`/`sdd-verify` pointing at a missing file.
-  **Preflight — is the module installed?** Resolve `tdd/SKILL.md` across the same
-  skill-resolution paths Step 4 scans (user-level `~/.claude/skills/`,
-  `~/.config/opencode/skills/`, `~/.codex/skills/`, `~/.pi/agent/skills/`,
-  `~/.omp/agent/skills/`, the parent directory of this skill file, and the project-level
-  equivalents).
+  **Preflight — is the module installed?** Check for `tdd/SKILL.md` as a SIBLING of this
+  skill file: `../tdd/SKILL.md` relative to the directory this `SKILL.md` lives in. The
+  same setup run installs both into the same skills directory, so the sibling is the
+  authoritative answer in one hop — and it cannot be satisfied by some other harness's
+  copy of a skill named `tdd`.
   - **If `tdd/SKILL.md` is NOT resolvable**: do NOT ask the enable question and do NOT record
     `tdd.enabled=true`. Record `tdd.enabled=false` and tell the user: *"The TDD module is
     missing (default installs include it; it was excluded with `--without tdd`) — reinstall
@@ -120,9 +120,10 @@ Read the project to understand:
   activate and there are ZERO heuristics — an existing project or a configured `gh` NEVER
   auto-enable it.
   **Preflight — is the module installed?** The `kanban-github` skill ships in the excludable
-  `optional` manifest group; resolve `kanban-github/SKILL.md` across the same skill-resolution
-  paths Step 4 scans. If it is NOT resolvable (excluded with `--without optional`), do NOT ask
-  the question, record `kanban.enabled=false`, and note it in `risks`.
+  `optional` manifest group; check for `../kanban-github/SKILL.md` as a sibling of this skill
+  file, exactly as the TDD preflight above does. If it is NOT there (excluded with
+  `--without optional`), do NOT ask the question, record `kanban.enabled=false`, and note it
+  in `risks`.
   **If resolvable**, ask directly: **"Enable Kanban board sync (GitHub Projects) for this
   project?"** (default `false` when the user does not opt in).
   - **On "yes", first verify the `gh` prerequisite in order** — activation REQUIRES a
@@ -302,14 +303,33 @@ on its own.
 
 ### Step 4: Build Skill Registry
 
-Follow the same logic as the `skill-registry` skill (`skills/skill-registry/SKILL.md`):
+Run the shipped builder. Do NOT scan the skill directories yourself and do NOT delegate
+this to a sub-agent — the scan is a script, and it finishes in well under a second:
 
-1. Scan user skills: glob `*/SKILL.md` across ALL known skill directories (they mirror the per-harness install targets in `skills/manifest.json`). **User-level**: `~/.claude/skills/`, `~/.config/opencode/skills/`, `~/.codex/skills/`, `~/.pi/agent/skills/`, `~/.omp/agent/skills/`, and the parent directory of this skill file (the catch-all — Kurama's own skills are co-located wherever it was installed, so this always covers the active harness target even if it is not in the explicit list). **Project-level**: `.claude/skills/`, `.config/opencode/skills/`, `.codex/skills/`, `.pi/skills/`, `.omp/skills/`, `skills/`. Skip `sdd-*`, `_shared`, `skill-registry`. Deduplicate by name (project-level wins). Read frontmatter triggers.
-2. Scan project conventions: check for `agents.md`, `AGENTS.md`, `CLAUDE.md` (project-level) in the project root. If an index file is found (e.g., `agents.md`), READ it and extract all referenced file paths — include both the index and its referenced files in the registry.
-3. **ALWAYS write `.kurama/skill-registry.md`** in the project root (create `.kurama/` if needed). This file is harness infrastructure, NOT an SDD project artifact, so it is written in EVERY mode. The persistence-mode gates that suppress project files (e.g. `openspec/`) never apply to `.kurama/`.
-4. If engram is available, **ALSO save to engram**: `mem_save(title: "skill-registry", topic_key: "skill-registry", type: "config", project: "{project}", capture_prompt: false, content: "{registry markdown}")` (`capture_prompt: false` — automated build output, not a human decision)
+```bash
+bash <this-skill-dir>/../_shared/build-skill-registry.sh --root "{project-root}"
+```
 
-See `skills/skill-registry/SKILL.md` for the full registry format and scanning details.
+`<this-skill-dir>/../_shared/` is the `_shared` directory installed alongside this skill.
+The script prints one line — `skill-registry: N skills (U user, P project) → .kurama/skill-registry.md`
+— and writes the file atomically.
+
+1. **Verify it landed**: read back `.kurama/skill-registry.md` and confirm the
+   `## User Skills` table holds the number of rows the script reported. Check with `test -f`
+   or your Read tool, never with `fd`/`rg` — `.kurama/` is hidden AND gitignored, so a finder
+   skips it even with hidden flags.
+2. `.kurama/skill-registry.md` is harness infrastructure, NOT an SDD project artifact, so it
+   is written in EVERY mode. The persistence-mode gates that suppress project files (e.g.
+   `openspec/`) never apply to `.kurama/`.
+3. If engram is available, **ALSO save to engram**: `mem_save(title: "skill-registry", topic_key: "skill-registry", type: "config", project: "{project}", capture_prompt: false, content: "{registry markdown}")` (`capture_prompt: false` — automated build output, not a human decision)
+
+**If the script is missing, STOP and report it in `risks`** — do not scan by hand. There is
+no fallback on purpose: one implementation of the scan, or two that drift apart. Tell the
+user to run `./scripts/update.sh` and then `./scripts/doctor.sh`, which reports the same
+finding. Which directories are scanned, what is excluded and how duplicate names resolve are
+the script's business, and the script's alone.
+
+See `skills/skill-registry/SKILL.md` for the surrounding protocol.
 
 ### Step 5: Persist Project Context and Pipeline Settings
 
