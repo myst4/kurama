@@ -7,7 +7,7 @@ description: >
   or asks to begin working on a named feature/fix through SDD.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

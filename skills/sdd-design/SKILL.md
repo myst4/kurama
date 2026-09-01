@@ -5,7 +5,7 @@ description: >
   Trigger: When the orchestrator launches you to write or update the technical design for a change.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "2.0"
 ---
 

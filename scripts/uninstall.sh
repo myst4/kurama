@@ -202,7 +202,7 @@ remove_engram_from_config() {
 }
 
 # Strip the Kurama TUI logo plugin from an OpenCode tui.json recorded in the
-# receipt's tui_plugins[]. Mirrors gentle-ai's removeTUIPlugin: drop every
+# receipt's tui_plugins[]. Removal is surgical: drop every
 # plugin[] entry pointing at tui-plugins/kurama-logo.tsx and leave the rest of
 # the file — $schema, other plugins, unrelated keys — exactly as it was. Matching
 # on the suffix (not the absolute path) keeps removal working when the receipt
@@ -465,8 +465,8 @@ sweep_legacy_opencode_artifacts() {
 
 # O3: offer to revert the Pi packages Kurama installed (recorded in the receipt).
 # Honors --with/--without-pi-packages; otherwise asks interactively (default no,
-# so a shared package set is never removed by surprise). Never touches gentle-pi
-# and never removes anything not recorded.
+# so a shared package set is never removed by surprise). Never touches `gentle-pi`
+# (third-party npm package name) and never removes anything not recorded.
 offer_pi_uninstall() {
     local manifest="$1"
     local pkgs

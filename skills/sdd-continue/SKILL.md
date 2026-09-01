@@ -7,7 +7,7 @@ description: >
   "what's next", or asks to pick up an existing change after a pause or compaction.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

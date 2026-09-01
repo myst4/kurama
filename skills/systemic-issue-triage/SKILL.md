@@ -13,7 +13,7 @@ description: >
   Runs INLINE in the orchestrator.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

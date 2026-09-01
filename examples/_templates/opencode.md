@@ -32,11 +32,11 @@ Read-only report of every active SDD cycle — last completed phase, next phase,
 A **profile** is a named parallel agent set that shares the SDD prompts and varies only its `model`. Installing one (`setup.sh --agent opencode --opencode-profile NAME[:provider/model]`) splices a `kurama-orchestrator` primary plus hidden `sdd-<phase>-NAME` subagents into `opencode.json`, all referencing the shared `~/.config/opencode/prompts/sdd/` prompt files. Press **Tab** in the TUI to cycle primaries. The `/sdd-*` slash commands stay frontmatter-pinned to the base agents, so they ignore the selected primary and run at their default models; to use a profile's per-phase models, select `kurama-orchestrator` and drive the flow with a **freeform** (non-slash) request; it delegates SDD phases to its own `sdd-<phase>-NAME` subagents and review lenses to `general`. Models are hand-edited in `opencode.json` (or set once via the flag's `:provider/model`) — there is no picker. See `docs/opencode-profiles.md`.
 
 <!-- @@MODEL_ASSIGNMENTS_SECTION@@ -->
-<!-- gentle-ai:sdd-model-assignments -->
+<!-- kurama:sdd-model-assignments -->
 ### Model Routing
 
 By default, pass NO `model` parameter when delegating: every sub-agent inherits the model this session is configured to run, whatever the provider. Tiered per-phase routing is opt-in and lives in `skills/_shared/model-assignments.md` — read it only when the user has opted in through their own configuration (agent entries in `opencode.json`, or a named profile), and never let it override a model the user configured.
-<!-- /gentle-ai:sdd-model-assignments -->
+<!-- /kurama:sdd-model-assignments -->
 
 <!-- @@STATE_CONVENTIONS@@ -->
 Convention files under `~/.config/opencode/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project fallback — a hidden dir; finders need `fd -H` / `rg --hidden` to see it). Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.

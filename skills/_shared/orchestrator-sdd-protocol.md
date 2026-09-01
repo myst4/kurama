@@ -88,7 +88,7 @@ session starts without asking anything, whatever these two resolve to.
   ask the user to fix it, never guess the nearest preset. The config is committed: a typo in
   it must not break the session for the whole team.
 - **It is a default, not an override.** A voice the user's own environment already imposes —
-  a Claude Code output style, `gentle-pi`, a project `AGENTS.md` — outranks this setting, and
+  a Claude Code output style, a harness persona package, a project `AGENTS.md` — outranks it, and
   an explicit instruction in the conversation outranks both. Full ladder: `personas.md` →
   *Never an override*.
 - The settings home is the only source: no per-harness default persona, no inference from

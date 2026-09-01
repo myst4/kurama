@@ -103,12 +103,12 @@ model you edited by hand (it captures existing `model` values before splicing an
 restores them afterward), so you can re-sync prompts and structure without losing
 your model choices.
 
-## What Kurama does NOT port from gentle-ai
+## What a Kurama profile deliberately does not include
 
 Kurama ships only the *runtime shape* of a profile (native multi-primary +
-per-agent model + shared prompt files). The following authoring conveniences from
-gentle-ai's Go binary are intentionally **not** reproduced — they have no
-bash/`jq` equivalent:
+per-agent model + shared prompt files). The authoring conveniences below are
+intentionally **absent** — they need a compiled binary and a model cache, and
+have no bash/`jq` equivalent:
 
 - **Interactive model picker + provider/auth detection** (backed by the OpenCode
   models cache). Kurama replacement: edit `model` fields or pass `:provider/model`.
@@ -126,7 +126,7 @@ at startup). OpenCode's own `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`
 switch covers background sub-agents now — see
 [sub-agents.md](sub-agents.md#per-agent-model-routing).
 
-gentle-ai's `home_logo` TUI plugin **is** ported, as the opt-in `--with-logo`
+The OpenCode `home_logo` TUI slot **is** used, by the opt-in `--with-logo`
 flag (which also installs Pi's startup header) — it is orthogonal to profiles
 (purely cosmetic) and is documented in
 [installation.md](installation.md#kurama-startup-logo-opt-in).

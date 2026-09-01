@@ -5,7 +5,7 @@ description: >
   Trigger: When the orchestrator launches you to create or update the task breakdown for a change.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "2.0"
 ---
 

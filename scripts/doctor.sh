@@ -859,6 +859,7 @@ check_tooling() {
         if pi list >/dev/null 2>&1; then
             local plist; plist="$(pi list 2>/dev/null || true)"
             local pkg
+            # Third-party npm package names, as published on the registry.
             for pkg in gentle-engram pi-mcp-adapter pi-subagents-j0k3r rpiv-ask-user-question pi-web-access rpiv-todo pi-btw; do
                 if printf '%s' "$plist" | grep -q "$pkg"; then
                     pass "  pi package: $pkg"

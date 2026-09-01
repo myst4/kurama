@@ -9,7 +9,7 @@ description: >
   of a full-4R sweep.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 
