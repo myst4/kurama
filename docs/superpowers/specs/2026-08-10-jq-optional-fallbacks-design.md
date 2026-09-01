@@ -3,6 +3,14 @@
 Date: 2026-08-10
 Status: approved, ready for implementation
 
+> **Superseded in part (issue #37).** This spec is a record of the design as it was
+> approved, and it was written against a repo with **no shared library**: it describes
+> the receipt array parser as living in six byte-identical copies kept in sync by
+> comment convention. That is no longer true. The parser, the harness map and
+> `receiptSchema` now live in **`scripts/lib/receipt.sh`**, which every script sources
+> and guards. The awk bodies below are still the shipped ones — read them there, in
+> one place, not as copies to keep aligned.
+
 ## Problem
 
 `README.md:313` advertises Kurama as zero-dependency. Measured on v6.0.0 with a PATH that
@@ -86,7 +94,8 @@ Three properties matter and must be preserved by anyone editing it:
 ### The receipt array parser
 
 The opening rule must handle a `]` on the same line. In all copies — `setup.sh`, `update.sh`,
-`doctor.sh`, `uninstall.sh`, `setup-tui.sh` — the opening rule becomes:
+`doctor.sh`, `uninstall.sh`, `setup-tui.sh` — the opening rule becomes (**since #37 there is
+exactly one copy, in `scripts/lib/receipt.sh`**):
 
 ```awk
     !inarr && $0 ~ "\"" key "\"[[:space:]]*:[[:space:]]*\\[" {

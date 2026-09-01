@@ -34,6 +34,12 @@ The recommended way to install is the **setup script** — it handles everything
 > **Platforms:** macOS and Linux. Every script is portable bash (3.2-compatible,
 > BSD and GNU userland). There is no PowerShell installer.
 
+> **Non-interactive callers (CI, pipes, `< /dev/null`):** a bare `./scripts/setup.sh`
+> is not a fully specified run — it hands off to the gum TUI, which owns the banner
+> and the prompts. With gum installed but **stdin closed**, that hand-off lands in
+> gum's own failure mode rather than a Kurama error message. Always pass an explicit
+> target from a script: `--all`, or `--agent NAME --non-interactive`.
+
 The setup script:
 - Detects installed agents via PATH (`claude`, `opencode`, `codex`, `pi`, `omp`)
 - Copies skills to the correct directory (user-level by default; per-repo with `--scope project`)

@@ -175,11 +175,12 @@ Two independent things, easy to conflate:
   flip it on.
 
 ```bash
-./scripts/install.sh --without tdd     # exclude the module from disk
+./scripts/setup.sh --without tdd     # exclude the module from disk
 ```
 
-If you excluded the module earlier, reinstall **without** the flag (`install.sh` /
-`setup.sh`) to put it back — the default install includes it. Keeping install and
+If you excluded the module earlier, reinstall **without** the flag to put it back —
+the default install includes it. (`install.sh --without tdd` still works: it is a
+compatibility wrapper that forwards the flag to `setup.sh`, the single installer.) Keeping install and
 activation separate is what lets a project **start without tests and add them
 later**: the module is always available on disk, and each project opts into the
 cycle when it is ready (see [Enabling TDD later](#enabling-tdd-later)).

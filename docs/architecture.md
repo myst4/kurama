@@ -222,7 +222,7 @@ kurama/
 └── scripts/
     ├── setup.sh                       ← Full setup: detect + install + configure
     ├── install.sh                     ← Thin back-compat wrapper; maps legacy flags onto setup.sh (writes no receipt of its own)
-    ├── install_test.sh                ← Regression test suite for install.sh
+    ├── install_test.sh                ← Regression test suite for ALL of scripts/ — setup, install, uninstall, update, doctor, setup-tui, validate_skills and lib/receipt.sh, plus the two shipped hooks
     ├── uninstall.sh                   ← Removes exactly what an install manifest recorded
     └── build-examples.sh              ← Assembles examples/_templates/ into every examples/* orchestrator file (portable bash 3.2/BSD)
 

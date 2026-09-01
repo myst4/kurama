@@ -79,6 +79,11 @@ setup.sh so paths resolve identically" comment and a copy of the helpers. A four
 follows that convention rather than fighting it; extracting a shared lib is a separate
 concern and out of scope here.
 
+> **Superseded (issue #37).** That separate concern was taken up: the copies were
+> consolidated into **`scripts/lib/receipt.sh`**, which every script sources and guards
+> at startup. The paragraph above describes the repo as it stood when this spec was
+> approved — there is no fourth copy to add today, only the one definition.
+
 `scripts/update.sh` — `resync_target()` reads `tools[]` (falling back to `[tool]`) and runs
 one `bash "$SETUP_SCRIPT" --agent <slug>` per recorded tool instead of one overall. The
 pre-sync hash snapshot, the changed-file report and the `.bak` pruning stay as they are and
