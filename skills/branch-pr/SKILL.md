@@ -31,7 +31,7 @@ Use this skill when:
 
 ```
 1. Verify issue has `status:approved` label
-2. Create branch: type/description (see Branch Naming below)
+2. Create branch: type/{issue}-{slug} — the issue number first (see Branch Naming below)
 3. Implement changes with conventional commits
 4. Run shellcheck on modified scripts
 5. Run the Review Workload Guard — measure the diff against the base and pick a Delivery Strategy
@@ -128,9 +128,11 @@ and stack them.
 
 **Rules:**
 
-- **One branch per work unit**, named `feat/{change}-{n}-{slug}` — `{change}` is the
-  change id/topic, `{n}` is the 1-based order, `{slug}` is a short kebab description.
-  Must still satisfy the Branch Naming regex below (lowercase, `a-z0-9._-` only).
+- **One branch per work unit**, named `type/{issue}-{slug}` — each unit links its own
+  approved issue, so that number identifies it and the merge order lives in the `### Chain`
+  block below. When a whole chain ships under ONE issue, order the units inside it:
+  `type/{issue}-{n}-{slug}`, `{n}` 1-based. Must still satisfy the Branch Naming regex
+  below (lowercase, `a-z0-9._-` only).
 - **Each PR is standalone reviewable** — it passes on its own, links its own
   `status:approved` issue, and carries exactly one `type:*` label. Every Critical Rule
   applies to every PR in the chain.
@@ -138,19 +140,19 @@ and stack them.
 - **Merge order is documented** in every PR body.
 
 ```bash
-# Unit 1 — bases on main
-git checkout -b feat/authflow-1-token-store main
+# Unit 1 — bases on main, carries its own issue number (#101)
+git checkout -b feat/101-token-store main
 # ...implement + commit unit 1...
-git push -u origin feat/authflow-1-token-store
+git push -u origin feat/101-token-store
 gh pr create --base main \
   --title "feat(auth): add token store" \
   --body "Closes #101"
 
-# Unit 2 — bases on unit 1's branch (stacked)
-git checkout -b feat/authflow-2-refresh feat/authflow-1-token-store
+# Unit 2 — bases on unit 1's branch (stacked), carries issue #102
+git checkout -b feat/102-refresh feat/101-token-store
 # ...implement + commit unit 2...
-git push -u origin feat/authflow-2-refresh
-gh pr create --base feat/authflow-1-token-store \
+git push -u origin feat/102-refresh
+gh pr create --base feat/101-token-store \
   --title "feat(auth): add refresh flow" \
   --body "Refs #102"   # base ≠ default → Refs (see Closes vs Refs); flips to Closes on re-parent onto main
 ```
@@ -159,17 +161,17 @@ Document the order in every chained PR body:
 
 ```markdown
 ### Chain
-Part 2 of 3 — merge order: #101 → #102 → #103.
-Base PR: #101 (must merge first).
+Part 2 of 3 — merge order: PR #201 → #202 → #203 (issues #101 → #102 → #103).
+Base PR: #201 (must merge first).
 ```
 
 **After a base PR merges**, re-parent the next unit onto the new base and retarget
 its PR:
 
 ```bash
-# #101 merged into main → re-base unit 2 onto main
-git checkout feat/authflow-2-refresh
-git rebase --onto main feat/authflow-1-token-store
+# unit 1 merged into main → re-base unit 2 onto main
+git checkout feat/102-refresh
+git rebase --onto main feat/101-token-store
 git push --force-with-lease
 gh pr edit <unit-2-pr> --base main
 # base is now the default branch → switch the body's `Refs #102` back to `Closes #102`
@@ -187,19 +189,28 @@ Branch names MUST match this regex:
 
 **Format:** `type/description` — lowercase, no spaces, only `a-z0-9._-` in description.
 
-| Type | Branch pattern | Example |
-|------|---------------|---------|
-| Feature | `feat/<description>` | `feat/user-login` |
-| Bug fix | `fix/<description>` | `fix/zsh-glob-error` |
-| Chore | `chore/<description>` | `chore/update-ci-actions` |
-| Docs | `docs/<description>` | `docs/installation-guide` |
-| Style | `style/<description>` | `style/format-scripts` |
-| Refactor | `refactor/<description>` | `refactor/extract-shared-logic` |
-| Performance | `perf/<description>` | `perf/reduce-startup-time` |
-| Test | `test/<description>` | `test/add-setup-coverage` |
-| Build | `build/<description>` | `build/update-shellcheck` |
-| CI | `ci/<description>` | `ci/add-branch-validation` |
-| Revert | `revert/<description>` | `revert/broken-setup-change` |
+**A GitHub issue is linked** — the work came from a kanban card, from
+`skills/issue-creation`, or the PR will carry `Closes #N` / `Refs #N` → the branch is
+**`type/{issue}-{slug}`**: the issue number first, then a short kebab slug. Always.
+Without the number, `git log` and `git branch` give no way back to the ticket.
+
+**No issue in play** → unchanged: `type/{slug}`.
+
+The regex is the same for both — it already admits digits.
+
+| Type | Issue-linked — `type/{issue}-{slug}` | No issue — `type/{slug}` |
+|------|--------------------------------------|--------------------------|
+| Feature | `feat/104-sdd-brainstorm-gate` | `feat/user-login` |
+| Bug fix | `fix/81-recaptcha-otp-resend` | `fix/zsh-glob-error` |
+| Chore | `chore/77-update-ci-actions` | `chore/update-ci-actions` |
+| Docs | `docs/62-installation-guide` | `docs/installation-guide` |
+| Style | `style/48-format-scripts` | `style/format-scripts` |
+| Refactor | `refactor/37-extract-shared-logic` | `refactor/extract-shared-logic` |
+| Performance | `perf/29-reduce-startup-time` | `perf/reduce-startup-time` |
+| Test | `test/95-add-setup-coverage` | `test/add-setup-coverage` |
+| Build | `build/54-update-shellcheck` | `build/update-shellcheck` |
+| CI | `ci/41-add-branch-validation` | `ci/add-branch-validation` |
+| Revert | `revert/88-broken-setup-change` | `revert/broken-setup-change` |
 
 ---
 
@@ -215,6 +226,10 @@ Closes #<issue-number>
 
 Valid closing keywords: `Closes #N`, `Fixes #N`, `Resolves #N` (case insensitive).
 The linked issue MUST have the `status:approved` label.
+
+**The branch number and this line MUST agree.** A branch named `type/{issue}-{slug}`
+carries the SAME `N` as its `Closes #N` / `Refs #N` — a branch numbered for one issue and
+a body linking another is a broken trail. Fix the branch, not the body.
 
 **Closes vs Refs — keyed on the PR base:**
 
@@ -401,15 +416,15 @@ feat!: redesign skill loading system
 ## Commands
 
 ```bash
-# Create branch
-git checkout -b feat/my-feature main
+# Create branch — issue number first when an issue is linked
+git checkout -b feat/42-my-feature main
 
 # Run shellcheck before pushing
 shellcheck scripts/*.sh
 
-# Push and create PR
-git push -u origin feat/my-feature
-gh pr create --title "feat(scope): description" --body "Closes #N"
+# Push and create PR — the branch number and the closing keyword must agree
+git push -u origin feat/42-my-feature
+gh pr create --title "feat(scope): description" --body "Closes #42"
 
 # Add type label to PR
 gh pr edit <pr-number> --add-label "type:feature"

@@ -37,7 +37,7 @@ Use this skill when:
 5. Submit → issue gets status:needs-review automatically
 6. If kanban.enabled → add the issue to the project (Backlog) and assign it (`@me` by default, or the `kanban.user` override) (see Kanban Integration)
 7. Wait for maintainer to add status:approved
-8. Only then open a PR linking this issue
+8. Only then open a PR linking this issue — branch it as `type/{issue}-{slug}`, carrying THIS issue's number (see `skills/branch-pr` → Branch Naming)
 ```
 
 ---

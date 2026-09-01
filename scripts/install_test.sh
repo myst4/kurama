@@ -10814,6 +10814,270 @@ run_test "sdd-init asks how the two workflows coexist" test_p_sdd_init_asks_how_
 echo ""
 
 # ============================================================================
+# UNIT-R (issue #109): the branch name carries the linked issue number
+#
+# `type/{issue}-{slug}` whenever a GitHub issue is in play — a kanban card, an
+# issue `skills/issue-creation` filed, or a PR that will carry `Closes #N`. The
+# rule is pure documentation: no script reads a branch name, so the shipped TEXT
+# is the whole enforcement surface, and it breaks silently — a table row loses
+# its issue-linked example, the chain section drifts back to naming the change
+# instead of the issue, or `kanban-github`/`issue-creation` go on sending a
+# reader to a branch name with no number in it. Nothing else in this file reads
+# these four documents.
+#
+# The regex does NOT change — it always admitted digits — which is exactly why a
+# regex-only check is worthless here: `feat/user-login` and `feat/104-gate` are
+# both valid, so validity cannot tell whether the rule landed. Every case below
+# pins the RULE and its examples instead; the one case that does use the regex
+# takes it from the shipped doc and requires the issue-linked form to be among
+# the names that doc actually shows.
+#
+# Mutation-checked: every case here fails against `git show origin/main:<file>`.
+# ============================================================================
+
+BRANCH_PR_SKILL="$REPO_DIR/skills/branch-pr/SKILL.md"
+KANBAN_SKILL="$REPO_DIR/skills/kanban-github/SKILL.md"
+ISSUE_SKILL="$REPO_DIR/skills/issue-creation/SKILL.md"
+CONTRIBUTING_DOC="$REPO_DIR/CONTRIBUTING.md"
+
+# The 11 types the branch regex admits, in the order the Branch Naming table
+# lists them. The table is checked row by row against this list, so one surviving
+# issue-linked example somewhere cannot stand in for the column.
+BRANCH_TYPES=(feat fix chore docs style refactor perf test build ci revert)
+
+# Print the body of the markdown section of file $1 whose heading line is exactly
+# $2, up to the next `##`-level heading. Fenced blocks are tracked because the
+# Chain Strategy section SHOWS a `### Chain` heading inside a ```markdown fence —
+# a fence-blind scan would cut the section in half there and assert over the
+# wrong text. Empty when the heading is gone, which every caller size-checks.
+md_section() {
+    local file="$1" heading="$2"
+    [ -f "$file" ] || return 0
+    awk -v h="$heading" '
+        /^```/                                 { fence = !fence }
+        !fence && $0 == h                      { f = 1; next }
+        f && !fence && substr($0, 1, 2) == "##" { exit }
+        f                                      { print }
+    ' "$file"
+}
+
+# Fail unless $1 is a real section body rather than the empty string a renamed or
+# deleted heading yields — every assertion over an empty haystack passes. $2 names
+# the section, $3 is the byte floor.
+assert_section_is_substantial() {
+    local body="$1" what="$2" floor="$3"
+    local bytes
+    bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
+    if [ "$bytes" -lt "$floor" ]; then
+        echo "  $what came back ${bytes}B (floor ${floor}B) — the heading is gone or"
+        echo "  renamed, and every assertion below it would pass over an empty string"
+        return 1
+    fi
+    return 0
+}
+
+# Print every branch name the file $1 shows: one of the published types, a slash,
+# then a non-blank run. Deliberately LOOSER than the branch regex — an extractor
+# built from the regex's own character class could only ever yield names that
+# match it, making "every example matches" true by construction. Backticks,
+# quotes, commas and parens are blanked first so markup bounds a name, and
+# placeholder forms (`{issue}`, `<description>`) are dropped: they are patterns,
+# not names.
+branch_names_shown() {
+    [ -f "$1" ] || return 0
+    sed "s/[\`\"'(),]/ /g" "$1" \
+        | grep -oE '(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)/[^[:space:]]+' \
+        | grep -v '[{<]' || true
+}
+
+# Print the branch regex the doc $1 publishes, so the fixtures below exercise what
+# ships instead of a copy that can drift away from it. The doc escapes the slash
+# for readers (`\/`); POSIX leaves `\/` undefined inside an ERE, so it is
+# unescaped here before any grep is handed the pattern.
+published_branch_regex() {
+    [ -f "$1" ] || return 0
+    awk '
+        index($0, "^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)") == 1 {
+            sub(/\\\//, "/"); print; exit
+        }
+    ' "$1"
+}
+
+test_r_branch_pr_publishes_the_issue_linked_rule() {
+    # Wrong-reason pass this guards against: "issue number" appears in prose all
+    # over this file, so a whole-file grep for the words would stay green while
+    # the table still showed nothing but issue-less examples. Everything here is
+    # scoped to the Branch Naming section, and the table is checked one type row
+    # at a time — the Chain or Commands section cannot answer for the column.
+    local section
+    section="$(md_section "$BRANCH_PR_SKILL" "## Branch Naming")"
+    assert_section_is_substantial "$section" "branch-pr's Branch Naming section" 800 || return 1
+
+    assert_matches "$section" 'type/\{issue\}-\{slug\}' \
+        "the issue-linked branch form itself" || return 1
+    assert_matches "$section" 'closes #n|refs #n' \
+        "the trigger: the PR will carry Closes/Refs" || return 1
+    assert_matches "$section" 'kanban card|issue-creation' \
+        "the other two triggers: a kanban card, or skills/issue-creation" || return 1
+    assert_matches "$section" 'type/\{slug\}' \
+        "the unchanged no-issue form" || return 1
+
+    # #99's rule applies to every grep in this section: herestring in, never a
+    # pipe — `grep -q` exits on its first match and the writer takes SIGPIPE.
+    local t missing=""
+    for t in "${BRANCH_TYPES[@]}"; do
+        if ! grep -Eq "\`$t/[0-9]+-[a-z0-9._-]+\`" <<<"$section"; then
+            missing="$missing $t"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        echo "  the examples table shows no issue-linked example for:$missing"
+        return 1
+    fi
+    return 0
+}
+
+test_r_chain_units_are_numbered_by_their_issue() {
+    # Wrong-reason pass this guards against: deleting the Chain Strategy section
+    # outright would satisfy "it no longer says feat/{change}-{n}-{slug}". So the
+    # section is size-checked before the negative assertion runs, and the form
+    # that REPLACED it is asserted positively — together with the `{n}` fallback,
+    # which survives only for a chain shipping under one issue.
+    local section
+    section="$(md_section "$BRANCH_PR_SKILL" "## Chain Strategy")"
+    assert_section_is_substantial "$section" "branch-pr's Chain Strategy section" 1200 || return 1
+
+    assert_not_matches "$section" 'feat/\{change\}-\{n\}-\{slug\}' \
+        "the old chain pattern, which named the change instead of the issue" || return 1
+    assert_not_matches "$section" 'authflow' \
+        "the old change-id example branches" || return 1
+    assert_matches "$section" 'one branch per work unit.*type/\{issue\}-\{slug\}' \
+        "the chain's primary form: one unit, one issue, one number" || return 1
+    assert_matches "$section" 'type/\{issue\}-\{n\}-\{slug\}' \
+        "the {n} fallback, kept only for a chain shipping under ONE issue" || return 1
+    assert_matches "$section" 'git checkout -b feat/[0-9]+-' \
+        "the worked example, branching from a real issue number" || return 1
+    return 0
+}
+
+test_r_pr_body_requires_branch_and_closes_to_agree() {
+    # Wrong-reason pass this guards against: "branch" appears dozens of times in
+    # this file — `--delete-branch`, "base branch", "rebased branch" — so a
+    # whole-file grep for branch-plus-agreement would pass on the Post-approval
+    # flow. The assertion is scoped to the Linked Issue subsection, where the rule
+    # has to live to be read at PR-body time.
+    local section
+    section="$(md_section "$BRANCH_PR_SKILL" "### 1. Linked Issue (REQUIRED)")"
+    assert_section_is_substantial "$section" "branch-pr's Linked Issue subsection" 400 || return 1
+
+    assert_matches "$section" 'branch.*(agree|same|match)' \
+        "the agreement rule: the branch number and the closing keyword are one issue" || return 1
+    assert_matches "$section" 'type/\{issue\}-\{slug\}' \
+        "the branch form the rule is about, named where the rule is stated" || return 1
+    return 0
+}
+
+test_r_the_rule_reaches_every_doc_that_names_a_branch() {
+    # Wrong-reason pass this guards against: three bare greps for the literal form
+    # would each go green on a file that merely links to skills/branch-pr. Each
+    # file is asserted to carry the form together with the context that makes it
+    # actionable THERE — the card's number for kanban, THIS issue's number for
+    # issue-creation, a concrete issue-linked example for CONTRIBUTING.
+    local f
+    for f in "$KANBAN_SKILL" "$ISSUE_SKILL" "$CONTRIBUTING_DOC"; do
+        if [ ! -f "$f" ]; then
+            echo "  missing document: $f"
+            return 1
+        fi
+    done
+
+    # Flattened: every rule below is a wrapped markdown bullet, so a line-oriented
+    # match would miss it for a reason that has nothing to do with the rule.
+    local kanban issue contributing
+    kanban="$(flatten_file "$KANBAN_SKILL")"
+    issue="$(flatten_file "$ISSUE_SKILL")"
+    contributing="$(flatten_file "$CONTRIBUTING_DOC")"
+
+    assert_matches "$kanban" 'card.{0,200}type/\{issue\}-\{slug\}' \
+        "kanban-github: work taken from a card branches with the card's issue number" || return 1
+    assert_matches "$issue" 'this issue.{0,200}type/\{issue\}-\{slug\}' \
+        "issue-creation: the branch that follows carries the issue just filed" || return 1
+    assert_matches "$contributing" 'type/\{issue\}-\{slug\}' \
+        "CONTRIBUTING: the format a contributor is told to use" || return 1
+    assert_matches "$contributing" '(feat|fix|docs)/[0-9]+-[a-z0-9._-]+' \
+        "CONTRIBUTING: a concrete issue-linked example, not just the pattern" || return 1
+    return 0
+}
+
+test_r_every_branch_example_matches_the_published_regex() {
+    # Wrong-reason pass this guards against: an extractor that finds nothing makes
+    # "every example matches" vacuously true, and the regex itself is unchanged by
+    # #109 — so passing it is no evidence the rule landed. Both holes are closed:
+    # the harvest is floor-checked, and at least one harvested name must be in the
+    # issue-linked form, which is what origin/main has none of.
+    local re
+    re="$(published_branch_regex "$BRANCH_PR_SKILL")"
+    if ! grep -q '^\^(feat|fix|chore' <<<"$re"; then
+        echo "  the Branch Naming regex is no longer published where it was: '$re'"
+        return 1
+    fi
+
+    # The four fixtures from #109, run against the regex the doc actually ships.
+    local good bad
+    for good in "fix/123-slug" "feat/104-2-second-unit"; do
+        if ! grep -Eq "$re" <<<"$good"; then
+            echo "  the published regex rejects the issue-linked form: $good"
+            return 1
+        fi
+    done
+    for bad in "Fix/123" "feat/123 slug"; do
+        if grep -Eq "$re" <<<"$bad"; then
+            echo "  the published regex accepts a malformed branch: $bad"
+            return 1
+        fi
+    done
+
+    local names count=0 issue_linked=0 offenders=""
+    names="$(branch_names_shown "$BRANCH_PR_SKILL"; branch_names_shown "$CONTRIBUTING_DOC")"
+    local n
+    while IFS= read -r n; do
+        [ -n "$n" ] || continue
+        count=$((count + 1))
+        if ! grep -Eq "$re" <<<"$n"; then
+            offenders="$offenders $n"
+        fi
+        if grep -Eq '^[a-z]+/[0-9]+-' <<<"$n"; then
+            issue_linked=$((issue_linked + 1))
+        fi
+    done <<<"$names"
+
+    if [ "$count" -lt 15 ]; then
+        echo "  only $count branch names harvested from the two docs — the docs or the"
+        echo "  extractor changed shape, and 'every example matches' would be vacuous"
+        return 1
+    fi
+    if [ -n "$offenders" ]; then
+        echo "  branch examples that do NOT match the published regex:$offenders"
+        return 1
+    fi
+    if [ "$issue_linked" -lt 1 ]; then
+        echo "  $count branch names shown and not one is type/{issue}-{slug} — the docs"
+        echo "  publish a rule they never illustrate"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-R (issue #109): branch names carry the linked issue number${NC}"
+run_test "branch-pr publishes type/{issue}-{slug} + an issue-linked example per type" test_r_branch_pr_publishes_the_issue_linked_rule
+run_test "chain units are numbered by their issue, not by the change" test_r_chain_units_are_numbered_by_their_issue
+run_test "the PR body's branch number and Closes #N must agree" test_r_pr_body_requires_branch_and_closes_to_agree
+run_test "the rule reaches kanban-github, issue-creation and CONTRIBUTING" test_r_the_rule_reaches_every_doc_that_names_a_branch
+run_test "every branch example shown matches the published regex" test_r_every_branch_example_matches_the_published_regex
+
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 
