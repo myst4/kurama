@@ -40,12 +40,19 @@ Once the issue is approved:
 Branch names MUST follow this format:
 
 ```
-type/description
+type/{issue}-{slug}
 ```
 
 **Regex:** `^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)\/[a-z0-9._-]+$`
 
-**Examples:** `feat/user-login`, `fix/zsh-glob-error`, `docs/installation-guide`
+Every PR here closes an approved issue, so the branch always carries that issue's number
+first — `git log` and `git branch` then lead straight back to the ticket. The number MUST
+be the same one the PR body closes.
+
+**Examples:** `feat/104-sdd-brainstorm-gate`, `fix/81-zsh-glob-error`, `docs/62-installation-guide`
+
+With no issue in play (a fork experiment, a scratch branch), the plain `type/{slug}` form
+still matches the regex: `feat/user-login`.
 
 Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`
 

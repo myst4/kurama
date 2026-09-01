@@ -140,7 +140,7 @@ kanban:
 
 ## Work Intake (which card to pick, and when it moves to Ready)
 
-The board reflects work; the human owns prioritization. Intake follows four rules:
+The board reflects work; the human owns prioritization. Intake follows five rules:
 
 - **Existing issue.** The card moves to **Ready** when work on it actually STARTS —
   not when it is merely selected or discussed.
@@ -151,6 +151,9 @@ The board reflects work; the human owns prioritization. Intake follows four rule
 - **Never pull from Backlog on your own initiative.** Backlog → Ready is a
   prioritization decision that belongs to the human; the harness does not promote
   Backlog cards unprompted.
+- **The branch carries the card's issue number.** Work taken from a card branches as
+  `type/{issue}-{slug}` (see `skills/branch-pr` → *Branch Naming*), so `git branch` maps
+  back to the board without a lookup.
 
 ## Card Lifecycle (who moves what, when)
 
@@ -280,6 +283,8 @@ orchestrator does not re-assign on moves.
 - The orchestrator moves cards inline; phase executors never do.
 - Every harness-created issue/card is assigned to the creator (`@me` by default;
   `kanban.user` overrides).
+- Work taken from a card branches as `type/{issue}-{slug}`; the branch number and the
+  PR body's `Closes`/`Refs` number are the same issue.
 - PR base = default branch → `Closes #{issue}`; base ≠ default → `Refs #{issue}` plus
   an explicit `gh issue close` after the merge.
 - Lifecycle `gh` failures are WARNINGs that never block; only the final `gh pr merge`
