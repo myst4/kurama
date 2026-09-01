@@ -2633,8 +2633,12 @@ receipt_array_values() {
 }
 
 # True when $2 is an exact line of the newline-separated list $1.
+#
+# #99: herestring, never `printf | grep -q`. See assert_matches for the full
+# reason — grep -q closes the pipe on its first match and the writer takes
+# SIGPIPE, which pipefail then reports as "no match".
 receipt_array_has() {
-    printf '%s\n' "$1" | grep -qxF "$2"
+    grep -qxF "$2" <<<"$1"
 }
 
 test_scope_project_receipt_records_every_tool() {
@@ -2721,8 +2725,12 @@ probe_line_count() {
 }
 
 # True when $2 is a whole entry of the comma-joined tools field $1.
+#
+# #99: the commas are split by parameter expansion rather than `| tr`, so there
+# is no writer left for grep -q's early exit to signal.
 probe_tools_has() {
-    printf '%s\n' "$1" | tr ',' '\n' | grep -qxF "$2"
+    local lines="${1//,/$'\n'}"
+    grep -qxF "$2" <<<"$lines"
 }
 
 # Strip tools[] from a receipt, leaving the v6 / legacy install.sh shape that
@@ -8525,7 +8533,9 @@ assert_installed_trees_identical() {
     out="$(diff -r -x '.git' -x 'openspec' "$a" "$b" 2>&1)" || true
     if [ -n "$out" ]; then
         echo "  $what: the installed trees differ"
-        printf '%s\n' "$out" | head -20
+        # #99: herestring — `printf | head` is the same SIGPIPE shape, and a big
+        # diff is exactly when head closes the pipe first.
+        head -20 <<<"$out"
         return 1
     fi
     return 0
@@ -8587,9 +8597,17 @@ assert_block_is_substantial() {
 
 # Fail unless the ERE $2 matches a line of $1 (case-insensitively). $3 names the
 # contract clause, so a failure reports what the prompt lost rather than a regex.
+#
+# #99: the haystack reaches grep as a HERESTRING, never through a pipe. With
+# `printf '%s\n' "$haystack" | grep -Eqi`, grep -q exits on its first match and
+# closes the pipe; on a haystack larger than the pipe buffer printf is still
+# writing and takes SIGPIPE, and under `set -euo pipefail` the pipeline's status
+# is printf's 141 — so a MATCH was reported as "nothing matched". It fired on the
+# ~23KB orchestrator prompt on macOS/bash 3.2 (PR #98). A herestring has no
+# writer process to signal. Do not reintroduce the pipe.
 assert_matches() {
     local haystack="$1" pattern="$2" what="$3"
-    if printf '%s\n' "$haystack" | grep -Eqi "$pattern"; then
+    if grep -Eqi "$pattern" <<<"$haystack"; then
         return 0
     fi
     echo "  the shipped text no longer carries: $what"
@@ -8597,12 +8615,14 @@ assert_matches() {
     return 1
 }
 
-# The inverse: fail when the ERE $2 DOES match.
+# The inverse: fail when the ERE $2 DOES match. Same #99 rule: herestring in,
+# and the evidence lines are capped with grep's own `-m 3` rather than `| head -3`
+# — head closing the pipe would SIGPIPE grep for the same reason.
 assert_not_matches() {
     local haystack="$1" pattern="$2" what="$3"
-    if printf '%s\n' "$haystack" | grep -Eqi "$pattern"; then
+    if grep -Eqi "$pattern" <<<"$haystack"; then
         echo "  the shipped text must not carry: $what"
-        printf '%s\n' "$haystack" | grep -Ein "$pattern" | head -3 | awk '{ print "    " $0 }'
+        grep -Ein -m 3 "$pattern" <<<"$haystack" | awk '{ print "    " $0 }'
         return 1
     fi
     return 0
@@ -9016,9 +9036,11 @@ test_l_session_identity_resolves_without_an_sdd_cycle() {
     region="$(printf '%s\n' "$block" | pre_sdd_region)"
 
     # The splitter's own positive control, before its output is trusted as a haystack.
-    printf '%s\n' "$block" | grep -q 'orchestrator-sdd-protocol\.md' \
+    # Herestrings, not pipes (#99): these two haystacks are the ~23KB prompt that
+    # made `printf | grep -q` take SIGPIPE on macOS.
+    grep -q 'orchestrator-sdd-protocol\.md' <<<"$block" \
         || { echo "the full block never named the protocol file — the sentinel below proves nothing"; return 1; }
-    if printf '%s\n' "$region" | grep -q 'orchestrator-sdd-protocol\.md'; then
+    if grep -q 'orchestrator-sdd-protocol\.md' <<<"$region"; then
         echo "the pre-SDD region still contains the SDD half — the split did not happen,"
         echo "and every assertion below would be answered by the gated text"
         return 1
@@ -9552,6 +9574,133 @@ run_test "sdd-brainstorm is a well-formed, registered skill" test_m_brainstorm_i
 run_test "the ledger is a declared artifact in both conventions" test_m_the_ledger_is_a_declared_artifact_in_both_conventions
 run_test "the issue Decisions comment is offered, never automatic" test_m_the_issue_decisions_comment_is_offered_never_automatic
 run_test "sdd-ff announces the gate it bypasses" test_m_sdd_ff_announces_the_bypass
+
+echo ""
+
+# ============================================================================
+# UNIT-N (issue #99) — the assertion helpers themselves
+#
+# assert_matches is shared by every contract case in this file, so a flake in it
+# is a flake in all of them. It read `printf '%s\n' "$haystack" | grep -Eqi`:
+# grep -q exits on its FIRST match and closes the pipe, and once the haystack is
+# larger than the kernel's pipe buffer printf is still writing when that happens.
+# printf dies of SIGPIPE (141), `set -o pipefail` makes 141 the pipeline's status,
+# and the helper reports "nothing matched" over text that matched on line 1. That
+# is what turned PR #98 — VERSION, two manifests and a changelog — red on macOS
+# while Ubuntu passed, and it pointed the reader at a content regression that did
+# not exist. The helpers now read their haystack from a herestring: no writer
+# process exists for grep's early exit to signal.
+# ============================================================================
+
+# Build a haystack of at least $1 bytes whose FIRST line is $2 and whose filler
+# can never match it. The filler doubles, so 64KB is ten concatenations.
+build_oversized_haystack() { # bytes first_line
+    local want="$1" first="$2"
+    local filler='padding line that carries no sentinel and never matches the pattern'
+    while [ "${#filler}" -lt "$want" ]; do
+        filler="$filler"$'\n'"$filler"
+    done
+    printf '%s\n%s' "$first" "$filler"
+}
+
+test_n_assert_matches_survives_a_haystack_larger_than_the_pipe_buffer() {
+    # What would make this pass for the wrong reason:
+    #
+    #   * A haystack that fits in the pipe buffer (16KB on macOS, 64KB on Linux).
+    #     printf's whole write lands in the buffer and returns before grep -q can
+    #     exit, so the OLD code passes too and the case proves nothing. The size is
+    #     therefore asserted at >= 64KB before the loop, not assumed.
+    #   * A match near the END of the haystack. grep -q would then have consumed
+    #     the entire stream before exiting, so there is no early close and no
+    #     SIGPIPE — again green on the broken helper. The sentinel is pinned to
+    #     line 1, and that placement is asserted.
+    #   * One iteration. The bug is a race between two processes: the broken helper
+    #     passed most of the time and failed on a minority of macOS runs. A single
+    #     green run is not evidence, so the assertion runs 20 times.
+    #   * A pattern that cannot fail. If the sentinel also appeared in the filler,
+    #     or if assert_matches returned 0 unconditionally, the loop would be
+    #     vacuous. Both are ruled out first: the filler alone must NOT match, and
+    #     assert_matches must return 1 for a pattern that is genuinely absent.
+    local sentinel='kurama-sigpipe-sentinel-99'
+    local haystack
+    haystack="$(build_oversized_haystack 65536 "$sentinel")"
+
+    local bytes
+    bytes=$(printf '%s' "$haystack" | wc -c | tr -d ' ')
+    if [ "$bytes" -lt 65536 ]; then
+        echo "  the haystack is ${bytes}B — under the pipe buffer, where the broken"
+        echo "  helper passes as well and this case proves nothing"
+        return 1
+    fi
+
+    local first_line
+    first_line="$(head -1 <<<"$haystack")"
+    if [ "$first_line" != "$sentinel" ]; then
+        echo "  the sentinel is not on line 1 — grep would drain the whole stream"
+        echo "  before exiting, and the early close this case exists for never happens"
+        return 1
+    fi
+
+    # Negative control: the filler must not answer for the sentinel.
+    local filler
+    filler="$(tail -n +2 <<<"$haystack")"
+    if grep -Eqi "$sentinel" <<<"$filler"; then
+        echo "  the filler already carries the sentinel — the match below is not the"
+        echo "  first line's"
+        return 1
+    fi
+
+    # Positive control: the helper must still be able to say no.
+    local out status
+    set +e
+    out="$(assert_matches "$haystack" 'sentinel-that-is-nowhere-in-the-haystack' 'a pattern that is absent' 2>&1)"
+    status=$?
+    set -e
+    if [ "$status" -eq 0 ]; then
+        echo "  assert_matches returned 0 for a pattern absent from the haystack —"
+        echo "  every assertion in this file is unfailable"
+        return 1
+    fi
+
+    # The regression itself: 20 consecutive runs, each of which the piped helper
+    # could lose to SIGPIPE.
+    local i
+    for ((i = 1; i <= 20; i++)); do
+        assert_matches "$haystack" "$sentinel" \
+            "the first line of a ${bytes}B haystack (run $i/20)" || {
+            echo "  assert_matches lost a match on line 1 of a ${bytes}B haystack —"
+            echo "  the pipe is back in the helper (#99)"
+            return 1
+        }
+    done
+
+    # assert_not_matches takes the same early exit, and its evidence line is the
+    # other half: `grep -Ein ... | head -3` SIGPIPEs grep itself.
+    for ((i = 1; i <= 20; i++)); do
+        set +e
+        out="$(assert_not_matches "$haystack" "$sentinel" 'the sentinel' 2>&1)"
+        status=$?
+        set -e
+        if [ "$status" -eq 0 ]; then
+            echo "  assert_not_matches missed a match on line 1 of a ${bytes}B haystack"
+            echo "  (run $i/20) — the pipe is back in the helper (#99)"
+            return 1
+        fi
+        case "$out" in
+            *"$sentinel"*) : ;;
+            *)
+                echo "  assert_not_matches failed without quoting the offending line"
+                echo "  (run $i/20) — its evidence pipeline died before printing:"
+                printf '    %s\n' "$out"
+                return 1
+                ;;
+        esac
+    done
+    return 0
+}
+
+echo -e "${BOLD}UNIT-N (issue #99): the assertion helpers themselves${NC}"
+run_test "assert_matches survives a haystack larger than the pipe buffer" test_n_assert_matches_survives_a_haystack_larger_than_the_pipe_buffer
 
 echo ""
 
