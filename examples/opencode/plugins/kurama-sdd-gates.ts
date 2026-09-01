@@ -61,20 +61,12 @@ import { join } from "node:path"
 // The scripts are installed alongside the plugin (see docs/installation.md).
 // KURAMA_HOOKS_DIR overrides the search for tests and unusual layouts.
 //
-// TODO(setup): `setup_opencode()` in scripts/setup.sh does not install this file
-// yet — issue #106 owns that script, so the step is sequenced separately. It is
-// three copies with no config merge (OpenCode auto-discovers the plugins
-// directory, which is how the retired plugin was found and how upstream installs
-// its own), each recorded in RECEIPT_FILES so uninstall.sh removes them:
+// `install_opencode_gates()` in scripts/setup.sh puts all three files in place —
+// this plugin plus the two scripts — in both scopes:
 //
 //   global  ~/.config/opencode/plugins/kurama-sdd-gates.ts
-//           ~/.config/opencode/kurama/hooks/orchestrator-write-guard.sh   (chmod +x)
-//           ~/.config/opencode/kurama/hooks/archive-gate.sh               (chmod +x)
+//           ~/.config/opencode/kurama/hooks/{orchestrator-write-guard,archive-gate}.sh
 //   project <repo>/.opencode/plugins/  and  <repo>/.opencode/kurama/hooks/
-//
-// Sources: examples/opencode/plugins/kurama-sdd-gates.ts and the two scripts in
-// examples/claude-code/hooks/. Until that lands, install by hand — the layout is
-// documented in docs/installation.md under "Enforcement tier: enforced".
 const HOOK_DIR_CANDIDATES = (directory: string): string[] => {
   const explicit = process.env.KURAMA_HOOKS_DIR
   if (explicit) return [explicit]

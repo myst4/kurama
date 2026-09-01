@@ -599,6 +599,12 @@ and the subagent marker from the session's `parentID` (the task tool creates a
 child session with `parentID` set, which is OpenCode's equivalent of Claude Code's
 `agent_id`, so delegated writers pass exactly as they do there).
 
+`setup.sh --agent opencode` installs all three files (`install_opencode_gates()`),
+in **both** scopes — the OpenCode flow is otherwise global-only, but a repo install
+that enforced nothing while the support matrix said "enforced" is the defect this
+was filed as. Each path is recorded in the install receipt, so `update.sh`
+re-syncs them and `uninstall.sh` removes them.
+
 Installed layout:
 
 ```

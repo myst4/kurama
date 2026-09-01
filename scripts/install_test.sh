@@ -10954,30 +10954,14 @@ test_t_sdd_archive_refuses_to_merge_a_spec_with_errors() {
     return 0
 }
 
-test_t_the_linter_wiring_is_new_on_this_branch() {
-    # Mutation guard for the four assertions above: they pass trivially if the
-    # phrases were already in the skills. origin/main is the baseline, and it
-    # must carry ZERO hits.
-    if ! git -C "$REPO_DIR" rev-parse --verify --quiet origin/main > /dev/null 2>&1; then
-        # Shallow CI checkout with no baseline ref. The presence half still
-        # holds; only the "this is new" half is unverifiable here.
-        return 0
-    fi
-    local skill hits
-    for skill in skills/sdd-spec/SKILL.md skills/sdd-verify/SKILL.md skills/sdd-archive/SKILL.md; do
-        hits=$(git -C "$REPO_DIR" show "origin/main:$skill" 2>/dev/null | grep -c 'lint-spec\.sh' || true)
-        hits=$(printf '%s' "$hits" | tr -d ' ')
-        if [ "${hits:-0}" -ne 0 ]; then
-            echo "origin/main:$skill already mentions lint-spec.sh ($hits hits) — the wiring assertions prove nothing"
-            return 1
-        fi
-    done
-    if git -C "$REPO_DIR" cat-file -e origin/main:skills/_shared/lint-spec.sh 2>/dev/null; then
-        echo "origin/main already ships skills/_shared/lint-spec.sh"
-        return 1
-    fi
-    return 0
-}
+# REMOVED (#90): test_t_the_linter_wiring_is_new_on_this_branch asserted that
+# origin/main carried ZERO mentions of lint-spec.sh — a premise that stopped being
+# true the moment #115 merged, so it went red on every later branch while passing
+# in CI only because a shallow checkout has no origin/main and it returned early.
+# A "this is new on my branch" mutation check belongs to the PR that makes the
+# change, not to the shipped suite: main is where the change already landed, so
+# the assertion is guaranteed to invert. The 20 other UNIT-T cases carry the
+# coverage; what this one added was confidence in ONE review, and it was spent.
 
 test_t_the_tree_hash_index_lives_in_a_private_temp_dir() {
     # CWE-377. Both Content Binding blocks used to do `tmp_index="$(mktemp)"; rm -f
@@ -11046,7 +11030,6 @@ run_test "Kurama's own delta specs lint clean (dogfood)" test_t_kuramas_own_delt
 run_test "sdd-spec lints its own output before persisting" test_t_sdd_spec_lints_its_own_output_before_persisting
 run_test "sdd-verify gates on the linter at CRITICAL" test_t_sdd_verify_gates_on_the_linter_at_critical
 run_test "sdd-archive refuses to merge a spec with ERRORs" test_t_sdd_archive_refuses_to_merge_a_spec_with_errors
-run_test "the linter wiring is new on this branch (origin/main clean)" test_t_the_linter_wiring_is_new_on_this_branch
 run_test "the Tree-Hash index lives in a private temp dir (CWE-377)" test_t_the_tree_hash_index_lives_in_a_private_temp_dir
 run_test "docs/concepts.md points at the linter" test_t_the_docs_point_at_the_linter
 
@@ -13572,12 +13555,156 @@ test_x_no_prompt_bytes_were_spent_on_the_tier_statement() {
     return 0
 }
 
+# --- the installer -----------------------------------------------------------
+# A gate that ships in examples/ and never reaches the user's machine enforces
+# nothing, and the support matrix would be lying. These drive the REAL setup.sh
+# through a jq-less farm, because that is the host where an installer is most
+# likely to skip a step quietly.
+
+# The three files `setup.sh --agent opencode` must land, relative to the project
+# root it was pointed at.
+OPENCODE_GATE_FILES=".opencode/plugins/kurama-sdd-gates.ts
+.opencode/kurama/hooks/orchestrator-write-guard.sh
+.opencode/kurama/hooks/archive-gate.sh"
+
+# Run a project-scope opencode install into $2 with $1 as the only PATH.
+install_opencode_project() {
+    local bindir="$1" repo="$2" output status=0
+    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
+        --without-engram --non-interactive 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "setup.sh --agent opencode --scope project exited $status:"
+        printf '%s\n' "$output" | tail -5
+        return 1
+    fi
+    return 0
+}
+
+test_x_setup_installs_the_gates_on_opencode() {
+    # `setup_opencode()` is global-only, so the project branch had to be wired
+    # separately — which is exactly the half that would have been forgotten. This
+    # runs the PROJECT scope for that reason.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    make_npm_shim "$bindir"
+
+    local repo="$TEST_TMPDIR/x-install"
+    make_git_repo "$repo"
+    install_opencode_project "$bindir" "$repo" || return 1
+
+    local rel
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        assert_file_exists "$repo/$rel" || return 1
+    done <<< "$OPENCODE_GATE_FILES"
+
+    # The plugin runs the scripts as processes; a non-executable gate is a gate
+    # that silently never fires.
+    local script
+    for script in orchestrator-write-guard.sh archive-gate.sh; do
+        [ -x "$repo/.opencode/kurama/hooks/$script" ] || {
+            echo "$script is not executable — the plugin cannot run it"; return 1; }
+    done
+
+    # Same bytes as the Claude Code hooks: one implementation, two harnesses.
+    diff -q "$repo/.opencode/kurama/hooks/archive-gate.sh" \
+        "$REPO_DIR/examples/claude-code/hooks/archive-gate.sh" > /dev/null || {
+        echo "the installed archive-gate differs from the shipped one"; return 1; }
+
+    # Recorded, or uninstall cannot remove them and doctor cannot see them.
+    local manifest="$repo/.kurama-install-manifest.json" files
+    assert_file_exists "$manifest" || return 1
+    files="$(receipt_array_values "$manifest" files)"
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        receipt_array_has "$files" "$rel" || {
+            echo "receipt files[] missing '$rel'"; return 1; }
+    done <<< "$OPENCODE_GATE_FILES"
+    return 0
+}
+
+test_x_a_second_setup_run_leaves_the_gates_byte_identical() {
+    # Copying the plugin IS its registration on OpenCode, so re-running must not
+    # append, duplicate or rewrite anything.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    make_npm_shim "$bindir"
+
+    local repo="$TEST_TMPDIR/x-idem"
+    make_git_repo "$repo"
+    install_opencode_project "$bindir" "$repo" || return 1
+
+    local before="$TEST_TMPDIR/x-idem-snapshot"
+    mkdir -p "$before"
+    cp -R "$repo/.opencode" "$before/" || { echo "could not snapshot .opencode"; return 1; }
+
+    install_opencode_project "$bindir" "$repo" || return 1
+    diff -r "$before/.opencode" "$repo/.opencode" > /dev/null || {
+        echo "a second run changed .opencode — the install is not idempotent"; return 1; }
+    return 0
+}
+
+test_x_uninstall_removes_the_gates() {
+    # They go in through files[], so they must come out through files[]. A gate
+    # left behind after uninstall keeps vetoing writes in a repo that no longer
+    # has Kurama — the worst possible leftover.
+    local bindir="$TEST_TMPDIR/nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+    make_npm_shim "$bindir"
+
+    local repo="$TEST_TMPDIR/x-uninstall"
+    make_git_repo "$repo"
+    install_opencode_project "$bindir" "$repo" || return 1
+    assert_file_exists "$repo/.opencode/plugins/kurama-sdd-gates.ts" || return 1
+
+    PATH="$bindir" bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" \
+        --without-pi-packages > /dev/null 2>&1 \
+        || { echo "uninstall.sh exited non-zero"; return 1; }
+
+    local rel
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        [ ! -e "$repo/$rel" ] || {
+            echo "uninstall left '$rel' behind"; return 1; }
+    done <<< "$OPENCODE_GATE_FILES"
+    return 0
+}
+
+test_x_the_installer_wiring_is_new_on_this_branch() {
+    # Mutation guard for the three tests above: they would pass trivially if
+    # setup.sh had always installed these files. Baselined against main's tip,
+    # which must not mention the plugin at all.
+    local ref baseline
+    ref="$(baseline_ref)"
+    [ -n "$ref" ] || {
+        echo "no ref for main's tip — the mutation check has no baseline"; return 1; }
+    baseline="$TEST_TMPDIR/baseline-setup.sh"
+    git -C "$REPO_DIR" show "$ref:scripts/setup.sh" > "$baseline" 2>/dev/null || {
+        echo "could not read $ref:scripts/setup.sh"; return 1; }
+    [ -s "$baseline" ] || { echo "$ref:scripts/setup.sh is empty"; return 1; }
+
+    grep -q 'kurama-sdd-gates' "$REPO_DIR/scripts/setup.sh" || {
+        echo "setup.sh does not install the OpenCode gate plugin"; return 1; }
+    if grep -q 'kurama-sdd-gates' "$baseline"; then
+        echo "$ref:scripts/setup.sh already installs it — these tests prove nothing"
+        return 1
+    fi
+    return 0
+}
+
 echo -e "${BOLD}UNIT-X (issue #90): enforcement tiers${NC}"
 run_test "the plugin is an adapter, not a second implementation" test_x_the_plugin_is_an_adapter_not_a_second_implementation
 run_test "README states the enforcement tier per harness" test_x_readme_states_the_enforcement_tier_per_harness
 run_test "docs/hooks.md states the enforcement tier per harness" test_x_hooks_doc_states_the_enforcement_tier_per_harness
 run_test "each tier names the primitive it was decided on" test_x_the_tier_statement_gives_a_reason_per_harness
 run_test "the tier statement cost zero prompt bytes" test_x_no_prompt_bytes_were_spent_on_the_tier_statement
+run_test "setup installs the gates on OpenCode (jq-less, project scope)" test_x_setup_installs_the_gates_on_opencode
+run_test "a second setup run leaves the gates byte-identical" test_x_a_second_setup_run_leaves_the_gates_byte_identical
+run_test "uninstall removes the gates" test_x_uninstall_removes_the_gates
+run_test "the installer wiring is new on this branch" test_x_the_installer_wiring_is_new_on_this_branch
 
 probe_node_ts
 if [ "${#NODE_TS_CMD[@]}" -gt 0 ]; then

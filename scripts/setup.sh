@@ -1704,6 +1704,72 @@ install_opencode_profile() {
     ok "OpenCode profile '$name' installed (kurama-orchestrator + 9 sdd-<phase>-$name agents)"
 }
 
+# ============================================================================
+# OpenCode deterministic gates (#90)
+#
+# The write guard and the archive gate are MECHANISM on OpenCode, not prose:
+# `tool.execute.before` can veto a tool call (throwing aborts it), so the same
+# two gates Claude Code wires as PreToolUse hooks run here through a plugin.
+#
+# Three files, no config merge. OpenCode auto-discovers its plugins directory —
+# copying the file IS the registration, which also makes this idempotent by
+# construction, the same property install_pi_logo relies on. The plugin is a thin
+# adapter: the DECISION logic stays in the two bash scripts, which is why they are
+# installed beside it rather than reimplemented in TypeScript. See docs/hooks.md.
+#
+# Called from BOTH scopes. setup_opencode() itself is global-only, but the gates
+# are the one OpenCode asset a project-scope install must still get — a harness
+# the support matrix calls "enforced" that silently enforces nothing in a repo
+# would be the exact defect #90 was filed about.
+OPENCODE_GATE_SCRIPTS="orchestrator-write-guard.sh archive-gate.sh"
+
+install_opencode_gates() {
+    local home plugin_src plugin_dir hooks_dir dest script
+    home="$(home_dir)"
+    plugin_src="$EXAMPLES_DIR/opencode/plugins/kurama-sdd-gates.ts"
+
+    if [ "$SCOPE" = "project" ]; then
+        plugin_dir="$TARGET_PATH/.opencode/plugins"
+        hooks_dir="$TARGET_PATH/.opencode/kurama/hooks"
+    else
+        plugin_dir="$home/.config/opencode/plugins"
+        hooks_dir="$home/.config/opencode/kurama/hooks"
+    fi
+
+    if [ ! -f "$plugin_src" ]; then
+        warn "OpenCode gate plugin not found: $plugin_src (skipped)"
+        return 0
+    fi
+
+    mkdir -p "$plugin_dir" "$hooks_dir"
+
+    dest="$plugin_dir/kurama-sdd-gates.ts"
+    if [ -f "$dest" ]; then make_writable "$dest"; fi
+    atomic_replace "$dest" < "$plugin_src"
+    RECEIPT_FILES="$RECEIPT_FILES
+$(receipt_rel "$dest")"
+
+    # The gates themselves — the same bytes claude-code installs, so the two
+    # harnesses can never decide differently. Executable: the plugin runs them.
+    local installed=1
+    for script in $OPENCODE_GATE_SCRIPTS; do
+        if [ ! -f "$HOOKS_SRC/$script" ]; then
+            warn "Missing gate script: $script — OpenCode enforcement will be degraded"
+            continue
+        fi
+        dest="$hooks_dir/$script"
+        if [ -f "$dest" ]; then make_writable "$dest"; fi
+        atomic_replace "$dest" < "$HOOKS_SRC/$script"
+        chmod +x "$dest" 2>/dev/null || true
+        RECEIPT_FILES="$RECEIPT_FILES
+$(receipt_rel "$dest")"
+        installed=$((installed + 1))
+    done
+
+    ok "SDD gates installed → both run as mechanisms on OpenCode (write-guard + archive-gate)"
+    info "$installed files → $plugin_dir and $hooks_dir (restart opencode to load the plugin)"
+}
+
 setup_opencode() {
     local home
     home="$(home_dir)"
@@ -1895,6 +1961,10 @@ $(receipt_rel "$prompts_target/$(basename "$prompt_file")")"
         done
         ok "$pcount shared SDD prompt files installed -> $prompts_target"
     fi
+
+    # The two deterministic gates (#90). OpenCode is the second harness where
+    # they are mechanism rather than prose.
+    install_opencode_gates
 
     # Optionally splice a named model profile (kurama-orchestrator + suffixed
     # sdd-<phase>-NAME subagents) into opencode.json. Resolved above; the base
@@ -2463,9 +2533,12 @@ setup_agent() {
 
     if [[ "$agent" == "opencode" ]]; then
         # OpenCode's dedicated flow is global-only; project scope still gets its
-        # skills + receipt above, and the orchestrator merge below.
+        # skills + receipt above, the orchestrator merge below, and — since #90 —
+        # the two deterministic gates, which are the one OpenCode asset a repo
+        # install must not silently go without.
         if [ "$SCOPE" = "project" ]; then
             setup_orchestrator "$prompt_path" "$EXAMPLES_DIR/pi/AGENTS.md" "$agent"
+            install_opencode_gates
         else
             setup_opencode
         fi
