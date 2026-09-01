@@ -187,7 +187,7 @@ kurama/
 │   ├── sdd-archive/SKILL.md
 │   ├── skill-registry/SKILL.md       ← Runs _shared/build-skill-registry.sh (writes .kurama/skill-registry.md)
 │   ├── judgment-day/SKILL.md         ← Dual blind review + fix loop
-│   ├── skill-creator/SKILL.md        ← Creates new skills from templates
+│   ├── skill-creator/SKILL.md        ← Authors a new skill and wires it into registry/manifest/suite
 │   ├── tdd/SKILL.md                  ← RED-GREEN-REFACTOR module (`tdd` group, installed by default; activation stays opt-in per project — opt out with `install.sh --without tdd`)
 │   ├── issue-creation/SKILL.md       ← GitHub issue creation workflow
 │   └── branch-pr/SKILL.md            ← Branch + pull request workflow

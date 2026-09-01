@@ -181,7 +181,7 @@ heard of.
 | Skill | Role |
 |-------|------|
 | `skill-registry` | Rebuild the project skill index by running `_shared/build-skill-registry.sh`. |
-| `skill-creator` | Author new Agent Skills that follow the open spec format. |
+| `skill-creator` | Author a new Kurama skill and wire it into the registry, the manifest and the suite. |
 
 ### Quality & delivery
 
