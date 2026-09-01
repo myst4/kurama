@@ -8,7 +8,7 @@ description: >
   "guardá este aprendizaje".
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

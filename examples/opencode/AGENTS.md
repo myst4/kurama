@@ -181,11 +181,11 @@ must never contradict it.
 ### Result Contract
 Each phase returns: `status`, `executive_summary`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`.
 
-<!-- gentle-ai:sdd-model-assignments -->
+<!-- kurama:sdd-model-assignments -->
 ### Model Routing
 
 By default, pass NO `model` parameter when delegating: every sub-agent inherits the model this session is configured to run, whatever the provider. Tiered per-phase routing is opt-in and lives in `skills/_shared/model-assignments.md` — read it only when the user has opted in through their own configuration (agent entries in `opencode.json`, or a named profile), and never let it override a model the user configured.
-<!-- /gentle-ai:sdd-model-assignments -->
+<!-- /kurama:sdd-model-assignments -->
 
 ### Sub-Agent Launch Deduplication
 

@@ -15,7 +15,7 @@
 //     (col0,row2)=0x04   (col1,row2)=0x20
 //     (col0,row3)=0x40   (col1,row3)=0x80
 //   codepoint = 0x2800 + bits.  bits == 0 → a plain space (keeps leading/interior
-//   blanks trimmable and centering cheap, exactly like gentle's rose array).
+//   blanks trimmable and centering cheap).
 //
 // Usage:
 //   node scripts/gen-braille.mjs                 # fox-grid.txt → fox.txt (defaults)

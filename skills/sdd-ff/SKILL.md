@@ -8,7 +8,7 @@ description: >
   "run through planning", or asks to batch the remaining planning phases without stopping between each.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

@@ -5,7 +5,7 @@ description: >
   Trigger: When user wants to initialize SDD in a project, or says "sdd init", "iniciar sdd", "openspec init".
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "2.0"
 ---
 

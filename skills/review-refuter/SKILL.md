@@ -8,7 +8,7 @@ description: >
   exactly one `general` task in standard review, or three parallel lens tasks in full-4R.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

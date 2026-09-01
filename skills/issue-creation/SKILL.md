@@ -10,7 +10,7 @@ description: >
   NOT for reporting a failure in Kurama itself — that is `skills/kurama-report`.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

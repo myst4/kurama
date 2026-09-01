@@ -12,7 +12,7 @@ description: >
   NOT for filing issues in the user's own repository — that is `skills/issue-creation`.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

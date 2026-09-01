@@ -926,9 +926,8 @@ test_opencode_multi_references_prompt_files() {
     # inline the prompt text) so profiles can share one file per phase.
     local f="$REPO_DIR/examples/opencode/opencode.multi.json"
     # #78: the reference is a path RELATIVE to the opencode.json that contains it,
-    # which is what upstream gentle-ai emits from code
-    # (internal/components/sdd/prompts.go). The tilde form this used to assert came
-    # from upstream's PRD prose, and nothing verifies that OpenCode expands ~ inside
+    # which is the form OpenCode itself resolves. The tilde form this used to assert
+    # came from a spec's prose, and nothing verifies that OpenCode expands ~ inside
     # {file:} — if it does not, all 9 subagents start with no prompt at all.
     grep -q 'file:\./prompts/sdd/sdd-apply.md' "$f" || {
         echo "opencode.multi.json does not reference the shared apply prompt file"; return 1; }
@@ -1587,7 +1586,7 @@ test_pi_packages_exact_sequence() {
 
     assert_file_exists "$log" || { echo "no pi/npm calls were logged"; return 1; }
 
-    # gentle-pi (rival harness) must NEVER be installed.
+    # gentle-pi (third-party npm package name) must NEVER be installed.
     if grep -q 'gentle-pi' "$log"; then
         echo "gentle-pi appeared in the install sequence — it must be excluded"
         return 1
@@ -3097,7 +3096,7 @@ test_doctor_orphaned_agents_exit_nonzero() {
     bash "$SETUP_SCRIPT" --agent claude-code > /dev/null 2>&1
     # Strip the receipt and move the skills aside, leaving agents + commands wired.
     rm -f "$HOME/.claude/skills/.kurama-install-manifest.json"
-    mv "$HOME/.claude/skills" "$HOME/.claude/skills-gentle-backup-20260101000000"
+    mv "$HOME/.claude/skills" "$HOME/.claude/skills-backup-20260101000000"
     local output
     if output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" 2>&1); then
         echo "doctor.sh must exit non-zero when Kurama agents exist with no receipt"
@@ -5983,8 +5982,8 @@ run_test "an unusable receipt does not abort the queued targets" test_update_unr
 # ===== UNIT-C (issue #35) =====
 #
 # #35: plugin.json shipped two defects — homepage/repository still pointed at
-# the pre-rename Gentleman-Programming/agent-teams-lite repo instead of this
-# repo's real origin, and the "agents" array hand-listed only the 9 SDD-phase
+# the pre-rename upstream repo instead of this repo's real origin, and the
+# "agents" array hand-listed only the 9 SDD-phase
 # agents, silently missing the 8 review-layer agents (the 4R lenses,
 # review-refuter, the two Judgment Day judges, and jd-fix-agent) that
 # setup.sh's install_native_agents() copies wholesale from
@@ -6030,10 +6029,8 @@ plugin_json_agent_basenames() {
 test_plugin_json_repository_url() {
     local plugin_file="$REPO_DIR/.claude-plugin/plugin.json"
     assert_file_exists "$plugin_file" || return 1
-    if grep -q 'Gentleman-Programming/agent-teams-lite' "$plugin_file"; then
-        echo "plugin.json still points at the pre-rename Gentleman-Programming/agent-teams-lite repo"
-        return 1
-    fi
+    # The two exact-match assertions below subsume the old "is not the pre-rename
+    # repo" negative grep: nothing but this repo's URL can satisfy them.
     grep -q '"homepage": "https://github.com/myst4/kurama"' "$plugin_file" \
         || { echo "plugin.json 'homepage' does not point at https://github.com/myst4/kurama"; return 1; }
     grep -q '"repository": "https://github.com/myst4/kurama"' "$plugin_file" \
@@ -10478,6 +10475,191 @@ run_test "the issue Decisions comment is offered, never automatic" test_m_the_is
 run_test "sdd-ff announces the gate it bypasses" test_m_sdd_ff_announces_the_bypass
 
 # ============================================================================
+# UNIT-Y (issue #107): the tree carries no origin references
+#
+# Kurama is an MIT fork. The licence's one condition is that the copyright and
+# permission notice travel with the code, and LICENSE is where that lives — it
+# sits OUTSIDE the roots scanned here and is never rewritten. Everything else
+# went: the `metadata.author` tag on every skill, the prompt marker named after
+# the upstream installer, and every line of prose that introduced Kurama by
+# pointing at where it came from.
+#
+# What legitimately survives is functional, never attributional: third-party
+# npm package identifiers (one Kurama installs, one it must refuse to install
+# BY NAME), the foreign marker setup.sh DETECTS so a re-sync replaces another
+# installer's orchestrator block instead of appending a second one, the GitHub
+# URLs of the memory tool Kurama integrates with, and docs/changelog.md, which
+# is history.
+#
+# The allowlist below is the whole contract, and it is FILE-SCOPED on purpose:
+# a string being legal in setup.sh does not make it legal in a skill body —
+# which is exactly what the planted-reference test proves. The entry cap and
+# the "did the scan read anything at all" test close the two ways this section
+# could go green for the wrong reason: an allowlist wide enough to permit
+# everything, and a grep that matched nothing.
+#
+# Every pattern here is spelled with a leading character class (`[g]entle…`),
+# the same trick `ps | grep [p]attern` uses: the regex still matches the real
+# string, but the literal text of this file does not, so the scan is not
+# permanently tripped by its own vocabulary.
+# ============================================================================
+
+# One entry per line: "<repo-relative path>|<extended regex>". The FIRST `|` is
+# the separator; everything after it is the pattern, alternation included. A
+# hit is legal only when its file matches an entry AND its text matches that
+# entry's pattern. A pattern of `.` exempts the whole file.
+y_origin_allowlist() {
+    cat <<'ALLOWLIST'
+docs/changelog.md|.
+docs/installation.md|[g]entle[-_]engram|[g]entle[-_]pi|[g]entleman-programming/(engram|homebrew-tap)
+README.md|[g]entle[-_]pi|[g]entleman-programming/engram
+scripts/setup.sh|[g]entle[-_]engram|[g]entle[-_]pi|[g]entleman-programming/(engram|homebrew-tap)|[g]entle-ai:sdd-orchestrator
+scripts/doctor.sh|[g]entle[-_]engram
+scripts/uninstall.sh|[g]entle[-_]pi
+scripts/install_test.sh|[g]entle[-_]engram|[g]entle[-_]pi|[g]entle-ai:sdd-orchestrator
+examples/_templates/pi.md|[g]entle[-_]pi
+examples/pi/AGENTS.md|[g]entle[-_]pi
+ALLOWLIST
+}
+
+# Print every off-allowlist hit under the tree rooted at $1, one
+# "path:lineno:text" per line. Empty output means that tree is clean. Taking a
+# root as an argument is what lets the wrong-reason test run the very same
+# scanner over a planted tree instead of a second, weaker copy of it.
+y_origin_violations() {
+    local root="$1"
+    local allow r hits line rest file text entry epath epat ok
+    allow="$(y_origin_allowlist)"
+    for r in skills examples scripts docs README.md CONTRIBUTING.md; do
+        [ -e "$root/$r" ] || continue
+        # -H forces the path prefix even when the operand is a single file;
+        # -I skips binaries; the herestrings below keep this SIGPIPE-free.
+        hits="$(grep -rHIn -iE -e '[g]entle' "$root/$r" 2>/dev/null || true)"
+        [ -n "$hits" ] || continue
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            rest="${line#"$root/"}"
+            file="${rest%%:*}"
+            text="${rest#*:}"
+            text="${text#*:}"
+            ok=0
+            while IFS= read -r entry; do
+                [ -n "$entry" ] || continue
+                epath="${entry%%|*}"
+                epat="${entry#*|}"
+                [ "$epath" = "$file" ] || continue
+                printf '%s\n' "$text" | grep -qiE -- "$epat" && ok=1
+                break
+            done <<< "$allow"
+            [ "$ok" -eq 1 ] || printf '%s\n' "$rest"
+        done <<< "$hits"
+    done
+}
+
+test_y_no_origin_reference_survives_outside_the_allowlist() {
+    local out
+    out="$(y_origin_violations "$REPO_DIR")"
+    if [ -n "$out" ]; then
+        echo "off-allowlist references (first 15):"
+        printf '%s\n' "$out" | head -15 | cut -c1-120
+        return 1
+    fi
+    return 0
+}
+
+test_y_the_allowlist_is_narrow_enough_to_mean_something() {
+    # Wrong-reason pass this guards against: an allowlist so broad that every
+    # hit is legal, which would make the scan above unconditionally green.
+    local n
+    n="$(y_origin_allowlist | awk 'NF' | wc -l | tr -d ' ')"
+    if [ "$n" -gt 10 ]; then
+        echo "the allowlist grew to $n entries (cap 10) — every entry is one more"
+        echo "place an origin reference can hide; justify a new one in the issue"
+        return 1
+    fi
+    # Exactly one file may be exempt wholesale, and it is the changelog.
+    local whole
+    whole="$(y_origin_allowlist | awk -F'|' '$2 == "." { print $1 }')"
+    assert_eq "docs/changelog.md" "$whole" \
+        "only docs/changelog.md may be exempt as a whole file" || return 1
+    return 0
+}
+
+test_y_a_planted_reference_in_a_skill_body_is_caught() {
+    local fake="$TEST_TMPDIR/planted-tree"
+    mkdir -p "$fake/skills/sdd-demo" "$fake/scripts"
+    printf 'The block is delimited by <!-- gentle-ai:sdd-orchestrator -->.\n' \
+        > "$fake/skills/sdd-demo/SKILL.md"
+    # The SAME string, in the one file that is allowed to name it.
+    printf 'FOREIGN_MARKER_BEGIN="<!-- gentle-ai:sdd-orchestrator -->"\n' \
+        > "$fake/scripts/setup.sh"
+    local out
+    out="$(y_origin_violations "$fake")"
+    printf '%s\n' "$out" | grep -q 'skills/sdd-demo/SKILL.md' || {
+        echo "a planted reference in a skill body was not reported"; return 1; }
+    if printf '%s\n' "$out" | grep -q 'scripts/setup.sh'; then
+        echo "the allowlist is not file-scoped: setup.sh's own foreign marker was flagged"
+        return 1
+    fi
+    return 0
+}
+
+test_y_the_scan_actually_reads_the_tree() {
+    # Wrong-reason pass this guards against: a grep that matches nothing (bad
+    # flag, wrong root, empty checkout) makes the clean-tree test vacuous.
+    local total
+    total="$(grep -rHIn -iE -e '[g]entle' "$REPO_DIR/scripts" 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$total" -lt 5 ]; then
+        echo "the scan found $total hits under scripts/ — the third-party package"
+        echo "identifiers should still be there; a zero-hit scan passes for free"
+        return 1
+    fi
+    return 0
+}
+
+test_y_every_skill_is_authored_by_kurama() {
+    local bad
+    bad="$(grep -rn '^  author:' "$REPO_DIR/skills" --include='SKILL.md' \
+        | grep -v 'author: kurama' || true)"
+    if [ -n "$bad" ]; then
+        echo "skills still carrying the old author:"
+        printf '%s\n' "$bad" | head -10
+        return 1
+    fi
+    # The template that mints NEW skills must teach the same value, or the
+    # next skill re-introduces what this sweep removed.
+    grep -q 'author: kurama' "$REPO_DIR/skills/skill-creator/SKILL.md" || {
+        echo "skill-creator's template does not teach 'author: kurama'"; return 1; }
+    return 0
+}
+
+test_y_the_model_assignments_marker_is_namespaced_to_kurama() {
+    local f
+    for f in claude-code.md opencode.md; do
+        grep -q '<!-- kurama:sdd-model-assignments -->' \
+            "$REPO_DIR/examples/_templates/$f" || {
+            echo "_templates/$f does not carry the kurama: model-assignments marker"
+            return 1; }
+    done
+    # The generated prompts must have been rebuilt from those templates.
+    grep -q '<!-- kurama:sdd-model-assignments -->' \
+        "$REPO_DIR/examples/claude-code/CLAUDE.md" || {
+        echo "examples/claude-code/CLAUDE.md was not rebuilt after the rename"; return 1; }
+    grep -q '<!-- kurama:sdd-model-assignments -->' \
+        "$REPO_DIR/examples/opencode/AGENTS.md" || {
+        echo "examples/opencode/AGENTS.md was not rebuilt after the rename"; return 1; }
+    return 0
+}
+
+echo -e "${BOLD}UNIT-Y (issue #107): no origin references outside the allowlist${NC}"
+run_test "no origin reference survives outside the allowlist" test_y_no_origin_reference_survives_outside_the_allowlist
+run_test "the allowlist is narrow enough to mean something" test_y_the_allowlist_is_narrow_enough_to_mean_something
+run_test "a planted reference in a skill body is caught" test_y_a_planted_reference_in_a_skill_body_is_caught
+run_test "the scan actually reads the tree" test_y_the_scan_actually_reads_the_tree
+run_test "every skill is authored by kurama" test_y_every_skill_is_authored_by_kurama
+run_test "the model-assignments marker is namespaced to kurama" test_y_the_model_assignments_marker_is_namespaced_to_kurama
+
+# ============================================================================
 # UNIT-S (issue #88): Work Unit Evidence — mandatory execution evidence in ALL
 # modes, with `tdd.enabled` true or false.
 #
@@ -13932,69 +14114,35 @@ tier_rows_are_complete() {
     return 0
 }
 
-# Resolve a ref for main's tip and echo it, or echo nothing. `origin/main` is the
-# local spelling; a CI checkout has none — actions/checkout fetches only the PR
-# ref, so the mutation check had no baseline and the three tests below failed on
-# ubuntu while passing locally. Fall back through the spellings that might exist,
-# then fetch one commit. Resolved once and cached, since a fetch is not free.
-BASELINE_REF=""
-BASELINE_REF_RESOLVED=0
-baseline_ref() {
-    if [ "$BASELINE_REF_RESOLVED" -eq 0 ]; then
-        BASELINE_REF_RESOLVED=1
-        local ref
-        for ref in origin/main refs/remotes/origin/main main; do
-            if git -C "$REPO_DIR" rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
-                BASELINE_REF="$ref"
-                break
-            fi
-        done
-        if [ -z "$BASELINE_REF" ] \
-            && git -C "$REPO_DIR" fetch --no-tags --depth=1 origin main >/dev/null 2>&1 \
-            && git -C "$REPO_DIR" rev-parse --verify --quiet FETCH_HEAD >/dev/null 2>&1; then
-            BASELINE_REF="FETCH_HEAD"
-        fi
-    fi
-    printf '%s' "$BASELINE_REF"
-}
+# REMOVED (#107): baseline_ref() and the three "this is new on my branch" guards
+# it fed — the two `assert_tier_rows_are_new_in` halves, the zero-prompt-bytes
+# diff against main, and the installer-wiring check. Same defect UNIT-T recorded
+# above when #115 merged: a mutation guard baselined on main's tip inverts the
+# moment the change it guards IS main. All three went red on the next branch —
+# two because main now satisfies the assertion, one because any later PR that
+# legitimately edits a prompt "spends prompt bytes" by that test's definition.
+# The assertions worth keeping are baseline-free and kept below: the tier rows
+# must be complete in README.md and docs/hooks.md, they must NOT appear in any
+# generated prompt, and setup.sh must install the gate plugin.
 
-assert_tier_rows_are_new_in() {
+assert_tier_rows_are_complete_in() {
     local rel="$1"
     tier_rows_are_complete "$REPO_DIR/$rel" || {
         echo "$rel has no enforced/advisory row for all five harnesses"; return 1; }
-
-    local ref
-    ref="$(baseline_ref)"
-    [ -n "$ref" ] || {
-        echo "no ref for main's tip (tried origin/main, main, a shallow fetch) — the mutation check has no baseline"
-        return 1; }
-
-    local baseline
-    baseline="$TEST_TMPDIR/baseline-$(basename "$rel")"
-    if ! git -C "$REPO_DIR" show "$ref:$rel" > "$baseline" 2>/dev/null; then
-        echo "could not read $ref:$rel — the mutation check has no baseline"
-        return 1
-    fi
-    [ -s "$baseline" ] || {
-        echo "$ref:$rel is empty — the mutation check has no baseline"; return 1; }
-    if tier_rows_are_complete "$baseline"; then
-        echo "$ref:$rel already satisfies this assertion — it does not test the change"
-        return 1
-    fi
     return 0
 }
 
 test_x_readme_states_the_enforcement_tier_per_harness() {
     # A user choosing a harness has to see, BEFORE installing, whether the two
     # gates are mechanism or prose there. The support matrix is where they look.
-    assert_tier_rows_are_new_in "README.md" || return 1
+    assert_tier_rows_are_complete_in "README.md" || return 1
     return 0
 }
 
 test_x_hooks_doc_states_the_enforcement_tier_per_harness() {
     # docs/hooks.md is the page that explains what the gates guarantee, so it is
     # the page that has to say where they do not.
-    assert_tier_rows_are_new_in "docs/hooks.md" || return 1
+    assert_tier_rows_are_complete_in "docs/hooks.md" || return 1
     return 0
 }
 
@@ -14013,19 +14161,17 @@ test_x_the_tier_statement_gives_a_reason_per_harness() {
     return 0
 }
 
-test_x_no_prompt_bytes_were_spent_on_the_tier_statement() {
+test_x_the_tier_statement_is_absent_from_every_prompt() {
     # The five generated orchestrator prompts are at their byte budget (omp has
     # tens of bytes of headroom), so the tier statement lives in docs and nowhere
-    # else. This pins that it stayed there.
-    local ref
-    ref="$(baseline_ref)"
-    [ -n "$ref" ] || {
-        echo "no ref for main's tip — cannot tell whether a prompt changed"; return 1; }
+    # else. Asserted against the prompts themselves rather than against a diff
+    # with main, so a later PR that legitimately edits a prompt still runs it.
     local f
     for f in "examples/omp/AGENTS.md" "examples/pi/AGENTS.md" "examples/opencode/AGENTS.md" \
-             "examples/claude-code/CLAUDE.md" "examples/codex/agents.md" "examples/_templates"; do
-        if ! git -C "$REPO_DIR" diff --quiet "$ref" -- "$f"; then
-            echo "$f changed — the prompt budget is exhausted; the tier statement belongs in docs"
+             "examples/claude-code/CLAUDE.md" "examples/codex/agents.md"; do
+        assert_file_exists "$REPO_DIR/$f" || return 1
+        if tier_rows_are_complete "$REPO_DIR/$f"; then
+            echo "$f carries the per-harness tier table — it belongs in docs, not in the prompt budget"
             return 1
         fi
     done
@@ -14150,25 +14296,12 @@ test_x_uninstall_removes_the_gates() {
     return 0
 }
 
-test_x_the_installer_wiring_is_new_on_this_branch() {
-    # Mutation guard for the three tests above: they would pass trivially if
-    # setup.sh had always installed these files. Baselined against main's tip,
-    # which must not mention the plugin at all.
-    local ref baseline
-    ref="$(baseline_ref)"
-    [ -n "$ref" ] || {
-        echo "no ref for main's tip — the mutation check has no baseline"; return 1; }
-    baseline="$TEST_TMPDIR/baseline-setup.sh"
-    git -C "$REPO_DIR" show "$ref:scripts/setup.sh" > "$baseline" 2>/dev/null || {
-        echo "could not read $ref:scripts/setup.sh"; return 1; }
-    [ -s "$baseline" ] || { echo "$ref:scripts/setup.sh is empty"; return 1; }
-
+test_x_setup_wires_the_opencode_gate_plugin() {
+    # The three installer tests above drive setup.sh end to end; this one pins
+    # the one string they all depend on, so a rename fails here by name instead
+    # of three directories deep in a farm run.
     grep -q 'kurama-sdd-gates' "$REPO_DIR/scripts/setup.sh" || {
         echo "setup.sh does not install the OpenCode gate plugin"; return 1; }
-    if grep -q 'kurama-sdd-gates' "$baseline"; then
-        echo "$ref:scripts/setup.sh already installs it — these tests prove nothing"
-        return 1
-    fi
     return 0
 }
 
@@ -14177,11 +14310,11 @@ run_test "the plugin is an adapter, not a second implementation" test_x_the_plug
 run_test "README states the enforcement tier per harness" test_x_readme_states_the_enforcement_tier_per_harness
 run_test "docs/hooks.md states the enforcement tier per harness" test_x_hooks_doc_states_the_enforcement_tier_per_harness
 run_test "each tier names the primitive it was decided on" test_x_the_tier_statement_gives_a_reason_per_harness
-run_test "the tier statement cost zero prompt bytes" test_x_no_prompt_bytes_were_spent_on_the_tier_statement
+run_test "the tier statement is absent from every prompt" test_x_the_tier_statement_is_absent_from_every_prompt
 run_test "setup installs the gates on OpenCode (jq-less, project scope)" test_x_setup_installs_the_gates_on_opencode
 run_test "a second setup run leaves the gates byte-identical" test_x_a_second_setup_run_leaves_the_gates_byte_identical
 run_test "uninstall removes the gates" test_x_uninstall_removes_the_gates
-run_test "the installer wiring is new on this branch" test_x_the_installer_wiring_is_new_on_this_branch
+run_test "setup wires the OpenCode gate plugin" test_x_setup_wires_the_opencode_gate_plugin
 
 probe_node_ts
 if [ "${#NODE_TS_CMD[@]}" -gt 0 ]; then

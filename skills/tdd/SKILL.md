@@ -7,7 +7,7 @@ description: >
   contract — loaded by sdd-apply to implement, and referenced by sdd-tasks and sdd-verify.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

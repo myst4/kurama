@@ -9,7 +9,7 @@ description: >
   `sdd-init` onboards the board.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 

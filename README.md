@@ -4,7 +4,7 @@
 
 **A lightweight, multi-harness Spec-Driven Development framework for AI coding agents.**
 
-24 pure-Markdown skills · 5 supported harnesses · no build step, no runtime
+28 pure-Markdown skills · 5 supported harnesses · no build step, no runtime
 
 </div>
 
@@ -13,10 +13,11 @@
 ## What it is
 
 Kurama turns any capable AI coding assistant into a disciplined
-**Spec-Driven Development (SDD)** team. It ships as **24 portable Markdown skills**
-(all installed by default — the optional `tdd` and `kanban-github` modules are included but
-removable with `setup.sh --without tdd` / `setup.sh --without optional`; module
-selection is a `setup.sh` flag, and with no `--with`/`--without` it installs the default set)
+**Spec-Driven Development (SDD)** team. It ships as **28 portable Markdown skills**
+(all installed by default — the `tdd` module and the five-skill `optional` group are
+included but removable with `setup.sh --without tdd` / `setup.sh --without optional`;
+module selection is a `setup.sh` flag, and with no `--with`/`--without` it installs the
+default set)
 plus a set of shared convention files, and a thin
 *delegate-only orchestrator* prompt. The orchestrator never writes code itself — it coordinates a pipeline of
 focused sub-agents, each running in a **fresh context window**, that explore,
@@ -131,7 +132,7 @@ skills, agents, hooks, and MCP registrations included.
 
 ## The skills
 
-All 24 default skills, grouped by role. Every one is a single `SKILL.md` that any
+All 28 default skills, grouped by role. Every one is a single `SKILL.md` that any
 file-reading agent can load. The optional `tdd` and `kanban-github` modules ship
 installed and can be excluded with `setup.sh --without tdd` /
 `setup.sh --without optional`; installing either never activates it — both stay
@@ -156,7 +157,8 @@ heard of.
 
 | Skill | Role |
 |-------|------|
-| `sdd-new` | Start a new SDD change: run exploration, then create a proposal for a fresh change name. |
+| `sdd-new` | Start a new SDD change: run the brainstorm gate, then exploration, then create a proposal for a fresh change name. |
+| `sdd-brainstorm` | Turn a vague request into a decision ledger before exploration starts. Reached from `sdd-new`'s gate, or on request. |
 | `sdd-continue` | Resume an existing change from persisted state and run the next dependency-ready phase. |
 | `sdd-ff` | Fast-forward through the remaining planning phases with auto-continue. |
 
@@ -173,6 +175,7 @@ heard of.
 | `sdd-apply` | Implement tasks as real code, following the specs and design. |
 | `sdd-verify` | Validate that the implementation matches specs, design, and tasks. |
 | `sdd-archive` | Merge delta specs into the main specs and archive the change. |
+| `sdd-learn` | Capture a finished cycle's durable learnings into the committed `MEMORY.md`. |
 
 ### Shared conventions & tooling
 
@@ -188,6 +191,8 @@ heard of.
 | `judgment-day` | Parallel adversarial review — two blind judges, synthesize, fix, re-judge. |
 | `branch-pr` | PR creation workflow following the issue-first enforcement system. |
 | `issue-creation` | GitHub issue workflow for bugs and feature requests. |
+| `systemic-issue-triage` | Partition a batch of issues by root cause before any code is written — one fix per root, never one per issue. |
+| `kurama-report` | Report a failure in Kurama itself upstream: searches first, sanitizes, and always asks before filing. |
 
 ### Review lenses (4R + refuter)
 
@@ -231,7 +236,7 @@ project in every mode.
 
 | Mode | Where artifacts live |
 |------|----------------------|
-| `engram` | Persistent memory via [Engram](https://github.com/gentleman-programming/engram); survives compaction and cross-session recovery. Default when Engram is available. |
+| `engram` | Persistent memory via [Engram](https://github.com/Gentleman-Programming/engram); survives compaction and cross-session recovery. Default when Engram is available. |
 | `openspec` | Human-readable files under `openspec/`, version-controllable with the repo. |
 | `hybrid` | Both Engram and the filesystem, written simultaneously (higher token cost). |
 
@@ -288,7 +293,7 @@ one implementation rather than two that drift. On **Pi**, `setup.sh --agent pi` 
 17 agents** in Pi's format into `~/.pi/agent/agents/`, and can optionally add a
 curated, consent-gated stack of Pi runtime packages (persistent memory, MCP adapter,
 native subagents, ask-user, web access, todo, side-conversations) at pinned versions
-— it never installs the rival `gentle-pi` harness. On **omp**, `setup.sh --agent omp`
+— it never installs the `gentle-pi` package (third-party). On **omp**, `setup.sh --agent omp`
 installs the **same 17 agents** in omp's task-agent format into `~/.omp/agent/agents/`
 plus a `RULES.md` sticky-rule file — omp re-attaches always-apply rules near the current
 turn, so the orchestrator's hard invariants survive a long conversation. The omp agent set
@@ -346,28 +351,7 @@ approved, then submit a PR that references it. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, commit conventions, and the
 automated PR checks.
 
-## Relationship with gentle-ai
-
-Kurama is **actively maintained** as the standalone, lightweight
-multi-harness SDD framework — the pure-Markdown way to install these skills into
-any of the five supported agents: no build step and no runtime to install, with
-`jq` optional and needed only for the JSON-merging extras (the Claude Code hooks
-block, the Engram MCP registration, OpenCode's `tui.json`).
-
-[`gentle-ai`](https://github.com/Gentleman-Programming/gentle-ai) is a separate,
-higher-level distribution: a managed installer (Go binary) that bundles these
-skills together with MCP configuration, persona injection, automatic updates, and
-other conveniences. The two are complementary. Use this repository when you want
-the skills directly, full control over what lands where, and a bash-only setup
-you can vendor into your own tooling; reach for `gentle-ai` when you want a
-batteries-included, self-updating installer.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
----
-
-<div align="center">
-  <sub>Built by <a href="https://github.com/Gentleman-Programming">Gentleman Programming</a></sub>
-</div>

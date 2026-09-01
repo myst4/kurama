@@ -135,7 +135,7 @@ working unchanged; the propagated-value precedence is untouched.
 
 ## `go-testing` moved to the opt-in `lang` group
 
-The default install is now **24 skills** instead of 25. `go-testing` moved to a new
+The default install carries **one skill fewer**: `go-testing` moved to a new
 `lang` manifest group that is **OFF by default**.
 
 **Why it moved.** It was the only language-specific skill shipped to every user of

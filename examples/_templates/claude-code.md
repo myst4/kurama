@@ -21,11 +21,11 @@ Claude Code can run each SDD phase as a native declarative subagent instead of a
 Session hygiene on Claude Code: named agents/teammates spawned for a phase are stopped with the native stop primitive (`TaskStop` with the agent's name, or requesting the teammate's shutdown) as soon as their envelope is read and validated — finished phase agents must not linger in the teammate list/status bar.
 
 <!-- @@MODEL_ASSIGNMENTS_SECTION@@ -->
-<!-- gentle-ai:sdd-model-assignments -->
+<!-- kurama:sdd-model-assignments -->
 ### Model Routing
 
 By default, pass NO `model` parameter when delegating: every sub-agent inherits the model this session is configured to run, whatever the provider. Tiered per-phase routing is opt-in and lives in `skills/_shared/model-assignments.md` — read it only when the user has opted in by adding `model` to an agent's frontmatter locally, and never let it override a model the user configured.
-<!-- /gentle-ai:sdd-model-assignments -->
+<!-- /kurama:sdd-model-assignments -->
 
 <!-- @@STATE_CONVENTIONS@@ -->
 Convention files under `~/.claude/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project) — both hidden dirs; finders need `fd -H` / `rg --hidden` to see them. Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.

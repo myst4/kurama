@@ -10,7 +10,7 @@ description: >
   classifies a request as vague and the user chooses to brainstorm.
 license: MIT
 metadata:
-  author: gentleman-programming
+  author: kurama
   version: "1.0"
 ---
 
