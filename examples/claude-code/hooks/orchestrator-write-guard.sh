@@ -43,78 +43,174 @@ if [ ! -t 0 ]; then
 fi
 
 # --- portable JSON string field extractors ----------------------------------
-# json_str <field>      : first string value for <field> found ANYWHERE in the
-#                         payload — the right tool for a field that lives inside
-#                         tool_input (file_path).
-# json_root_str <field> : the string value of a ROOT-level <field> and nothing
-#                         else — see the subagent pass-through below for why.
-# Both prefer jq and fall back to a POSIX scan when jq is unavailable.
-json_str() {
+# json_root_str <field>  : the string value of a ROOT-level <field> and nothing
+#                          else — see the subagent pass-through below for why.
+# json_input_str <field> : the string value of a <field> that is a DIRECT key of
+#                          the payload's `tool_input` object — the shape every
+#                          field this guard reads out of the tool call has.
+#
+# There is deliberately no "first <field> found ANYWHERE" extractor left. Every
+# value this hook decides on has a FIXED location in the PreToolUse contract, and
+# an unanchored read is the bug class #70 was opened for: jq walks the payload
+# depth-first while a textual scan walks it in serialization order, so the two
+# halves return different values for the same payload and the verdict depends on
+# whether the host happens to have jq.
+json_scoped_str() {
   field="$1"
+  # "" -> the field is a key of the ROOT object. Otherwise the name of a ROOT key
+  # whose OBJECT value is searched instead (one level down, and only there).
+  scope="$2"
   [ -n "$payload" ] || return 0
   if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$payload" \
-      | jq -r --arg f "$field" '.. | objects | .[$f]? // empty' 2>/dev/null \
-      | head -n 1
+    if [ -z "$scope" ]; then
+      printf '%s' "$payload" \
+        | jq -r --arg f "$field" '.[$f]? | strings' 2>/dev/null \
+        | head -n 1
+    else
+      printf '%s' "$payload" \
+        | jq -r --arg f "$field" --arg s "$scope" '.[$s]? | objects | .[$f]? | strings' 2>/dev/null \
+        | head -n 1
+    fi
     return 0
   fi
-  printf '%s' "$payload" \
-    | tr -d '\n' \
-    | grep -o "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
-    | head -n 1 \
-    | sed -e "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
-}
-
-json_root_str() {
-  field="$1"
-  [ -n "$payload" ] || return 0
-  if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$payload" \
-      | jq -r --arg f "$field" '.[$f]? | strings' 2>/dev/null \
-      | head -n 1
-    return 0
-  fi
+  if [ -z "$scope" ]; then want=1; else want=2; fi
   # No jq: split the payload on the quote character and walk the pieces — the scan
   # a character loop would do, at C speed (this hook runs on EVERY tool call and a
   # Write payload can be megabytes). Pieces OUTSIDE strings carry the brace/bracket
   # depth; pieces inside them carry none, so nothing within a string — a nested key,
-  # or file CONTENT that spells one out — can move it. "<field>" is accepted only as
-  # a key of the ROOT object (depth 1), wherever it sits in the KEY ORDER, and only
-  # a string value is returned: null, a number or an object reads as absent, exactly
-  # as the jq branch above returns it. A quote preceded by an odd number of
-  # backslashes is escaped and does not end its string. Escape sequences inside the
-  # value are NOT expanded — the fields read this way are a token and a path. awk
-  # seeds every variable to 0/"" on first use, so no BEGIN block is needed.
-  printf '%s' "$payload" | awk -v field="$field" '
+  # or file CONTENT that spells one out — can move it. "<field>" is accepted only at
+  # the target depth (`want`: 1 for a root key, 2 for a key of the `scope` object)
+  # and, when scoped, only while that object is open — so a same-named key in ANOTHER
+  # root object, in a nested object, or in an array element is never returned no
+  # matter where it sits in the KEY ORDER. Only a string value is returned: null, a
+  # number or an object reads as absent, exactly as the jq branch above returns it.
+  # A quote preceded by an odd number of backslashes is escaped and does not end its
+  # string. Escape sequences inside the value are NOT expanded — the fields read this
+  # way are a token and a path. `keep` also accumulates ROOT-level strings while
+  # scoped, because that is where the scope key itself is recognized. awk seeds every
+  # variable to 0/"" on first use, so no BEGIN block is needed.
+  printf '%s' "$payload" | awk -v field="$field" -v scope="$scope" -v want="$want" '
     {
       n = split($0, seg, "\"")
       for (k = 1; k <= n; k++) {
         s = seg[k]
+        inscope_ok = (scope == "" || inscope)
+        keep = (depth == want && inscope_ok) || (scope != "" && depth == 1)
         if (instr) {
-          if (depth == 1) { str = str s }        # only a root string can ever matter
+          if (keep) { str = str s }
         } else {
+          if (spend == 2) {                      # scope key matched: ":" then "{"
+            if (s ~ /^[ \t\r\n]*:[ \t\r\n]*\{[ \t\r\n]*$/) { inscope = 1; spend = 0 }
+            else if (s !~ /^[ \t\r\n]*$/)                  { spend = 0 }
+          }
           if (pend == 2) {                       # key matched: a colon must follow
             if (s ~ /^[ \t\r\n]*:[ \t\r\n]*$/) { pend = 1 }
             else if (s !~ /^[ \t\r\n]*$/)      { pend = 0 }
           } else if (pend == 1 && s !~ /^[ \t\r\n]*$/) { pend = 0 }
           t = s; depth += gsub(/[[{]/, "", t)
           t = s; depth -= gsub(/[]}]/, "", t)
+          if (depth <= 1) { inscope = 0 }        # the scope object closed again
         }
         if (k == n) { break }                    # no quote closes the last piece
         if (instr && match(s, /\\+$/) && RLENGTH % 2 == 1) {
-          if (depth == 1) { str = str "\"" }     # escaped quote: the string goes on
+          if (keep) { str = str "\"" }           # escaped quote: the string goes on
           continue
         }
         if (instr) {
           instr = 0
           if (pend == 1) { printf "%s", str; exit 0 }
-          pend = (depth == 1 && str == field) ? 2 : 0
+          pend  = (depth == want && inscope_ok && str == field) ? 2 : 0
+          spend = (scope != "" && depth == 1 && str == scope) ? 2 : 0
         } else {
           instr = 1; str = ""
         }
       }
     }
   '
+}
+
+json_root_str() {
+  json_scoped_str "$1" ""
+}
+
+json_input_str() {
+  json_scoped_str "$1" "tool_input"
+}
+
+# --- path canonicalization ---------------------------------------------------
+# The exemption `case` below is a GLOB over a string. Feed it a raw path and
+# ".kurama/../src/app.ts" matches "$root/.kurama/*" while resolving to repository
+# code — the guard exempts precisely what it exists to block. Two steps close that,
+# in this order:
+#
+#   lexical_path  — resolves "." and ".." WITHOUT touching the filesystem. It has
+#                   to be lexical: a Write CREATES its target, so the path may not
+#                   exist yet and an existence-based resolver cannot see it. (There
+#                   is no portable one to reach for anyway — macOS ships neither
+#                   `realpath -m` nor `readlink -f`.)
+#   physical_path — resolves SYMLINKS on the longest EXISTING prefix with
+#                   `cd -P` + `pwd -P`, then re-attaches the segments that do not
+#                   exist yet. Without it a symlinked ".kurama/escape -> src" is
+#                   still a literal ".kurama/..." string and stays exempt.
+#
+# Both the target AND the project root go through both steps, so the two sides of
+# every glob are in the same (physical) namespace. Resolving only one of them would
+# make "$root"/* stop matching on any host whose project path crosses a symlink
+# (/tmp -> /private/tmp on macOS), and the guard would fall through to "outside the
+# repo -> allow" — fail-OPEN, the worst outcome available.
+#
+# Where the two steps disagree (a symlinked directory followed by "..") the lexical
+# answer is kept, which keeps the path INSIDE the repo and therefore guarded. That
+# is the fail-closed direction.
+lexical_path() {
+  lp_out=""
+  lp_seg=""
+  set -f
+  lp_ifs="$IFS"
+  IFS='/'
+  # shellcheck disable=SC2086  # deliberate split on "/", with globbing disabled
+  set -- $1
+  IFS="$lp_ifs"
+  set +f
+  for lp_seg in "$@"; do
+    case "$lp_seg" in
+      ''|.) continue ;;
+      ..)   lp_out="${lp_out%/*}" ;;   # never climbs above "/"
+      *)    lp_out="$lp_out/$lp_seg" ;;
+    esac
+  done
+  printf '%s' "${lp_out:-/}"
+}
+
+physical_path() {
+  pp_dir="$1"
+  pp_tail=""
+  pp_real=""
+  # Peel the deepest segments that do not exist yet — a Write's target, and any
+  # parent directory the write would create — until a real directory is left.
+  while [ "$pp_dir" != "/" ] && [ ! -d "$pp_dir" ]; do
+    if [ -z "$pp_tail" ]; then
+      pp_tail="${pp_dir##*/}"
+    else
+      pp_tail="${pp_dir##*/}/$pp_tail"
+    fi
+    pp_dir="${pp_dir%/*}"
+    [ -n "$pp_dir" ] || pp_dir="/"
+  done
+  # CDPATH is cleared inside the subshell so a user's CDPATH cannot make `cd` land
+  # somewhere else (and echo the directory it picked) for a relative-looking name.
+  pp_real="$(CDPATH=''; cd -P "$pp_dir" 2>/dev/null && pwd -P)" || pp_real=""
+  [ -n "$pp_real" ] || pp_real="$pp_dir"
+  pp_real="${pp_real%/}"
+  if [ -z "$pp_tail" ]; then
+    printf '%s' "${pp_real:-/}"
+  else
+    printf '%s/%s' "$pp_real" "$pp_tail"
+  fi
+}
+
+canonical_path() {
+  physical_path "$(lexical_path "$1")"
 }
 
 # --- subagent pass-through ---------------------------------------------------
@@ -153,11 +249,20 @@ fi
 project_root="${CLAUDE_PROJECT_DIR:-}"
 [ -n "$project_root" ] || project_root="$(json_root_str cwd)"
 [ -n "$project_root" ] || project_root="$PWD"
-root="${project_root%/}"
+case "$project_root" in
+  /*) : ;;
+  *)  project_root="$PWD/$project_root" ;;
+esac
+root="$(canonical_path "$project_root")"
+root="${root%/}"
 
 # --- resolve target file path -----------------------------------------------
-# Edit, Write and MultiEdit all carry a single "file_path".
-file_path="$(json_str file_path)"
+# Edit, Write and MultiEdit all carry a single "file_path", and it is always a
+# direct key of tool_input — so it is read as one. Reading it from anywhere in
+# the payload let a same-named key in a NESTED object win the textual scan while
+# jq returned the real one: two verdicts for one payload, decided by whether the
+# host has jq.
+file_path="$(json_input_str file_path)"
 # Nothing to guard (unknown tool shape) -> allow.
 [ -n "$file_path" ] || exit 0
 
@@ -165,6 +270,7 @@ case "$file_path" in
   /*) abs_path="$file_path" ;;
   *)  abs_path="$root/$file_path" ;;
 esac
+abs_path="$(canonical_path "$abs_path")"
 
 # --- is an SDD cycle active? ------------------------------------------------
 # openspec mode        : an active change dir (NOT under changes/archive/) that
@@ -201,11 +307,13 @@ active_cycle_exists() {
 active_cycle_exists "$root" || exit 0
 
 # --- path exemptions --------------------------------------------------------
+# Both sides are canonical here (see canonical_path above), so these globs decide
+# on where the write LANDS, not on how it was spelled.
 case "$abs_path" in
-  "$root"/.kurama/*)     exit 0 ;;  # harness state directory — always writable
-  "$root"/openspec/*) exit 0 ;;  # SDD artifacts — always writable
-  "$root"/*)          : ;;       # inside the repo — this is the guarded case
-  *)                  exit 0 ;;  # outside the repo — not our concern
+  "$root"/.kurama|"$root"/.kurama/*)   exit 0 ;;  # harness state directory — always writable
+  "$root"/openspec|"$root"/openspec/*) exit 0 ;;  # SDD artifacts — always writable
+  "$root"/*)                           : ;;       # inside the repo — this is the guarded case
+  *)                                   exit 0 ;;  # outside the repo — not our concern
 esac
 
 # --- block: an active cycle + a direct write to repo code -------------------

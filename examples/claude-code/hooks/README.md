@@ -68,6 +68,13 @@ The guard allows the write when **any** of these holds:
   artifacts) — the orchestrator must still be able to persist state and artifacts.
 - The target path is **outside the project root** — not repository code.
 
+Those last two are decided on the **resolved** path, not the spelling. The target and
+the project root are both canonicalized first: `.` and `..` lexically (a `Write`
+creates its target, so there may be nothing on disk yet — and macOS ships neither
+`realpath -m` nor `readlink -f`), then symlinks on the longest existing prefix via
+`cd -P` + `pwd -P`. So `.kurama/../src/app.ts` is repository code and is blocked,
+while `./.kurama/./sdd/x/state.md` is still the exempt marker.
+
 It blocks (`exit 2`) only when an SDD cycle is active **and** the orchestrator is
 about to write repository code directly. The message tells it to delegate (e.g.
 launch `sdd-apply` via the `Task` tool).
@@ -90,10 +97,12 @@ was edited afterward — the same gate `sdd-archive` Step 0 describes, made dete
 - **CLI:** `archive-gate.sh <change-name>` → exit `0` on PASS / PASS WITH WARNINGS with
   a fresh binding, exit `2` when the report is missing, the verdict is FAIL, no PASS is
   found, **or the Content Binding receipt is stale**.
-- **Hook:** wired on `Task`/`Skill`, it reads the payload and only gates launches
-  that reference `sdd-archive`; every other `Task`/`Skill` call passes through
-  (`exit 0`). It auto-detects the change from the active change directory (or takes
-  `KURAMA_CHANGE`).
+- **Hook:** wired on `Task`/`Skill`, it gates only launches whose **invoked identity**
+  is `sdd-archive` — `tool_input.skill`, `tool_input.subagent_type`, or
+  `tool_input.description`. Free-form text (`prompt`, `args`, `content`) is never
+  consulted, so a delegation that merely quotes the phase list passes through
+  (`exit 0`) like every other `Task`/`Skill` call. It auto-detects the change from the
+  active change directory (or takes `KURAMA_CHANGE`).
 
 It locates the verify report at `openspec/changes/<name>/verify-report.md` or
 `.kurama/sdd/<name>/verify-report.md`, reads the `### Verdict` line, and gates on it.
@@ -103,10 +112,11 @@ treated as "not passing".
 **Content binding (closes the "trust the verdict blindly" gap).** A PASS is only
 meaningful for the exact code it was computed against. `sdd-verify` (Step 6b) stamps a
 `Tree-Hash` in the report's **Content Binding** section — the hash of the reviewed tree,
-computed over a throwaway git index (`GIT_INDEX_FILE` points at a temp file, so the real
-index is never touched), excluding the `openspec/` artifact store and `.kurama/` harness
-state. The gate recomputes that hash with the **identical** procedure and refuses the
-archive when it no longer matches — the working tree changed after verification, so the
+computed over a throwaway git index (`GIT_INDEX_FILE` points at an `index` inside a
+private `mktemp -d` directory, so the real index is never touched and the throwaway name
+cannot be pre-empted by another local user), excluding the `openspec/` artifact store and
+`.kurama/` harness state. The gate recomputes that hash with the **identical** procedure
+and refuses the archive when it no longer matches — the working tree changed after verification, so the
 receipt is **STALE** and `sdd-verify` must be re-run. Because the two churny paths are
 excluded, writing the verify report or moving the change folder during archive does *not*
 trip the check, and committing unchanged content leaves the hash identical to HEAD's tree
