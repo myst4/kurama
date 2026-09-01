@@ -119,15 +119,32 @@ RECEIPT_SCHEMA=1
 # absent (a pre-#37 receipt), the file is missing, or the value is non-numeric —
 # so a future caller can gate with a plain `-ge`. manifest_field cannot read this:
 # it matches only quoted string values, and receiptSchema is a bare JSON number.
+# Both branches must answer IDENTICALLY on every input, including the ones no
+# writer produces — jq being installed is not supposed to change what a receipt
+# means. It did, in both directions (#65): for a STRING `"receiptSchema": "1"`
+# jq read 1 while awk's bare-integer regex found nothing and read 0; for a
+# FRACTIONAL `1.0` jq printed "1.0", which the digits-only case below rejected to
+# 0, while awk's `[0-9]+` matched the leading "1" and read 1. The canonical answer
+# for anything that is not a bare JSON integer is 0 — the same answer a pre-#37
+# receipt with no field at all gives — because the field exists to be gated with
+# `-ge`, and a value this build cannot read must never claim to be a schema it
+# does not understand.
+#
+# jq side: reject non-numbers up front, so a quoted "1" is a string and reads 0.
+# awk side: require the integer to END at the value (a comma, a closing brace, or
+# end of line), so "1.0" no longer matches on its leading digit. The writer emits
+# `"receiptSchema": 1,` — a delimiter is always there — and the end-of-line
+# alternative covers a hand-written receipt with the field last.
 receipt_schema() {
     local manifest="$1" v=""
     [ -f "$manifest" ] || { printf '0'; return 0; }
     if command -v jq >/dev/null 2>&1; then
-        v="$(jq -r '.receiptSchema // 0' "$manifest" 2>/dev/null)"
+        v="$(jq -r 'if (.receiptSchema | type) == "number" then (.receiptSchema | tostring) else "0" end' "$manifest" 2>/dev/null)"
     else
         v="$(awk '
-            match($0, "\"receiptSchema\"[[:space:]]*:[[:space:]]*[0-9]+") {
-                s = substr($0, RSTART, RLENGTH); sub(/.*:[[:space:]]*/, "", s); print s; exit
+            match($0, "\"receiptSchema\"[[:space:]]*:[[:space:]]*[0-9]+[[:space:]]*([,}]|$)") {
+                s = substr($0, RSTART, RLENGTH)
+                sub(/.*:[[:space:]]*/, "", s); sub(/[^0-9].*/, "", s); print s; exit
             }' "$manifest")"
     fi
     case "$v" in ''|*[!0-9]*) v=0 ;; esac
