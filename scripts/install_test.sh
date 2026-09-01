@@ -13472,21 +13472,53 @@ tier_rows_are_complete() {
     return 0
 }
 
+# Resolve a ref for main's tip and echo it, or echo nothing. `origin/main` is the
+# local spelling; a CI checkout has none — actions/checkout fetches only the PR
+# ref, so the mutation check had no baseline and the three tests below failed on
+# ubuntu while passing locally. Fall back through the spellings that might exist,
+# then fetch one commit. Resolved once and cached, since a fetch is not free.
+BASELINE_REF=""
+BASELINE_REF_RESOLVED=0
+baseline_ref() {
+    if [ "$BASELINE_REF_RESOLVED" -eq 0 ]; then
+        BASELINE_REF_RESOLVED=1
+        local ref
+        for ref in origin/main refs/remotes/origin/main main; do
+            if git -C "$REPO_DIR" rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
+                BASELINE_REF="$ref"
+                break
+            fi
+        done
+        if [ -z "$BASELINE_REF" ] \
+            && git -C "$REPO_DIR" fetch --no-tags --depth=1 origin main >/dev/null 2>&1 \
+            && git -C "$REPO_DIR" rev-parse --verify --quiet FETCH_HEAD >/dev/null 2>&1; then
+            BASELINE_REF="FETCH_HEAD"
+        fi
+    fi
+    printf '%s' "$BASELINE_REF"
+}
+
 assert_tier_rows_are_new_in() {
     local rel="$1"
     tier_rows_are_complete "$REPO_DIR/$rel" || {
         echo "$rel has no enforced/advisory row for all five harnesses"; return 1; }
 
+    local ref
+    ref="$(baseline_ref)"
+    [ -n "$ref" ] || {
+        echo "no ref for main's tip (tried origin/main, main, a shallow fetch) — the mutation check has no baseline"
+        return 1; }
+
     local baseline
     baseline="$TEST_TMPDIR/baseline-$(basename "$rel")"
-    if ! git -C "$REPO_DIR" show "origin/main:$rel" > "$baseline" 2>/dev/null; then
-        echo "could not read origin/main:$rel — the mutation check has no baseline"
+    if ! git -C "$REPO_DIR" show "$ref:$rel" > "$baseline" 2>/dev/null; then
+        echo "could not read $ref:$rel — the mutation check has no baseline"
         return 1
     fi
     [ -s "$baseline" ] || {
-        echo "origin/main:$rel is empty — the mutation check has no baseline"; return 1; }
+        echo "$ref:$rel is empty — the mutation check has no baseline"; return 1; }
     if tier_rows_are_complete "$baseline"; then
-        echo "origin/main:$rel already satisfies this assertion — it does not test the change"
+        echo "$ref:$rel already satisfies this assertion — it does not test the change"
         return 1
     fi
     return 0
@@ -13525,10 +13557,14 @@ test_x_no_prompt_bytes_were_spent_on_the_tier_statement() {
     # The five generated orchestrator prompts are at their byte budget (omp has
     # tens of bytes of headroom), so the tier statement lives in docs and nowhere
     # else. This pins that it stayed there.
+    local ref
+    ref="$(baseline_ref)"
+    [ -n "$ref" ] || {
+        echo "no ref for main's tip — cannot tell whether a prompt changed"; return 1; }
     local f
     for f in "examples/omp/AGENTS.md" "examples/pi/AGENTS.md" "examples/opencode/AGENTS.md" \
              "examples/claude-code/CLAUDE.md" "examples/codex/agents.md" "examples/_templates"; do
-        if ! git -C "$REPO_DIR" diff --quiet origin/main -- "$f"; then
+        if ! git -C "$REPO_DIR" diff --quiet "$ref" -- "$f"; then
             echo "$f changed — the prompt budget is exhausted; the tier statement belongs in docs"
             return 1
         fi
