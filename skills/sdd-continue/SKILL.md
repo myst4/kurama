@@ -91,3 +91,6 @@ next depends on `execution_mode`:
 - Pass upstream artifacts by reference, not by inlining their content.
 - If a required upstream artifact is missing, the delegated phase returns `status: blocked` naming it —
   surface that and recommend the phase that produces it.
+- Reap the phase agent as soon as you have synthesized its envelope — the delegation is not complete
+  until the agent is shut down, and the only reason to keep one alive is a follow-up message you name
+  when you decide it (`skills/_shared/skill-resolver.md` → *Step 5*).

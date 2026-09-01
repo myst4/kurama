@@ -105,3 +105,6 @@ each phase produced (its **Section D** `executive_summary`) and the recommended 
 - Never auto-archive; archive is an explicit, verify-gated, potentially destructive step.
 - Resolve and propagate pipeline settings once; the propagated value wins on conflict.
 - Present a single combined summary at the end, not a summary per phase.
+- Reap each phase agent as soon as you have synthesized its envelope, before launching the next
+  one — a fast-forward that reaps nothing ends with one idle agent per phase; keep one alive only
+  for a follow-up message you name (`skills/_shared/skill-resolver.md` → *Step 5*).

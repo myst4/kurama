@@ -11331,6 +11331,222 @@ run_test "every branch example shown matches the published regex" test_r_every_b
 echo ""
 
 # ============================================================================
+# UNIT-Q (issues #87, #100): the envelope's Key Learnings closing, and reaping
+# the sub-agent that sent it
+#
+# Two halves of the same cycle, both fixed in `skills/_shared/` — the contracts
+# every generated orchestrator prompt already points at, so neither costs a byte
+# of the 24000-byte prompt budget the omp prompt has 35 bytes left of.
+#
+# #87: Section D of sdd-phase-common.md is the ONE return contract every phase
+# reads, and it ended at `skill_resolution` — so the gotchas a phase discovered
+# died with its context. The closing `## Key Learnings` section is extracted
+# VERBATIM by a memory engine, which is why its shape is pinned rather than left
+# to taste.
+#
+# #100: the same contract said how to LAUNCH a sub-agent and never how to close
+# it, so a finished agent stayed alive holding its whole context — observed an
+# hour after it reported. Both the reap step AND its keep-alive exception are
+# pinned, because a reap rule without the exception is a regression, not a fix.
+# ============================================================================
+
+test_q_envelope_closes_with_key_learnings() {
+    # #87. Section D is the ONLY return contract every SDD phase reads, and it used to end at
+    # `skill_resolution` — so every gotcha a phase discovered died with that phase's context.
+    # The closing `## Key Learnings` section is what a memory engine extracts VERBATIM, with no
+    # model re-reading it, which is why the shape is pinned here instead of left to taste: the
+    # >= 20-character / >= 4-word floors are Engram's extraction thresholds, and an item under
+    # either one is dropped in silence. The three rules that keep the section honest are pinned
+    # for the same reason — each is a distinct failure mode. Omit-when-empty is what stops the
+    # section from becoming padding that dilutes the real learnings; no-secrets/no-absolute-paths
+    # is what stops passive capture from becoming a leak, since these lines are persisted and
+    # re-read on other machines. And the two-store sentence is what stops the next reader from
+    # "deduplicating" this against `sdd-learn`: Engram captures it passively for one developer,
+    # `sdd-learn` curates the team's committed MEMORY.md from it — the section feeds both and
+    # replaces neither.
+    local common="$REPO_DIR/skills/_shared/sdd-phase-common.md"
+    local docs="$REPO_DIR/docs/sub-agents.md"
+    assert_file_exists "$common" || return 1
+    assert_file_exists "$docs" || return 1
+
+    # The literal heading a phase is told to emit. Anything else and the extractor's pattern
+    # stops matching, which is exactly the silent failure this contract exists to prevent.
+    grep -qF '## Key Learnings' "$common" \
+        || { echo "sdd-phase-common.md never names the '## Key Learnings' closing section"; return 1; }
+
+    # It has to live in Section D — the envelope contract — not in some section a phase agent
+    # reading its return format would never reach.
+    local d_line kl_line
+    d_line=$(grep -n '^## D\. Return Envelope' "$common" | head -1 | cut -d: -f1 || true)
+    kl_line=$(grep -n 'Key Learnings' "$common" | head -1 | cut -d: -f1 || true)
+    if [ -z "$d_line" ]; then
+        echo "sdd-phase-common.md lost its '## D. Return Envelope' heading — this test is stale"; return 1
+    fi
+    if [ -z "$kl_line" ] || [ "$kl_line" -le "$d_line" ]; then
+        echo "Key Learnings does not sit inside Section D (envelope at line $d_line, learnings at ${kl_line:-none})"
+        return 1
+    fi
+
+    # Everything from the contract's own subsection to the end of the file, flattened: every
+    # rule below is a wrapped markdown bullet, and a line-oriented match would miss it for a
+    # reason that has nothing to do with the contract.
+    local kl
+    kl=$(awk '/^### Key Learnings/ { f = 1 } f' "$common" | tr '\n' ' ')
+    local kl_bytes
+    kl_bytes=$(printf '%s' "$kl" | wc -c | tr -d ' ')
+    if [ "$kl_bytes" -lt 400 ]; then
+        echo "the Key Learnings subsection is ${kl_bytes}B — every assertion below would pass over nothing"
+        return 1
+    fi
+
+    # The extraction thresholds, stated AS thresholds so nobody "simplifies" them later.
+    case "$kl" in
+        *"20 characters and 4 words"*) ;;
+        *) echo "the Key Learnings contract dropped Engram's 20-character / 4-word extraction thresholds"; return 1 ;;
+    esac
+    case "$kl" in
+        *"extraction threshold"*) ;;
+        *) echo "the two numbers are stated without saying they are extraction thresholds"; return 1 ;;
+    esac
+
+    # Rule 1 — omit the section entirely when there is nothing non-obvious.
+    case "$kl" in
+        *"Omit the whole section"*) ;;
+        *) echo "the Key Learnings contract lost the omit-when-empty rule"; return 1 ;;
+    esac
+    # Rule 2 — never restate what executive_summary already said.
+    case "$kl" in
+        *"Never restate the phase"*) ;;
+        *) echo "the Key Learnings contract lost the do-not-restate-the-main-output rule"; return 1 ;;
+    esac
+    # Rule 3 — no secrets, no absolute machine paths.
+    case "$kl" in
+        *"secret"*) ;;
+        *) echo "the Key Learnings contract no longer forbids writing secrets"; return 1 ;;
+    esac
+    case "$kl" in
+        *"absolute machine path"*) ;;
+        *) echo "the Key Learnings contract no longer forbids absolute machine paths"; return 1 ;;
+    esac
+
+    # Both memory stores, and the boundary between them, named where the phase reads it.
+    case "$kl" in
+        *"Engram"*) ;;
+        *) echo "the Key Learnings contract never says Engram captures the section passively"; return 1 ;;
+    esac
+    case "$kl" in
+        *"sdd-learn"*) ;;
+        *) echo "the Key Learnings contract never names sdd-learn as the other consumer"; return 1 ;;
+    esac
+    case "$kl" in
+        *"MEMORY.md"*) ;;
+        *) echo "the Key Learnings contract never names the team file sdd-learn curates"; return 1 ;;
+    esac
+    case "$kl" in
+        *"docs/persistence.md"*) ;;
+        *) echo "the Key Learnings contract does not point at the four-store boundary table"; return 1 ;;
+    esac
+
+    # The docs describe the envelope too, and a contract documented in only one of the two
+    # places is the drift this repo keeps a docs gate for.
+    local docs_flat
+    docs_flat=$(tr '\n' ' ' < "$docs")
+    case "$docs_flat" in
+        *"Key Learnings"*) ;;
+        *) echo "docs/sub-agents.md describes the envelope without its Key Learnings closing"; return 1 ;;
+    esac
+    case "$docs_flat" in
+        *"omitted entirely"*) ;;
+        *) echo "docs/sub-agents.md never states the omit-when-empty rule"; return 1 ;;
+    esac
+    case "$docs_flat" in
+        *"sdd-learn"*) ;;
+        *) echo "docs/sub-agents.md never relates Key Learnings to sdd-learn"; return 1 ;;
+    esac
+    return 0
+}
+
+test_q_delegation_contract_reaps_finished_subagents() {
+    # #100. The delegation contract told the orchestrator how to LAUNCH a sub-agent and never
+    # how to close it, so a finished agent stayed alive holding its whole context — observed an
+    # hour after it reported. That is a leak by omission which gets worse the better the
+    # orchestrator pattern works: eight correctly delegated phases end the session with eight
+    # idle agents, and the bookkeeping lands back on the user.
+    #
+    # The fix is contract-level and harness-agnostic, which is why it is asserted in
+    # `skill-resolver.md` — the canonical file every generated prompt already points at — and
+    # not in the prompts, whose 24000-byte budget has no room left.
+    #
+    # BOTH halves are asserted on purpose. A reap rule without its exception is a regression,
+    # not a fix: resuming an agent preserves the context it built, and an orchestrator that
+    # kills every agent on sight has to re-derive that context in a fresh one. The exception is
+    # bounded by an INTENT the orchestrator states out loud when it takes it — "might need it
+    # later" is not one — so the two assertions have to travel together.
+    local resolver="$REPO_DIR/skills/_shared/skill-resolver.md"
+    assert_file_exists "$resolver" || return 1
+
+    local flat
+    flat=$(tr '\n' ' ' < "$resolver")
+
+    # Half 1 — the reap step itself, as a step of the launch/return cycle.
+    grep -qi '^### Step 5.*Reap' "$resolver" \
+        || { echo "skill-resolver.md has no Step 5 that reaps the sub-agent"; return 1; }
+    case "$flat" in
+        *"delegation is not complete"*) ;;
+        *) echo "skill-resolver.md never says the delegation is incomplete until the agent is shut down"; return 1 ;;
+    esac
+    # The Claude Code primitive, named — a contract that says "close it somehow" closes nothing.
+    case "$flat" in
+        *"shutdown request to"*) ;;
+        *) echo "skill-resolver.md does not name the Claude Code shutdown request to the teammate"; return 1 ;;
+    esac
+    # And the harnesses that have no primitive: the reap is holding no reference, said out loud.
+    case "$flat" in
+        *"no such primitive"*) ;;
+        *) echo "skill-resolver.md has no branch for harnesses without a termination primitive"; return 1 ;;
+    esac
+    case "$flat" in
+        *"hold no reference"*) ;;
+        *) echo "skill-resolver.md never defines the reap on a harness that cannot terminate an agent"; return 1 ;;
+    esac
+
+    # Half 2 — the keep-alive exception. Without this the resume pattern is banned outright.
+    case "$flat" in
+        *"The one exception"*) ;;
+        *) echo "skill-resolver.md states a reap rule with no keep-alive exception — this bans resuming an agent"; return 1 ;;
+    esac
+    case "$flat" in
+        *"follow-up"*) ;;
+        *) echo "the keep-alive exception never names the intended follow-up that justifies it"; return 1 ;;
+    esac
+    case "$flat" in
+        *"name the intent"*) ;;
+        *) echo "the keep-alive exception is unbounded — the orchestrator never has to state the intent"; return 1 ;;
+    esac
+
+    # The three meta-skills are the surfaces that actually delegate a phase; each must close the
+    # cycle it opens and point at the one canonical home instead of restating the rule.
+    local skill f
+    for skill in sdd-new sdd-ff sdd-continue; do
+        f="$REPO_DIR/skills/$skill/SKILL.md"
+        assert_file_exists "$f" || return 1
+        grep -qi 'reap' "$f" \
+            || { echo "$skill/SKILL.md delegates a phase and never reaps the agent"; return 1; }
+        grep -qF 'skill-resolver.md' "$f" \
+            || { echo "$skill/SKILL.md restates the reap rule instead of pointing at skill-resolver.md"; return 1; }
+        grep -qF 'Step 5' "$f" \
+            || { echo "$skill/SKILL.md does not point at the reap step by name"; return 1; }
+    done
+    return 0
+}
+
+echo -e "${BOLD}UNIT-Q (issues #87, #100): Key Learnings + sub-agent reaping${NC}"
+run_test "the envelope closes with Key Learnings (#87)" test_q_envelope_closes_with_key_learnings
+run_test "the delegation contract reaps finished agents (#100)" test_q_delegation_contract_reaps_finished_subagents
+
+echo ""
+
+# ============================================================================
 # Summary
 # ============================================================================
 

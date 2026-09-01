@@ -10,6 +10,10 @@ Sub-agents are born with NO context about what skills exist. Without skill injec
 
 Before EVERY sub-agent launch that involves **reading, writing, or reviewing code**. Skip only for purely mechanical delegations (e.g., "run this test command").
 
+And **after every return**, whatever the delegation was for: *Step 5* closes the cycle by
+reaping the agent. That half has no exemption — a mechanical agent holds its context and its
+slot in the agent list exactly like a code-reading one.
+
 ## The Protocol
 
 ### Step 1: Obtain the Skill Registry (once per session)
@@ -88,6 +92,37 @@ Read these files for project-specific patterns:
 ```
 
 Project conventions are short references (paths + notes), so passing them is cheap. The sub-agent reads them only if relevant to its task.
+
+### Step 5: Reap the Sub-Agent Once You Have Synthesized Its Envelope
+
+Launching is half the cycle; closing it is the other half. **A delegation is not complete when the
+envelope arrives — it is complete when the envelope has been read, validated (gatekeeper checks
+included) and synthesized, AND the agent that produced it has been shut down.**
+
+A finished agent left alive is not free: it holds its entire context, keeps its slot in the
+harness's agent/teammate list, and hands the user back the bookkeeping the orchestrator pattern
+exists to absorb. An orchestrator that correctly delegates eight phases and reaps none ends the
+session with eight idle agents.
+
+- **On a harness with an explicit termination primitive** — Claude Code: the shutdown request to
+  the named teammate (equivalently, the native stop tool with that agent's name) — issue it as
+  soon as the envelope is synthesized, and name the agent you stopped alongside the result you
+  took from it.
+- **On a harness with no such primitive**, the reap is that you **hold no reference**: drop the
+  handle, never message it again, and **say so** ("this harness has no stop primitive; the
+  `sdd-spec` agent is finished and will not be reused"), so the user reads a closed delegation
+  rather than a pending one.
+- **At cycle end** — archive, a blocked stop, or the user cancelling — sweep: close every
+  delegated agent still open from this session.
+
+**The one exception: an intended follow-up by message.** Keep an agent alive ONLY while you still
+intend to send *that* agent more work, because resuming it preserves the context it already built
+and re-deriving that context in a fresh agent is the waste this exception exists to prevent. When
+you take the exception, **name the intent at the moment you take it** — which agent, and what you
+are about to send it ("keeping `sdd-design` open: the reconciliation note from `sdd-spec` goes to
+it next"). "It might be useful later" is not an intent: the path for later work is a fresh agent
+plus the persisted artifacts, which `sdd-phase-common.md` → *Artifact Persistence* guarantees are
+already in the store.
 
 ## Why Not Compact Rules? (default is the full SKILL.md)
 
