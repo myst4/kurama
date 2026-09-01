@@ -120,6 +120,13 @@ openspec/changes/{change-name}/
 - [ ] 4.2 {Remove temporary code}
 ```
 
+**Leave the evidence slot empty.** `sdd-apply` appends a **Work Unit Evidence** block (its
+Step 3c: test command + exact result, harness/runtime, rollback boundary) under each unit as it
+completes it — in every mode, with `tdd.enabled` true or false. Do NOT pre-fill, stub, or
+placeholder those lines here: evidence is produced by execution, and a pre-written block is
+exactly the unbacked claim the gate exists to prevent. The size budget below covers the PLANNED
+checklist only; the evidence `sdd-apply` adds later never counts against it.
+
 #### TDD Task Expansion (only when `tdd.enabled` — Step 2a)
 
 When TDD is on, each behavior — one MUST scenario from the spec — expands into a
@@ -203,4 +210,5 @@ Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Pop
 - NEVER include vague tasks like "implement feature" or "add tests"
 - Apply any `rules.tasks` from `openspec/config.yaml`
 - When `tdd.enabled` resolves true (Step 2a — propagated > `config.yaml` > default off), expand every behavior task into `n.x RED` / `n.y GREEN` / `n.z REFACTOR` subtasks, each referencing the spec scenario ID (`S-{requirement}-{n}`) per the TDD Task Expansion format; when false, produce the standard checklist. Do NOT infer TDD from existing test files.
+- NEVER pre-fill a Work Unit Evidence block — `sdd-apply` writes it from real execution (Step 3c). Plan the tasks; leave the evidence slot to the phase that runs the commands
 - **Size budget**: Tasks artifact MUST be under 530 words. Each task: 1-2 lines max. Use checklist format, not paragraphs.

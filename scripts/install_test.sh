@@ -9980,6 +9980,259 @@ run_test "the ledger is a declared artifact in both conventions" test_m_the_ledg
 run_test "the issue Decisions comment is offered, never automatic" test_m_the_issue_decisions_comment_is_offered_never_automatic
 run_test "sdd-ff announces the gate it bypasses" test_m_sdd_ff_announces_the_bypass
 
+# ============================================================================
+# UNIT-S (issue #88): Work Unit Evidence — mandatory execution evidence in ALL
+# modes, with `tdd.enabled` true or false.
+#
+# The bug: with TDD off (the default) nothing in sdd-apply forced a work unit to
+# run anything before being marked `[x]`, so "done" rested on the model's word and
+# sdd-verify had nothing to audit. These tests pin the producer side (sdd-apply
+# writes the block), the checker side (sdd-verify audits it, WARNING vs CRITICAL),
+# and the structural property that makes the whole thing worth having: the gate is
+# reachable on the NON-TDD path.
+#
+# Every content assertion below runs over a size-checked file through flatten_file,
+# because each clause is a wrapped markdown bullet or table row: a line-oriented
+# match would miss it for a reason that has nothing to do with the contract. All
+# patterns are ASCII on purpose — CI runs under LC_ALL=C, where an em dash is three
+# bytes rather than one character, so any `.` spanning one is given room to match.
+# ============================================================================
+
+test_s_apply_carries_the_evidence_block_in_every_mode() {
+    # Wrong-reason pass this guards against: the block present but described as a
+    # TDD-mode artifact, which would leave the default path exactly as broken as
+    # before. Hence the explicit "EVERY mode / true OR false" and "does not depend
+    # on tdd.enabled" clauses, not just the presence of the heading. A second
+    # wrong-reason pass — asserting over a missing or truncated file, where every
+    # pattern fails and nothing is really checked — is closed by the size check and
+    # the positive control first.
+    local f="$REPO_DIR/skills/sdd-apply/SKILL.md"
+    assert_file_exists "$f" || return 1
+    assert_file_not_empty "$f" 9000 || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    # Positive control: the haystack really is sdd-apply.
+    assert_matches "$flat" 'apply-progress' \
+        "the extracted body is really sdd-apply (control for the clauses below)" || return 1
+
+    assert_matches "$flat" 'Work Unit Evidence' \
+        "the evidence block exists at all" || return 1
+    assert_matches "$flat" 'EVERY mode.{0,60}tdd\.enabled.{0,40}true OR false' \
+        "the gate runs in every mode with the TDD flag either way" || return 1
+    assert_matches "$flat" 'Nothing.{1,8}about this gate depends on .tdd.enabled' \
+        "evidence must never be made conditional on the opt-in TDD flag" || return 1
+
+    # The three fields, each pinned by what it must actually contain — a heading
+    # named "Test" proves nothing about whether a command and its result are required.
+    assert_matches "$flat" 'smallest command that proves THIS unit' \
+        "the exact test/check command run for this unit" || return 1
+    assert_matches "$flat" 'exit code plus pass/fail counts, or the verbatim last lines' \
+        "the exact RESULT, not a summary of it" || return 1
+    assert_matches "$flat" 'harness/runtime the unit actually ran under' \
+        "the harness/runtime field" || return 1
+    assert_matches "$flat" 'rollback boundary' \
+        "the rollback boundary field" || return 1
+    assert_matches "$flat" 'revert to undo THIS unit and nothing else' \
+        "the rollback boundary is scoped to this unit, not to the whole change" || return 1
+    assert_matches "$flat" 'commit, the file list, or the migration step' \
+        "what a rollback boundary may name" || return 1
+
+    # The N/A rule is the difference between an escape hatch and a loophole.
+    assert_matches "$flat" 'N/A. is valid ONLY with a reason' \
+        "N/A needs a stated reason" || return 1
+    assert_matches "$flat" 'bare .N/A., an empty field, or an omitted line is a GAP' \
+        "a bare N/A is a gap, not an answer" || return 1
+    assert_matches "$flat" 'Rollback never takes .N/A' \
+        "the rollback boundary has no N/A escape at all" || return 1
+
+    assert_matches "$flat" 'Never claim a pass without the command that produced it' \
+        "no claimed pass without the command behind it" || return 1
+    assert_matches "$flat" 'Never fabricate output' \
+        "the ban on inventing a result" || return 1
+    assert_matches "$flat" 'Do NOT mark a unit.{0,20}tasks complete when the focused test command' \
+        "a failed check blocks the [x] instead of being written under it" || return 1
+
+    # Supplements, never competes.
+    assert_matches "$flat" 'SUPPLEMENTS the TDD module' \
+        "the block adds to the TDD module rather than replacing it" || return 1
+    assert_matches "$flat" 'recorded IN ADDITION' \
+        "with TDD on, both the cycle evidence and this block are recorded" || return 1
+
+    # It must land where THIS mode records completion, engram included, and reach the
+    # orchestrator through the phase-specific report fields Section D already allows.
+    assert_matches "$flat" 'tasks artifact content for .engram' \
+        "the engram path for the block, not just tasks.md" || return 1
+    assert_matches "$flat" 'Work Unit Evidence\*\* \(ALL modes' \
+        "the return envelope's detailed_report carries the evidence field" || return 1
+    assert_matches "$flat" 'carried forward VERBATIM' \
+        "a later batch never erases an earlier unit's evidence (read-merge-write)" || return 1
+    return 0
+}
+
+test_s_verify_audits_it_with_the_warning_critical_split() {
+    # Wrong-reason pass this guards against: an audit that exists but is capped at
+    # WARNING like the TDD audit is, which would let a code-touching unit claim
+    # passing tests with no command and still archive. Both severities are pinned,
+    # and so is the rule that they must not be collapsed into each other.
+    local f="$REPO_DIR/skills/sdd-verify/SKILL.md"
+    assert_file_exists "$f" || return 1
+    assert_file_not_empty "$f" 20000 || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    # Positive control: the haystack really is sdd-verify.
+    assert_matches "$flat" 'compliance matrix' \
+        "the extracted body is really sdd-verify (control for the clauses below)" || return 1
+
+    assert_matches "$flat" 'Work Unit Evidence Audit' \
+        "the audit exists at all" || return 1
+    assert_matches "$flat" 'ALL modes.{0,20}never conditional' \
+        "the audit is never skipped for a mode" || return 1
+    assert_matches "$flat" 'independent of .compliance_mode. and of .tdd\.enabled' \
+        "neither switch can turn the audit off or reinterpret it" || return 1
+
+    # WARNING is the floor; CRITICAL is reserved for the two unbacked assertions and
+    # for a recorded failure sitting under a checked box.
+    assert_matches "$flat" 'No Work Unit Evidence block at all [|] \*\*WARNING\*\*' \
+        "a checked unit with no evidence block is a WARNING at least" || return 1
+    assert_matches "$flat" '\*\*CRITICAL\*\* when the unit touched code' \
+        "it escalates to CRITICAL when the unit touched code" || return 1
+    assert_matches "$flat" 'claimed pass.{0,120}no command recorded' \
+        "a claimed pass with no command is itself a finding" || return 1
+    assert_matches "$flat" 'N/A. on Test or Harness with no stated reason [|] \*\*WARNING\*\*' \
+        "an unexplained N/A is a WARNING" || return 1
+    assert_matches "$flat" 'Rollback boundary missing, or .N/A.{0,40}[|] \*\*WARNING\*\*' \
+        "a missing rollback boundary is a WARNING" || return 1
+    assert_matches "$flat" 'recorded result is a FAILURE [|] \*\*CRITICAL\*\*' \
+        "a recorded failure under an [x] is CRITICAL in both compliance modes" || return 1
+    assert_matches "$flat" 'named boundary \(commit, file list' \
+        "the audit checks the rollback boundary names something revertible" || return 1
+    assert_matches "$flat" 'floor is WARNING' \
+        "an unevidenced [x] is never merely a SUGGESTION" || return 1
+
+    # Composition with the TDD module's existing RED-evidence check.
+    assert_matches "$flat" 'How this composes with the TDD audit \(Step 6a\)' \
+        "the composition with the TDD audit is stated, not left to inference" || return 1
+    assert_matches "$flat" 'Both run; neither replaces the other' \
+        "both audits run when TDD is on" || return 1
+    assert_matches "$flat" 'traceability ON TOP of this block' \
+        "TDD adds scenario/test traceability on top rather than substituting" || return 1
+    assert_matches "$flat" 'Never.{0,20}downgrade a CRITICAL here to a WARNING' \
+        "the TDD audit's WARNING cap must not leak onto this audit" || return 1
+
+    # The report has somewhere to put the finding, or the audit is unreportable.
+    assert_matches "$flat" '### Work Unit Evidence Audit' \
+        "the verify report template carries an evidence section" || return 1
+    return 0
+}
+
+test_s_the_gate_is_reachable_with_tdd_off() {
+    # (a) STRUCTURAL, not a string grep, and the reason is the bug itself: RED/GREEN
+    # evidence already existed, it was just unreachable with tdd.enabled false. Text
+    # placed inside the TDD-only branch would satisfy every assertion in the two
+    # tests above while changing nothing on the default path. Line ORDER is the
+    # property, so line order is what is compared. assert_heading_precedes requires
+    # BOTH headings to exist, so a pair of missing headings cannot compare equal and
+    # pass vacuously.
+    local a="$REPO_DIR/skills/sdd-apply/SKILL.md"
+    local v="$REPO_DIR/skills/sdd-verify/SKILL.md"
+    assert_file_exists "$a" || return 1
+    assert_file_exists "$v" || return 1
+
+    # Step 3a is the TDD branch and Step 3b the standard one; a gate after BOTH and
+    # before the "mark complete" step is on every path into Step 4.
+    assert_heading_precedes "$a" '^### Step 3a: Implement Tasks' \
+        '^### Step 3b: Implement Tasks' \
+        "the two implementation branches must both precede the gate" || return 1
+    assert_heading_precedes "$a" '^### Step 3b: Implement Tasks' \
+        '^### Step 3c: Hard Gate' \
+        "the evidence gate must sit outside the TDD branch, after the standard one" || return 1
+    assert_heading_precedes "$a" '^### Step 3c: Hard Gate' \
+        '^### Step 4: Mark Tasks Complete' \
+        "the gate must run BEFORE tasks are marked complete, not after" || return 1
+
+    # Same property on the checker side: the evidence audit is its own step, ahead of
+    # (and outside) the tdd.enabled-gated Step 6a that is skipped when TDD is off.
+    assert_heading_precedes "$v" '^### Step 2a: Work Unit Evidence Audit' \
+        '^### Step 3: Check Correctness' \
+        "the evidence audit belongs with the completeness check, not with the TDD audit" || return 1
+    assert_heading_precedes "$v" '^### Step 2a: Work Unit Evidence Audit' \
+        '^### Step 6a: TDD Audit' \
+        "the audit must not be nested inside the step that TDD-off skips entirely" || return 1
+    return 0
+}
+
+test_s_docs_and_tasks_declare_evidence_always_on() {
+    # The producer and the checker can be right while the docs still tell a project
+    # that execution evidence arrives with the optional module — which is how the
+    # gate gets "simplified away" in a later pass. Wrong-reason pass guarded: the
+    # phrase living only inside docs/tdd.md's TDD-on table, where it would read as
+    # conditional; the always-on wording is asserted explicitly.
+    local d="$REPO_DIR/docs/tdd.md"
+    assert_file_exists "$d" || return 1
+    assert_file_not_empty "$d" 5000 || return 1
+    local flat
+    flat="$(flatten_file "$d")"
+    assert_matches "$flat" 'Work Unit Evidence is always on' \
+        "the docs state the block is always on" || return 1
+    assert_matches "$flat" 'Independently of TDD.{1,8}and of .tdd.enabled' \
+        "the docs state the block does not depend on the opt-in flag" || return 1
+    assert_matches "$flat" 'Enabling TDD.{1,8}never replaces that block' \
+        "TDD is opt-in ON TOP of the evidence, not instead of it" || return 1
+    assert_matches "$flat" 'Disabling TDD removes.{1,8}the cycle, never the evidence' \
+        "turning TDD off leaves the evidence requirement standing" || return 1
+
+    # The planning phase must leave the slot empty: a pre-filled block is the exact
+    # unbacked claim the gate exists to stop.
+    local t="$REPO_DIR/skills/sdd-tasks/SKILL.md"
+    assert_file_exists "$t" || return 1
+    assert_file_not_empty "$t" 5000 || return 1
+    local tflat
+    tflat="$(flatten_file "$t")"
+    assert_matches "$tflat" 'Leave the evidence slot empty' \
+        "sdd-tasks plans the checklist and leaves the evidence to sdd-apply" || return 1
+    assert_matches "$tflat" 'NEVER pre-fill a Work Unit Evidence block' \
+        "the rule against a placeholder block in the planned checklist" || return 1
+    assert_matches "$tflat" 'evidence .{0,20}sdd-apply. adds later never counts against it' \
+        "the 530-word budget covers the plan, not the evidence appended later" || return 1
+    return 0
+}
+
+test_s_the_tdd_module_rules_are_not_weakened() {
+    # The always-on gate had one obvious wrong way to land: relaxing the opt-in
+    # module so the two stop overlapping. These are pre-existing invariants, asserted
+    # here so this change cannot quietly trade one for the other. They are also the
+    # control for the composition claims above — "both run" is only meaningful while
+    # the TDD half still says what it always said.
+    local a="$REPO_DIR/skills/sdd-apply/SKILL.md"
+    local v="$REPO_DIR/skills/sdd-verify/SKILL.md"
+    local d="$REPO_DIR/docs/tdd.md"
+    local aflat vflat dflat
+    aflat="$(flatten_file "$a")"
+    vflat="$(flatten_file "$v")"
+    dflat="$(flatten_file "$d")"
+
+    assert_matches "$aflat" 'never skip RED' \
+        "sdd-apply still forbids skipping the failing test first" || return 1
+    assert_matches "$aflat" 'RED.{1,10}GREEN.{1,10}REFACTOR' \
+        "sdd-apply still names the full cycle" || return 1
+    assert_matches "$vflat" 'test-after detected' \
+        "sdd-verify still labels the TDD-process gap" || return 1
+    assert_matches "$vflat" 'NEVER CRITICAL' \
+        "the TDD audit's findings are still capped at WARNING" || return 1
+    assert_matches "$dflat" 'never CRITICAL' \
+        "the docs still describe the TDD audit as non-blocking" || return 1
+    return 0
+}
+
+echo -e "${BOLD}UNIT-S (issue #88): Work Unit Evidence in all modes${NC}"
+run_test "sdd-apply carries the Work Unit Evidence block in every mode" test_s_apply_carries_the_evidence_block_in_every_mode
+run_test "sdd-verify audits it (WARNING floor, CRITICAL on unbacked code claims)" test_s_verify_audits_it_with_the_warning_critical_split
+run_test "the evidence gate is reachable with TDD off (structural)" test_s_the_gate_is_reachable_with_tdd_off
+run_test "docs and sdd-tasks declare evidence always-on, TDD opt-in on top" test_s_docs_and_tasks_declare_evidence_always_on
+run_test "the opt-in TDD module's rules are not weakened" test_s_the_tdd_module_rules_are_not_weakened
+
 echo ""
 
 echo -e "${BOLD}UNIT-O (issues #93–#96): the two shipped hooks${NC}"
