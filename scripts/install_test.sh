@@ -10487,6 +10487,317 @@ run_test "the issue Decisions comment is offered, never automatic" test_m_the_is
 run_test "sdd-ff announces the gate it bypasses" test_m_sdd_ff_announces_the_bypass
 
 # ============================================================================
+# UNIT-Z (issue #125): every shipped skill is Kurama's own, and go-testing is not
+# one of them
+#
+# Four skills still carried `license: Apache-2.0` — inherited from the March 2026
+# parity syncs, where the tag was already set upstream. #124 called it five; it
+# was four. `go-testing` was deleted outright (the harness is stack-agnostic and
+# that file was the last place it was not), and the other three were rewritten in
+# our own words, so the tag on all three is now MIT and there is no Apache-2.0
+# left anywhere under skills/.
+#
+# The licence half is a provenance claim, which is why it gets a test rather than
+# a lint: a foreign tag on a file we wrote is not a formatting slip, it is false.
+# The deletion half needs one because a removal is exactly what an upstream sync
+# silently undoes — that is the whole reason the forbidden-claims gate exists, and
+# `go-testing` is now a line in it.
+#
+# NOTE on controls. Like UNIT-L, UNIT-P and UNIT-U, nothing here reads git
+# history: .github/workflows/pr-check.yml checks out at depth 1, so `origin/main`
+# is not a ref on CI and a history-based control would either fail there or
+# degrade to a vacuous skip. Every case asserts the new state directly.
+#
+# Mutation-checked by hand against origin/main materialized with
+# `git archive origin/main | tar -x -C <tmp>` — the tree, never the ref. On that
+# tree: `license: Apache-2.0` matches 5 lines across 4 files (skill-creator
+# declares it twice, once in its frontmatter and once in the template it taught);
+# those same 4 SKILL.md files declare no `license: MIT`; skills/go-testing/SKILL.md
+# exists, manifest.json lists it under a `lang` group and setup.sh's
+# SETUP_KNOWN_GROUPS still ends in `lang`; pr-check.yml's FORBIDDEN block holds a
+# single entry, `background-agents`; and all 16 upstream phrases below are present
+# in skills/skill-creator/SKILL.md. Each case fails there, and the last case
+# proves the scanners can fail at all by planting each violation back into a copy
+# of the current tree.
+# ============================================================================
+
+# Print every skills/<name>/SKILL.md under the tree rooted at $1, one per line.
+# Depth-1 on purpose: a SKILL.md two levels down is not an installed skill, and
+# counting it would let a stray fixture answer for a real one.
+z_skill_files() {
+    local root="$1" d
+    for d in "$root"/skills/*/; do
+        [ -f "${d}SKILL.md" ] && printf '%s\n' "${d}SKILL.md"
+    done
+    return 0
+}
+
+# Sixteen phrases the IMPORTED skill-creator carried verbatim, each present
+# exactly once in `git show origin/main:skills/skill-creator/SKILL.md`. Kept as
+# literal text rather than hashes so a reader can see what is being ruled out;
+# matched with grep -F, so the parentheses and backticks below are data.
+#
+# This is how "shares no sentence with the import" is asserted WITHOUT reading
+# git at test time. A phrase list is weaker than a full sentence diff, which is
+# why the count floor below is part of the contract: a list that shrank to two
+# generic strings would pass on anything.
+z_upstream_skill_creator_phrases() {
+    cat <<'PHRASES'
+Documentation already exists (create a reference instead)
+Pattern is trivial or self-explanatory
+Decision: assets/ vs references/
+should point to LOCAL files, not web URLs
+Always `Apache-2.0`
+Add Keywords section (agent searches frontmatter, not body)
+Skill doesn't already exist (check `skills/`)
+After creating the skill, add it to `AGENTS.md`
+Checklist Before Creating
+Naming Conventions
+Content Guidelines
+Skill identifier (lowercase, hyphens)
+Semantic version as string
+What + Trigger in one block
+Use tables for decision trees
+Include Commands section with copy-paste commands
+PHRASES
+}
+
+# Every "path:line:text" under $1/skills whose text declares a licence that is
+# not MIT. Empty output means the tree is clean.
+z_foreign_licence_hits() {
+    grep -rn '^license:' "$1/skills" 2>/dev/null | grep -v 'license: MIT$' || true
+}
+
+# Every SKILL.md under $1 that does NOT declare `license: MIT`, one path per line.
+z_skills_without_mit() {
+    local f
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        grep -q '^license: MIT$' "$f" || printf '%s\n' "$f"
+    done <<< "$(z_skill_files "$1")"
+    return 0
+}
+
+# Every upstream phrase still present in $1's skill-creator, one per line.
+z_surviving_upstream_phrases() {
+    local file="$1/skills/skill-creator/SKILL.md" p
+    [ -f "$file" ] || { printf '%s\n' "MISSING: $file"; return 0; }
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        grep -qF -- "$p" "$file" && printf '%s\n' "$p"
+    done <<< "$(z_upstream_skill_creator_phrases)"
+    return 0
+}
+
+# The FORBIDDEN block of .github/workflows/pr-check.yml — the lines strictly
+# between `FORBIDDEN='` and the closing quote. Each is "<pattern> <exempt paths>".
+# The workflow indents the block inside a YAML `run:` scalar and strips that
+# indentation itself before reading it, so this strips it too: an entry anchored
+# at `^` here has to be anchored the same way the gate sees it.
+z_forbidden_entries() {
+    awk "/FORBIDDEN='/ { f = 1; next } f && /^[[:space:]]*'/ { exit } f" \
+        "$1/.github/workflows/pr-check.yml" 2>/dev/null \
+        | awk '{ sub(/^[[:space:]]+/, ""); if (NF) print }'
+}
+
+test_z_no_skill_declares_a_foreign_licence() {
+    # Wrong-reason pass this guards against: a grep that reads nothing (skills/
+    # moved, the glob broken) reports "no hits" exactly like a clean tree. The
+    # scanned count is floor-checked first, so an empty scan fails loudly.
+    local files count
+    files="$(z_skill_files "$REPO_DIR")"
+    count=$(printf '%s\n' "$files" | awk 'NF { n++ } END { print n + 0 }')
+    if [ "$count" -lt 25 ]; then
+        echo "  the scan found $count SKILL.md files — it is not reading the skills tree"
+        return 1
+    fi
+
+    local hits
+    hits="$(z_foreign_licence_hits "$REPO_DIR")"
+    if [ -n "$hits" ]; then
+        echo "  a skill declares a licence that is not MIT:"
+        printf '%s\n' "$hits" | awk 'NR <= 5 { print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+test_z_every_skill_declares_mit() {
+    # Wrong-reason pass this guards against: the negative above is satisfied by a
+    # file with NO licence line at all. This one is the positive half — every
+    # SKILL.md must say MIT, not merely fail to say Apache-2.0.
+    local missing
+    missing="$(z_skills_without_mit "$REPO_DIR")"
+    if [ -n "$missing" ]; then
+        echo "  these skills do not declare 'license: MIT':"
+        printf '%s\n' "$missing" | awk '{ print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+test_z_go_testing_is_gone_from_the_tree() {
+    # Wrong-reason pass this guards against: deleting the directory while the
+    # manifest still lists it (the installers would then fail on a missing source)
+    # or while the `lang` group survives as dead configuration. All three are
+    # asserted, and the group is checked in the two scripts that validate it, not
+    # only in the manifest that declares it.
+    if [ -e "$REPO_DIR/skills/go-testing" ]; then
+        echo "  skills/go-testing is back"
+        return 1
+    fi
+    local manifest
+    manifest="$(flatten_file "$REPO_DIR/skills/manifest.json")"
+    assert_not_matches "$manifest" 'go-testing' \
+        "a manifest entry for the deleted skill" || return 1
+    assert_not_matches "$manifest" '"lang"' \
+        "the lang group, whose only member was go-testing" || return 1
+
+    local setup_groups
+    setup_groups="$(grep -n 'SETUP_KNOWN_GROUPS=' "$REPO_DIR/scripts/setup.sh" || true)"
+    assert_matches "$setup_groups" 'SETUP_KNOWN_GROUPS=' \
+        "setup.sh's known-groups list, where group names are validated" || return 1
+    assert_not_matches "$setup_groups" 'lang' \
+        "lang among setup.sh's known groups" || return 1
+
+    local validator
+    validator="$(grep -n 'sdd-core|quality|review|optional' "$REPO_DIR/scripts/validate_skills.sh" || true)"
+    assert_matches "$validator" 'sdd-core' \
+        "validate_skills.sh's group whitelist" || return 1
+    assert_not_matches "$validator" 'lang' \
+        "lang among the groups validate_skills.sh accepts" || return 1
+    return 0
+}
+
+test_z_go_testing_is_on_the_removals_list() {
+    # Wrong-reason pass this guards against: a `go-testing` string anywhere in the
+    # workflow file — a comment, an unrelated step — would satisfy a whole-file
+    # grep while the gate scanned for nothing. The FORBIDDEN block is extracted
+    # first and size-checked, then the entry is matched at the start of its own
+    # line, where the workflow's parser reads the pattern.
+    local entries
+    entries="$(z_forbidden_entries "$REPO_DIR")"
+    local n
+    n=$(printf '%s\n' "$entries" | awk 'NF { c++ } END { print c + 0 }')
+    if [ "$n" -lt 2 ]; then
+        echo "  the FORBIDDEN block came back with $n entr(y|ies) — the block moved or the"
+        echo "  extractor no longer finds it, and the assertion below would prove nothing"
+        return 1
+    fi
+    assert_matches "$entries" '^go-testing( |$)' \
+        "go-testing registered as a deliberately removed component" || return 1
+    assert_matches "$entries" '^go-testing .*docs/changelog\.md' \
+        "changelog.md exempted — it is history, not a live claim" || return 1
+    assert_matches "$entries" '^go-testing .*docs/migration\.md' \
+        "migration.md exempted — it carries the removal note" || return 1
+
+    # And the rule actually holds: no in-scope document still advertises it.
+    local stray
+    stray="$(grep -rniI 'go-testing' \
+        "$REPO_DIR/docs" "$REPO_DIR/README.md" "$REPO_DIR/examples" 2>/dev/null \
+        | grep -v '^.*/docs/changelog\.md:' | grep -v '^.*/docs/migration\.md:' || true)"
+    if [ -n "$stray" ]; then
+        echo "  a document outside the two exemptions still names go-testing:"
+        printf '%s\n' "$stray" | awk 'NR <= 5 { print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+test_z_skill_creator_keeps_no_sentence_from_the_import() {
+    # Wrong-reason pass this guards against: a phrase list that quietly shrank, or
+    # a skill-creator that was deleted rather than rewritten. The list is
+    # floor-checked at 16, and the file itself is size-checked, before the
+    # survival scan runs.
+    local phrases n
+    phrases="$(z_upstream_skill_creator_phrases)"
+    n=$(printf '%s\n' "$phrases" | awk 'NF { c++ } END { print c + 0 }')
+    if [ "$n" -lt 16 ]; then
+        echo "  the upstream phrase list is down to $n entries — restore it before trusting"
+        echo "  a green result from the scan below"
+        return 1
+    fi
+    local file="$REPO_DIR/skills/skill-creator/SKILL.md"
+    assert_file_not_empty "$file" || return 1
+    local bytes
+    bytes=$(wc -c < "$file" | tr -d ' ')
+    if [ "$bytes" -lt 3000 ]; then
+        echo "  skill-creator is ${bytes}B — it was gutted, not rewritten"
+        return 1
+    fi
+
+    local survivors
+    survivors="$(z_surviving_upstream_phrases "$REPO_DIR")"
+    if [ -n "$survivors" ]; then
+        echo "  skill-creator still carries text from the import:"
+        printf '%s\n' "$survivors" | awk 'NR <= 5 { print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+test_z_the_scanners_catch_a_planted_violation() {
+    # The mutation check that runs in CI. Each scanner above is pointed at a COPY
+    # of the real tree with one violation planted back into it, so a scanner that
+    # can only ever return empty — a broken glob, a grep against a path that moved
+    # — fails here instead of reporting a clean tree forever.
+    local w="$TEST_TMPDIR/z-planted"
+    mkdir -p "$w"
+    cp -R "$REPO_DIR/skills" "$w/skills" || { echo "could not copy the skills tree"; return 1; }
+
+    # 1. A foreign licence tag on a skill we wrote.
+    local victim="$w/skills/tdd/SKILL.md"
+    [ -f "$victim" ] || { echo "fixture skill missing: $victim"; return 1; }
+    awk '{ sub(/^license: MIT$/, "license: Apache-2.0"); print }' "$victim" > "$victim.tmp"
+    mv "$victim.tmp" "$victim"
+    if [ -z "$(z_foreign_licence_hits "$w")" ]; then
+        echo "  the licence scan missed a planted 'license: Apache-2.0'"
+        return 1
+    fi
+    if [ -z "$(z_skills_without_mit "$w")" ]; then
+        echo "  the MIT scan missed a skill that stopped declaring MIT"
+        return 1
+    fi
+
+    # 2. Upstream text back inside skill-creator.
+    printf '\nSemantic version as string\n' >> "$w/skills/skill-creator/SKILL.md"
+    local survivors
+    survivors="$(z_surviving_upstream_phrases "$w")"
+    if [ -z "$survivors" ]; then
+        echo "  the phrase scan missed a planted upstream sentence"
+        return 1
+    fi
+
+    # 3. A FORBIDDEN block that no longer registers the removal.
+    local wf="$w/.github/workflows"
+    mkdir -p "$wf"
+    {
+        printf "          FORBIDDEN='\n"
+        printf "          background-agents docs/changelog.md docs/migration.md\n"
+        printf "          '\n"
+    } > "$wf/pr-check.yml"
+    local entries
+    entries="$(z_forbidden_entries "$w")"
+    if [ -z "$entries" ]; then
+        echo "  the FORBIDDEN extractor read nothing from a block that has one entry"
+        return 1
+    fi
+    if grep -Eq '^go-testing( |$)' <<<"$entries"; then
+        echo "  the FORBIDDEN extractor invented an entry that is not in the block"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-Z (issue #125): MIT everywhere, go-testing nowhere${NC}"
+run_test "no skill declares a foreign licence" test_z_no_skill_declares_a_foreign_licence
+run_test "every skill declares license: MIT" test_z_every_skill_declares_mit
+run_test "go-testing and the lang group are gone from the tree" test_z_go_testing_is_gone_from_the_tree
+run_test "go-testing is registered as a deliberate removal" test_z_go_testing_is_on_the_removals_list
+run_test "skill-creator keeps no sentence from the import" test_z_skill_creator_keeps_no_sentence_from_the_import
+run_test "the scanners catch a planted violation" test_z_the_scanners_catch_a_planted_violation
+
+# ============================================================================
 # UNIT-Y (issue #107): the tree carries no origin references
 #
 # Kurama is an MIT fork. The licence's one condition is that the copyright and
