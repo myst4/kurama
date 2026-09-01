@@ -146,6 +146,11 @@ a degraded one.
   ```bash
   cat .kurama/skill-registry.md | head
   ```
+  Its mere presence proves nothing about `sdd-init`: `setup.sh` already built it at
+  install time (both run `skills/_shared/build-skill-registry.sh`). To see Step 4 do the
+  work, delete the file before running `/sdd-init` and confirm it comes back with the
+  `## User Skills` table and **no** summary or compact-rules section — the registry is an
+  index by construction.
 - Settings home for your pass:
   - **Pass B (openspec)**: `openspec/config.yaml` exists with a `rules.verify`
     block; `compliance_mode: behavioral` (test infra was detected).

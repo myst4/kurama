@@ -178,7 +178,7 @@ heard of.
 
 | Skill | Role |
 |-------|------|
-| `skill-registry` | Scan installed skills and project conventions into a project registry. |
+| `skill-registry` | Rebuild the project skill index by running `_shared/build-skill-registry.sh`. |
 | `skill-creator` | Author new Agent Skills that follow the open spec format. |
 
 ### Quality & delivery

@@ -4,7 +4,7 @@ Reference documentation for the SDD phase sub-agents and skill system. For quick
 
 ## SDD Phase Sub-Agents
 
-Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI assistant can follow. The preferred path is for the orchestrator to pre-resolve relevant skills from the registry and inject compact rules into each sub-agent prompt. Sub-agents still support registry/path fallback for backward compatibility.
+Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI assistant can follow. The preferred path is for the orchestrator to pre-resolve relevant skills from the registry and inject their `SKILL.md` paths into each sub-agent prompt. Sub-agents still support registry/path fallback for backward compatibility.
 
 | Sub-Agent | Skill File | What It Does |
 |-----------|-----------|-------------|
@@ -18,7 +18,7 @@ Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI ass
 | **Verifier** | `sdd-verify/SKILL.md` | Validates implementation against specs with real test execution. v2.0: spec compliance matrix |
 | **Archiver** | `sdd-archive/SKILL.md` | Merges delta specs into main specs, moves to archive |
 | **TDD Module** | `tdd/SKILL.md` | Optional RED-GREEN-REFACTOR cycle contract; loaded by `sdd-apply` when TDD resolves active, referenced by `sdd-tasks` and `sdd-verify`. Installed by default (`tdd` manifest group, `default: true`); activation stays opt-in per project — opt out of the module with `install.sh --without tdd` |
-| **Skill Registry** | `skill-registry/SKILL.md` | Scans user skills + project conventions, writes `.kurama/skill-registry.md` |
+| **Skill Registry** | `skill-registry/SKILL.md` | Runs `_shared/build-skill-registry.sh`, which writes `.kurama/skill-registry.md` (index only) |
 | **Judgment Day** | `judgment-day/SKILL.md` | Runs dual adversarial review with two blind judges and a fix loop |
 | **Go Testing** | `go-testing/SKILL.md` | Go test conventions, including Bubbletea and teatest patterns. `lang` group, OFF by default — opt in with `install.sh --with lang` |
 | **Skill Creator** | `skill-creator/SKILL.md` | Creates new reusable skills following the project skill spec |
@@ -49,7 +49,7 @@ Every sub-agent returns a structured envelope (`status`, `executive_summary`, `d
 
 ### Sub-Agent Context Protocol
 
-Sub-agents start with a **fresh context**. The canonical injection and fallback protocol — how the orchestrator resolves the registry, matches skills, injects compact rules as `## Project Standards (auto-resolved)`, and how sub-agents report `skill_resolution` back — lives in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md); this section only summarizes it: if no `## Project Standards` block arrives, sub-agents fall back to registry lookup or explicit `SKILL: Load` paths.
+Sub-agents start with a **fresh context**. The canonical injection and fallback protocol — how the orchestrator resolves the registry, matches skills, injects their paths as `## Project Standards (skills to load)`, and how sub-agents report `skill_resolution` back — lives in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md); this section only summarizes it: if no `## Project Standards` block arrives, sub-agents fall back to registry lookup or explicit `SKILL: Load` paths.
 
 Sub-agents are also instructed to save discoveries, decisions, and bug fixes to engram automatically (non-SDD sub-agents) or via the mandatory persist step (SDD phases).
 
@@ -68,7 +68,7 @@ The same contract closes the cycle it opens: once the envelope has been read, va
 | `persistence-contract.md` | Mode resolution rules, sub-agent context protocol, skill registry loading protocol |
 | `engram-convention.md` | Supplementary reference for deterministic naming (`sdd/{change-name}/{artifact-type}`) and two-step recovery. Critical calls are inlined in skills. |
 | `openspec-convention.md` | Filesystem paths for each artifact, directory structure, config.yaml reference, and archive layout. **Not** the upstream OpenSpec CLI format — see the note at the top of that file. |
-| `skill-resolver.md` | **Canonical** protocol for delegators to inject compact rules from the skill registry |
+| `skill-resolver.md` | **Canonical** protocol for delegators to resolve skills from the registry and inject their paths |
 | `review-ledger-contract.md` | **Canonical** shared contract for the 4R review lenses + refuter: sweep budget, precision gate, candidate-causal admission, findings-ledger schema, adversarial verification, severity floor, and artifact-store-aware persistence. |
 | `test-runners.md` | Per-runner detect → full-suite + single-test command table, used by the optional TDD module (`skills/tdd/SKILL.md`) |
 
@@ -123,23 +123,28 @@ or in the `.kurama/sdd/` fallback when Engram is unavailable).
 
 ## Skill Registry
 
-Sub-agents start with a **fresh context** — they do not know what user skills exist (React, TDD, Playwright, etc.). The skill registry solves this, and the orchestrator uses it to inject compact rules before each delegation.
+Sub-agents start with a **fresh context** — they do not know what user skills exist (React, TDD, Playwright, etc.). The skill registry solves this: the orchestrator looks a skill up in it and passes that skill's `SKILL.md` path into the delegation.
 
-**How the registry gets built:**
-1. `/sdd-init` or `/skill-registry` scans your installed skills and project conventions
-2. Writes `.kurama/skill-registry.md` in the project root (mode-independent, always created)
-3. If engram is available, also saves to engram (cross-session bonus)
+**How the registry gets built:** by a script, [`skills/_shared/build-skill-registry.sh`](../skills/_shared/build-skill-registry.sh). It reads two frontmatter fields per `SKILL.md` and writes the file atomically in well under a second. It runs at four points, and nothing else ever writes the file:
 
-Once the registry exists, resolving it and injecting compact rules into each delegation follows the canonical protocol in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) — see that file for the full resolution order, injection format, fallback chain, and the `skill_resolution` feedback loop.
+1. `setup.sh`, at the end of a project-scope install — the set of installed skills just changed by definition
+2. `update.sh`, on every project re-sync
+3. `/sdd-init` Step 4
+4. `/skill-registry`, on demand
 
-**Preferred path:** the orchestrator pre-resolves compact rules. Sub-agent self-loading is only a compatibility fallback.
+The skill and `sdd-init` **run that script** — neither scans the directories itself, and there is no fallback scan. One implementation, or two that drift apart. A missing script is a broken install: both stop and say so, and `doctor.sh` reports it.
 
-**What it contains:**
+If engram is available the registry is also saved there (`topic_key: skill-registry`), as a cross-session bonus. The file on disk is the guarantee.
+
+Once the registry exists, resolving it and injecting skills into each delegation follows the canonical protocol in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) — see that file for the full resolution order, injection format, fallback chain, and the `skill_resolution` feedback loop.
+
+**What it contains — an index, not a summary:**
 - User skills table: trigger → skill name → path (e.g., "React components" → `react-19` → `~/.claude/skills/react-19/SKILL.md`)
-- Compact rules blocks: short, pre-digested instructions that delegators paste directly into sub-agent prompts
-- Project conventions found: `agents.md`, `AGENTS.md`, `CLAUDE.md`, etc.
+- Project conventions found: `agents.md`, `AGENTS.md`, `CLAUDE.md`, plus every `.md` path an index file references that actually exists
 
-**When to update:** Run `/skill-registry` after installing or removing skills.
+There are deliberately **no pre-digested summaries**. A delegator passes the path and the sub-agent reads the full skill: a full read is authoritative, a digest is lossy and goes stale silently. Producing those digests was 63% of a build that used to take twelve minutes.
+
+**When to update:** installs and re-syncs already do it. Run `/skill-registry` after installing or removing skills by hand.
 
 ---
 
