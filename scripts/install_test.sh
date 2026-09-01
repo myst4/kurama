@@ -10247,6 +10247,792 @@ run_test "archive gate's throwaway index cannot be pre-empted (#96)" test_o_arch
 echo ""
 
 # ============================================================================
+# UNIT-T (issue #89): the delta-spec linter and the three skills that run it
+#
+# Skills are validated mechanically by validate_skills.sh; change artifacts
+# never were. A delta spec with a partial MODIFIED block, a scenario without
+# GIVEN/WHEN/THEN, a missing RFC 2119 keyword, a leftover placeholder or a
+# dangling RENAMED reached sdd-archive, which merges it into openspec/specs/ —
+# the source of truth, with sdd-archive as its ONLY writer. #80 fixed the worst
+# data-loss case by prose; skills/_shared/lint-spec.sh is the mechanical half.
+#
+# Every case below asserts the LEVEL line, not just the exit code: a linter that
+# exits 1 for the wrong reason is worse than one that exits 0, because it trains
+# the reader to stop looking at the message.
+# ============================================================================
+
+LINT_SPEC="$REPO_DIR/skills/_shared/lint-spec.sh"
+
+# Write the remaining arguments as lines of the file $1, creating its parents.
+# Line-by-line rather than a heredoc so a fixture can be built from a loop (the
+# five-scenario baseline) with the same helper as a literal one.
+t_write() {
+    local f="$1"; shift
+    mkdir -p "$(dirname "$f")"
+    printf '%s\n' "$@" > "$f"
+}
+
+# Run the linter, leaving its combined output in T_OUT and its status in
+# T_STATUS. errexit is disarmed only around the call — a non-zero exit IS the
+# subject of most of these tests.
+t_lint() {
+    local status=0
+    set +e
+    T_OUT=$(bash "$LINT_SPEC" "$@" 2>&1)
+    status=$?
+    set -e
+    T_STATUS=$status
+}
+
+# Case-SENSITIVE finding assertion. assert_matches is grep -Ei, which cannot
+# tell an `ERROR:` level from the word "error" inside a message — and the level
+# is precisely what sdd-verify and sdd-archive branch on.
+t_assert_line() {
+    local out="$1" pattern="$2" what="$3"
+    if printf '%s\n' "$out" | grep -Eq "$pattern"; then
+        return 0
+    fi
+    echo "  no finding line matched: $what"
+    echo "    (pattern: $pattern)"
+    echo "    the linter said:"
+    printf '%s\n' "$out" | awk '{ print "      " $0 }'
+    return 1
+}
+
+t_assert_no_line() {
+    local out="$1" pattern="$2" what="$3"
+    if printf '%s\n' "$out" | grep -Eq "$pattern"; then
+        echo "  the linter must NOT have reported: $what"
+        printf '%s\n' "$out" | grep -En "$pattern" | head -3 | awk '{ print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+# A structurally perfect delta: all four sections, RFC 2119 keywords, stable
+# unique IDs, full GIVEN/WHEN/THEN, reasons on REMOVED, both names on RENAMED.
+# Every negative fixture below is this file with ONE property broken, so a test
+# that fails is pointing at that property and not at fixture noise.
+t_write_clean_delta() {
+    t_write "$1" \
+        '# Delta for Auth' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system MUST expire a session after 30 minutes of inactivity.' \
+        '' \
+        '#### Scenario: [S-session-1] Idle session expires' \
+        '' \
+        '- GIVEN a session idle for 30 minutes' \
+        '- WHEN the user issues any request' \
+        '- THEN the request is rejected with 401' \
+        '' \
+        '#### Scenario: [S-session-2] Active session survives' \
+        '' \
+        '- GIVEN a session with activity in the last minute' \
+        '- WHEN the user issues any request' \
+        '- THEN the request is served' \
+        '' \
+        '## REMOVED Requirements' \
+        '' \
+        '### Requirement: Legacy Cookie Auth' \
+        '' \
+        '(Reason: replaced by bearer tokens)' \
+        '(Migration: clients send the Authorization header)' \
+        '' \
+        '## RENAMED Requirements' \
+        '' \
+        '### Requirement: Login Flow -> Sign-in Flow' \
+        '' \
+        '(Reason: matches the product vocabulary)' \
+        '(Migration: None)'
+}
+
+# The five-scenario baseline the #80 case is measured against.
+t_write_baseline_main_spec() {
+    local f="$1" n
+    mkdir -p "$(dirname "$f")"
+    {
+        printf '%s\n' '# Auth Specification' '' '## Purpose' '' \
+            'Authentication behaviour.' '' '## Requirements' '' \
+            '### Requirement: Session Expiration' '' \
+            'The system MUST expire a session after 30 minutes of inactivity.' ''
+        for n in 1 2 3 4 5; do
+            printf '#### Scenario: [S-session-%s] Case %s\n\n' "$n" "$n"
+            printf -- '- GIVEN a precondition %s\n' "$n"
+            printf -- '- WHEN an action %s\n' "$n"
+            printf -- '- THEN an outcome %s\n\n' "$n"
+        done
+    } > "$f"
+}
+
+test_t_the_linter_ships_and_is_a_well_formed_shell_script() {
+    # It lives in _shared because that is the directory every install already
+    # copies and every skill already references. Shipping it under scripts/
+    # would put it somewhere the installed harness cannot reach at all.
+    assert_file_exists "$LINT_SPEC" || return 1
+    assert_file_not_empty "$LINT_SPEC" 2000 || return 1
+    head -n 1 "$LINT_SPEC" | grep -q '^#!.*bash' \
+        || { echo "lint-spec.sh has no bash shebang"; return 1; }
+
+    if command -v shellcheck > /dev/null 2>&1; then
+        local out status=0
+        set +e
+        out=$(shellcheck "$LINT_SPEC" 2>&1)
+        status=$?
+        set -e
+        if [ "$status" -ne 0 ]; then
+            echo "shellcheck rejected skills/_shared/lint-spec.sh:"
+            printf '%s\n' "$out" | head -20 | awk '{ print "    " $0 }'
+            return 1
+        fi
+    fi
+    return 0
+}
+
+test_t_the_linter_is_portable_bash_3_2() {
+    # It runs on USER machines, where bash is whatever the OS shipped — 3.2 on
+    # macOS — and where rg/fd/jq are not assumed to exist (#13). A bash-4-only
+    # construct here fails on exactly the platform the harness ships to most.
+    #
+    # Scanned with full-line comments blanked out (line numbers preserved): the
+    # script's own header DOCUMENTS the ban by naming mapfile and ${var,,}, and
+    # a checker that cannot tell a banned construct from a note about it forces
+    # the next author to delete the explanation to get green.
+    local code="$TEST_TMPDIR/lint-spec.code"
+    sed 's|^[[:space:]]*#.*$||' "$LINT_SPEC" > "$code"
+    grep -Eq 'lint_file|structural_pass' "$code" \
+        || { echo "the comment-stripped copy lost the script body — the scan below would pass vacuously"; return 1; }
+
+    local banned
+    for banned in 'mapfile' 'readarray' 'declare -A' 'local -A' '\$\{[A-Za-z_][A-Za-z0-9_]*,,' '\$\{[A-Za-z_][A-Za-z0-9_]*\^\^'; do
+        if grep -Eq "$banned" "$code"; then
+            echo "lint-spec.sh uses a bash-4-only construct ($banned):"
+            grep -En "$banned" "$code" | head -3 | awk '{ print "    " $0 }'
+            return 1
+        fi
+    done
+    # Dependency ban: the shipped script may only reach for the POSIX toolbox.
+    local dep
+    for dep in '(^|[^-[:alnum:]_/])rg ' '(^|[^-[:alnum:]_/])fd ' '(^|[^-[:alnum:]_/])jq '; do
+        if grep -Eq "$dep" "$code"; then
+            echo "lint-spec.sh reaches for a non-POSIX dependency ($dep):"
+            grep -En "$dep" "$code" | head -3 | awk '{ print "    " $0 }'
+            return 1
+        fi
+    done
+
+    # And it actually runs with bash's POSIX behaviour armed, over a real spec —
+    # a grep for banned words cannot prove that, and --help alone would exit
+    # before touching awk, sort or the temp files.
+    local spec="$TEST_TMPDIR/posix/spec.md"
+    t_write_clean_delta "$spec"
+    local status=0
+    set +e
+    bash --posix "$LINT_SPEC" "$spec" > /dev/null 2>&1
+    status=$?
+    set -e
+    assert_eq "0" "$status" "bash --posix could not run the linter over a clean spec" || return 1
+    return 0
+}
+
+test_t_a_clean_delta_is_silent_and_exits_zero() {
+    # The control for every case below: if this fixture ever reports something,
+    # the negative tests are proving nothing about the property they name.
+    local spec="$TEST_TMPDIR/clean/spec.md"
+    t_write_clean_delta "$spec"
+    t_lint "$spec"
+    assert_eq "0" "$T_STATUS" "a structurally clean delta must exit 0" || return 1
+    if [ -n "$T_OUT" ]; then
+        echo "  a clean delta must produce NO output; got:"
+        printf '%s\n' "$T_OUT" | awk '{ print "    " $0 }'
+        return 1
+    fi
+    return 0
+}
+
+test_t_an_unknown_delta_section_is_an_error() {
+    # openspec-convention.md -> Delta Spec Sections defines exactly four. A fifth
+    # merges as nothing at all: sdd-archive has no branch for it, so every
+    # requirement underneath is silently dropped on the floor.
+    local spec="$TEST_TMPDIR/section/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system MUST expire a session.' \
+        '' \
+        '#### Scenario: [S-session-1] Idle session expires' \
+        '' \
+        '- GIVEN an idle session' \
+        '- WHEN the user issues a request' \
+        '- THEN the request is rejected' \
+        '' \
+        '## DELETED Requirements' \
+        '' \
+        '### Requirement: Old Thing' \
+        '' \
+        '(Reason: gone)'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "an unknown delta section must exit 1" || return 1
+    t_assert_line "$T_OUT" ':15: ERROR: unknown delta section .## DELETED Requirements.' \
+        "the DELETED section named on its own line, as an ERROR" || return 1
+    t_assert_line "$T_OUT" 'ADDED / MODIFIED / REMOVED / RENAMED' \
+        "the finding naming the canonical set" || return 1
+    return 0
+}
+
+test_t_a_requirement_without_an_rfc_2119_keyword_is_an_error() {
+    # "Use RFC 2119 keywords" is a rules.specs line in every generated
+    # config.yaml and a Rules bullet in sdd-spec. Without one, requirement
+    # STRENGTH is unstated, and sdd-verify's compliance matrix — which treats a
+    # MUST scenario without a passing test as CRITICAL — has nothing to grade.
+    local spec="$TEST_TMPDIR/rfc/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system expires a session after a while.' \
+        '' \
+        '#### Scenario: [S-session-1] Idle session expires' \
+        '' \
+        '- GIVEN an idle session' \
+        '- WHEN the user issues a request' \
+        '- THEN the request is rejected'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "a requirement with no RFC 2119 keyword must exit 1" || return 1
+    t_assert_line "$T_OUT" ':5: ERROR: requirement .Session Expiration. states no RFC 2119 keyword' \
+        "the requirement named at its own heading line, as an ERROR" || return 1
+    return 0
+}
+
+test_t_a_requirement_without_a_scenario_is_an_error() {
+    # sdd-spec: "Every requirement MUST have at least ONE scenario". A
+    # requirement with none is untestable by construction — sdd-verify can only
+    # build a compliance matrix out of scenarios.
+    local spec="$TEST_TMPDIR/noscen/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system MUST expire a session after 30 minutes.'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "a requirement with no scenario must exit 1" || return 1
+    t_assert_line "$T_OUT" ':5: ERROR: requirement .Session Expiration. carries no .#### Scenario:. block' \
+        "the scenario-less requirement, as an ERROR" || return 1
+    return 0
+}
+
+test_t_a_scenario_missing_given_when_then_is_an_error() {
+    # The finding must name WHICH of the three is missing: "malformed scenario"
+    # sends the author back to read the whole block, and the whole point of a
+    # mechanical check is that it already knows.
+    local spec="$TEST_TMPDIR/gwt/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system MUST expire a session.' \
+        '' \
+        '#### Scenario: [S-session-1] Idle session expires' \
+        '' \
+        '- GIVEN an idle session' \
+        '- THEN the request is rejected'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "a scenario without WHEN must exit 1" || return 1
+    t_assert_line "$T_OUT" ':9: ERROR: scenario .*is missing WHEN' \
+        "the missing keyword named explicitly, as an ERROR" || return 1
+    t_assert_no_line "$T_OUT" 'is missing GIVEN' \
+        "GIVEN as missing — it is present in the fixture" || return 1
+    return 0
+}
+
+test_t_malformed_and_duplicate_scenario_ids_are_errors() {
+    # IDs are STABLE for the life of the requirement: sdd-tasks and sdd-verify
+    # reference them, and the TDD audit looks for them inside test names. A
+    # duplicate makes every one of those references ambiguous.
+    local spec="$TEST_TMPDIR/ids/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system MUST expire a session.' \
+        '' \
+        '#### Scenario: [S-session-1] Idle session expires' \
+        '' \
+        '- GIVEN an idle session' \
+        '- WHEN the user issues a request' \
+        '- THEN the request is rejected' \
+        '' \
+        '#### Scenario: [S-session-1] Active session survives' \
+        '' \
+        '- GIVEN an active session' \
+        '- WHEN the user issues a request' \
+        '- THEN the request is served' \
+        '' \
+        '#### Scenario: [SESSION9] Expired token is refused' \
+        '' \
+        '- GIVEN an expired token' \
+        '- WHEN the user issues a request' \
+        '- THEN the request is rejected'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "duplicate and malformed IDs must exit 1" || return 1
+    t_assert_line "$T_OUT" ':15: ERROR: duplicate scenario ID .\[S-session-1\]. - already used on line 9' \
+        "the duplicate ID, naming BOTH lines, as an ERROR" || return 1
+    t_assert_line "$T_OUT" ':21: ERROR: malformed scenario ID .\[SESSION9\]' \
+        "the malformed ID, as an ERROR" || return 1
+    return 0
+}
+
+test_t_a_partial_modified_block_names_the_baseline_count() {
+    # THE #80 case, made mechanical. A five-scenario requirement whose author
+    # pastes only the scenario they edited archives as a one-scenario
+    # requirement: sdd-archive replaces the whole matching block and cannot tell
+    # a deliberate deletion from an incomplete paste. The finding has to name
+    # the baseline count, because that number is the whole argument.
+    local proj="$TEST_TMPDIR/proj"
+    t_write_baseline_main_spec "$proj/openspec/specs/auth/spec.md"
+    local delta="$proj/openspec/changes/add-mfa/specs/auth/spec.md"
+    t_write "$delta" \
+        '# Delta for Auth' \
+        '' \
+        '## MODIFIED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system MUST expire a session after 15 minutes of inactivity.' \
+        '(Previously: the timeout was 30 minutes)' \
+        '' \
+        '#### Scenario: [S-session-3] Case 3' \
+        '' \
+        '- GIVEN a precondition 3' \
+        '- WHEN an action 3' \
+        '- THEN an outcome 3'
+
+    # The baseline itself must be clean, or the assertions below are measuring
+    # a broken fixture rather than the delta.
+    t_lint "$proj/openspec/specs/auth/spec.md"
+    assert_eq "0" "$T_STATUS" "the five-scenario baseline fixture must itself lint clean" || return 1
+
+    t_lint "$delta"
+    assert_eq "1" "$T_STATUS" "a MODIFIED block that drops scenarios must exit 1" || return 1
+    t_assert_line "$T_OUT" ':5: ERROR: MODIFIED requirement .Session Expiration. carries 1 scenario' \
+        "the partial MODIFIED block, as an ERROR at the requirement heading" || return 1
+    t_assert_line "$T_OUT" 'currently has 5' \
+        "the baseline count named in the finding" || return 1
+    t_assert_line "$T_OUT" '4 scenario\(s\) would be DELETED' \
+        "the consequence stated as a count of losses" || return 1
+
+    # Control 1: the SAME delta carrying the full block is clean. Without this,
+    # the test above would also pass for a linter that rejects every MODIFIED.
+    local full="$proj/openspec/changes/add-mfa/specs/auth/spec.md"
+    {
+        printf '%s\n' '# Delta for Auth' '' '## MODIFIED Requirements' '' \
+            '### Requirement: Session Expiration' '' \
+            'The system MUST expire a session after 15 minutes of inactivity.' \
+            '(Previously: the timeout was 30 minutes)' ''
+        local n
+        for n in 1 2 3 4 5; do
+            printf '#### Scenario: [S-session-%s] Case %s\n\n' "$n" "$n"
+            printf -- '- GIVEN a precondition %s\n' "$n"
+            printf -- '- WHEN an action %s\n' "$n"
+            printf -- '- THEN an outcome %s\n\n' "$n"
+        done
+    } > "$full"
+    t_lint "$full"
+    assert_eq "0" "$T_STATUS" "a MODIFIED block carrying the FULL baseline must lint clean" || return 1
+
+    # Control 2: with no baseline to compare against, the check is SKIPPED, not
+    # guessed. Inventing a loss against an absent main spec would make the
+    # linter unusable on a first cycle, where every domain is an empty baseline.
+    t_write "$delta" \
+        '# Delta for Auth' \
+        '' \
+        '## MODIFIED Requirements' \
+        '' \
+        '### Requirement: Session Expiration' \
+        '' \
+        'The system MUST expire a session after 15 minutes of inactivity.' \
+        '' \
+        '#### Scenario: [S-session-3] Case 3' \
+        '' \
+        '- GIVEN a precondition 3' \
+        '- WHEN an action 3' \
+        '- THEN an outcome 3'
+    mkdir -p "$TEST_TMPDIR/empty-specs"
+    t_lint --specs "$TEST_TMPDIR/empty-specs" "$delta"
+    assert_eq "0" "$T_STATUS" "with no baseline in the main-spec tree the MODIFIED check must be skipped" || return 1
+    return 0
+}
+
+test_t_a_renamed_entry_must_name_both_requirements() {
+    # A RENAMED entry rewrites a heading in place and KEEPS the scenarios. With
+    # only one name the merger has nothing to match on — and modelling the
+    # rename as REMOVED + ADDED instead discards the scenario history and every
+    # stable ID downstream phases hold.
+    local spec="$TEST_TMPDIR/renamed/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## RENAMED Requirements' \
+        '' \
+        '### Requirement: Login Flow' \
+        '' \
+        '(Reason: matches the product vocabulary)'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "a one-sided RENAMED entry must exit 1" || return 1
+    t_assert_line "$T_OUT" ':5: ERROR: RENAMED requirement .Login Flow. names only one requirement' \
+        "the dangling rename, as an ERROR" || return 1
+    return 0
+}
+
+test_t_placeholders_error_and_open_markers_warn() {
+    # Template braces are an ERROR because they mean the writer shipped the
+    # TEMPLATE; TBD/TODO/XXX are a WARNING because they are a real sentence with
+    # an open question in it. The two levels are the whole distinction.
+    local spec="$TEST_TMPDIR/placeholder/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: {Requirement Name}' \
+        '' \
+        'The system MUST reject a request when the token is TBD.' \
+        '' \
+        '#### Scenario: [S-session-1] Idle session expires' \
+        '' \
+        '- GIVEN an idle session' \
+        '- WHEN the user issues a request' \
+        '- THEN the request is rejected'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "a spec with leftover placeholders must exit 1" || return 1
+    t_assert_line "$T_OUT" ':5: ERROR: unfilled template placeholder \{Requirement Name\}' \
+        "the unreplaced template brace, as an ERROR" || return 1
+    t_assert_line "$T_OUT" ':7: WARNING: placeholder marker \(TBD / TODO / XXX\)' \
+        "the open marker, as a WARNING and not an ERROR" || return 1
+    return 0
+}
+
+test_t_a_removed_entry_without_a_reason_is_an_error() {
+    # A REMOVED block deletes a requirement from the source of truth, and the
+    # reason is the only record of WHY once the requirement itself is gone.
+    # openspec-convention.md -> Delta Spec Sections says the delta MUST carry
+    # `(Reason: ...)`, so this is an ERROR: the canonical contract decides the
+    # level, not how survivable the omission feels. Downgrading it here would
+    # make the linter and the convention disagree about the same sentence.
+    local spec="$TEST_TMPDIR/removed/spec.md"
+    t_write "$spec" \
+        '# Delta for Auth' \
+        '' \
+        '## REMOVED Requirements' \
+        '' \
+        '### Requirement: Legacy Cookie Auth' \
+        '' \
+        '(Migration: clients send the Authorization header)'
+    t_lint "$spec"
+    assert_eq "1" "$T_STATUS" "a reasonless REMOVED entry must exit 1" || return 1
+    t_assert_line "$T_OUT" ':5: ERROR: REMOVED requirement .Legacy Cookie Auth. carries no' \
+        "the reasonless removal, as an ERROR (the convention says MUST)" || return 1
+    t_assert_no_line "$T_OUT" ': WARNING:' \
+        "a WARNING — that was the pre-convention level and must not come back" || return 1
+    return 0
+}
+
+test_t_a_change_directory_argument_lints_its_domain_specs() {
+    # The three skills call it with the CHANGE directory, not a file: a change
+    # can span several domains, and asking each caller to enumerate them is how
+    # a domain gets skipped. The narrow expansion (specs/ or spec.md) is also
+    # what keeps proposal.md — which carries `## Design (inline)` on the small
+    # path — from being linted as a delta spec.
+    local change="$TEST_TMPDIR/changes/add-mfa"
+    t_write "$change/proposal.md" \
+        '# Proposal' '' '## Design (inline)' '' 'Not a delta spec section.'
+    t_write_clean_delta "$change/specs/auth/spec.md"
+    t_write "$change/specs/billing/spec.md" \
+        '# Delta for Billing' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Invoice Export' \
+        '' \
+        'The system MUST export an invoice as PDF.' \
+        '' \
+        '#### Scenario: [S-invoice-1] Export succeeds' \
+        '' \
+        '- GIVEN a settled invoice' \
+        '- THEN a PDF is produced'
+    # A domain file that is NOT named spec.md. The convention is
+    # {domain}/spec.md, but a flat specs/{domain}.md is the obvious drift, and a
+    # spec the linter silently skips is indistinguishable from a spec that
+    # passed — so the specs/ path component has to be enough on its own.
+    t_write "$change/specs/reporting.md" \
+        '# Delta for Reporting' \
+        '' \
+        '## ADDED Requirements' \
+        '' \
+        '### Requirement: Weekly Digest' \
+        '' \
+        'The digest is sent on Mondays.'
+
+    t_lint "$change"
+    assert_eq "1" "$T_STATUS" "a change dir with broken domains must exit 1" || return 1
+    t_assert_line "$T_OUT" 'specs/billing/spec\.md:9: ERROR: scenario .*is missing WHEN' \
+        "the finding attributed to the billing domain file ({domain}/spec.md)" || return 1
+    t_assert_line "$T_OUT" 'specs/reporting\.md:5: ERROR: requirement .Weekly Digest. states no RFC 2119' \
+        "the finding attributed to the flat specs/{domain}.md file" || return 1
+    t_assert_no_line "$T_OUT" 'specs/auth/spec\.md' \
+        "any finding against the clean auth domain" || return 1
+    t_assert_no_line "$T_OUT" 'proposal\.md' \
+        "a finding against proposal.md — it is not a delta spec" || return 1
+    return 0
+}
+
+test_t_usage_errors_exit_two_and_never_report_a_pass() {
+    # Exit 2 is reserved for "the linter did not run". Collapsing it into 0
+    # would make a typo in a skill's invocation read as a clean spec — the same
+    # fail-open class as #41, in the one script whose whole job is to be trusted.
+    local status=0
+    set +e
+    bash "$LINT_SPEC" > /dev/null 2>&1
+    status=$?
+    set -e
+    assert_eq "2" "$status" "no arguments must exit 2" || return 1
+
+    set +e
+    bash "$LINT_SPEC" "$TEST_TMPDIR/does-not-exist.md" > /dev/null 2>&1
+    status=$?
+    set -e
+    assert_eq "2" "$status" "a missing path must exit 2, never 0" || return 1
+
+    mkdir -p "$TEST_TMPDIR/no-specs-here"
+    set +e
+    bash "$LINT_SPEC" "$TEST_TMPDIR/no-specs-here" > /dev/null 2>&1
+    status=$?
+    set -e
+    assert_eq "2" "$status" "a directory holding no spec files must exit 2, never a silent 0" || return 1
+
+    set +e
+    bash "$LINT_SPEC" --help > /dev/null 2>&1
+    status=$?
+    set -e
+    assert_eq "0" "$status" "--help must exit 0" || return 1
+    return 0
+}
+
+test_t_kuramas_own_delta_specs_lint_clean() {
+    # Dogfood: the repo's own change artifacts are the only delta specs in the
+    # tree that nobody wrote for this test. If the linter cannot pass them, its
+    # rules are stricter than the convention it claims to enforce.
+    local changes="$REPO_DIR/openspec/changes"
+    [ -d "$changes" ] || return 0
+    local found=0 d status=0
+    for d in "$changes"/*/; do
+        [ -d "${d}specs" ] || continue
+        found=1
+        set +e
+        local out
+        out=$(bash "$LINT_SPEC" "${d}specs" 2>&1)
+        status=$?
+        set -e
+        if [ "$status" -ne 0 ]; then
+            echo "the linter rejects Kurama's own delta spec ${d}specs:"
+            printf '%s\n' "$out" | head -10 | awk '{ print "    " $0 }'
+            return 1
+        fi
+    done
+    assert_eq "1" "$found" "no openspec change with a specs/ directory was found to dogfood against" || return 1
+    return 0
+}
+
+test_t_sdd_spec_lints_its_own_output_before_persisting() {
+    # The writer is the cheapest place to catch a structural defect: it still
+    # has the baseline it read in Step 3 and the intent it was given. Catching
+    # the same defect at archive time costs a blocked cycle.
+    local f="$REPO_DIR/skills/sdd-spec/SKILL.md"
+    assert_file_exists "$f" || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    assert_matches "$flat" '_shared/lint-spec\.sh' \
+        "sdd-spec naming the linter by its _shared home" || return 1
+    assert_matches "$flat" 'Step 4b' \
+        "the lint step sitting before Step 5 (persist)" || return 1
+    assert_matches "$flat" 'fail-loud existence check' \
+        "the #41 rule: resolve the script with test -f, never a finder" || return 1
+    assert_matches "$flat" '\[ -f skills/_shared/lint-spec\.sh \]' \
+        "the concrete test -f probe, not a bare invocation" || return 1
+    assert_matches "$flat" 'status: blocked' \
+        "the blocked envelope for findings it cannot resolve" || return 1
+    assert_matches "$flat" 'NEVER report a lint pass you did not run' \
+        "the ban on claiming a clean lint when the script is absent" || return 1
+    return 0
+}
+
+test_t_sdd_verify_gates_on_the_linter_at_critical() {
+    # sdd-verify is the quality gate, and CRITICAL is the level sdd-archive
+    # refuses on. Reporting lint ERRORs as WARNINGs would let every structural
+    # defect through the one phase whose job is to stop them.
+    local f="$REPO_DIR/skills/sdd-verify/SKILL.md"
+    assert_file_exists "$f" || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    assert_matches "$flat" '_shared/lint-spec\.sh' \
+        "sdd-verify naming the linter by its _shared home" || return 1
+    assert_matches "$flat" '\[ -f skills/_shared/lint-spec\.sh \]' \
+        "the test -f probe (#41 fail-loud)" || return 1
+    assert_matches "$flat" 'Every .ERROR:. line is a CRITICAL issue' \
+        "the ERROR -> CRITICAL mapping stated as a rule" || return 1
+    assert_matches "$flat" 'WARNING:. line is a WARNING' \
+        "WARNING findings staying non-blocking" || return 1
+    assert_matches "$flat" 'NEVER report a lint pass you did not run' \
+        "the ban on a silent pass when the script is absent" || return 1
+    return 0
+}
+
+test_t_sdd_archive_refuses_to_merge_a_spec_with_errors() {
+    # sdd-archive is the ONLY writer of openspec/specs/. A refusal here is the
+    # last mechanical stop before a malformed requirement becomes the source of
+    # truth — and in engram mode there is no git history to recover it from.
+    local f="$REPO_DIR/skills/sdd-archive/SKILL.md"
+    assert_file_exists "$f" || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+
+    assert_matches "$flat" '_shared/lint-spec\.sh' \
+        "sdd-archive naming the linter by its _shared home" || return 1
+    assert_matches "$flat" '\[ -f skills/_shared/lint-spec\.sh \]' \
+        "the test -f probe (#41 fail-loud)" || return 1
+    assert_matches "$flat" 'Step 1a' \
+        "the gate as a numbered step ahead of Step 2 (the merge), not a passing remark" || return 1
+    assert_matches "$flat" 'An .ERROR:. line REFUSES the merge' \
+        "the refusal, in sdd-archive's own refusal idiom" || return 1
+    assert_matches "$flat" 'next_recommended: sdd-spec' \
+        "the refusal routing back to the phase that can fix it" || return 1
+    assert_matches "$flat" 'Do NOT merge the clean domains and skip the broken one' \
+        "the ban on a partial merge around the refusal" || return 1
+    assert_matches "$flat" 'BEFORE any merge' \
+        "the gate running before anything is written" || return 1
+    return 0
+}
+
+test_t_the_linter_wiring_is_new_on_this_branch() {
+    # Mutation guard for the four assertions above: they pass trivially if the
+    # phrases were already in the skills. origin/main is the baseline, and it
+    # must carry ZERO hits.
+    if ! git -C "$REPO_DIR" rev-parse --verify --quiet origin/main > /dev/null 2>&1; then
+        # Shallow CI checkout with no baseline ref. The presence half still
+        # holds; only the "this is new" half is unverifiable here.
+        return 0
+    fi
+    local skill hits
+    for skill in skills/sdd-spec/SKILL.md skills/sdd-verify/SKILL.md skills/sdd-archive/SKILL.md; do
+        hits=$(git -C "$REPO_DIR" show "origin/main:$skill" 2>/dev/null | grep -c 'lint-spec\.sh' || true)
+        hits=$(printf '%s' "$hits" | tr -d ' ')
+        if [ "${hits:-0}" -ne 0 ]; then
+            echo "origin/main:$skill already mentions lint-spec.sh ($hits hits) — the wiring assertions prove nothing"
+            return 1
+        fi
+    done
+    if git -C "$REPO_DIR" cat-file -e origin/main:skills/_shared/lint-spec.sh 2>/dev/null; then
+        echo "origin/main already ships skills/_shared/lint-spec.sh"
+        return 1
+    fi
+    return 0
+}
+
+test_t_the_tree_hash_index_lives_in_a_private_temp_dir() {
+    # CWE-377. Both Content Binding blocks used to do `tmp_index="$(mktemp)"; rm -f
+    # "$tmp_index"` — mktemp a file, then UNLINK it so git can create its own index at
+    # that path. Between the rm and git's create, the name is unowned and world-writable
+    # in /tmp: anyone can plant a file there. The value being computed is the receipt
+    # that decides whether a PASS still binds to the code — the single number
+    # sdd-archive and archive-gate.sh gate on — so it is the last hash in the pipeline
+    # that should be computable by someone else. `mktemp -d` hands out a 0700 directory
+    # and the index is born inside it, never at a name that existed unowned.
+    #
+    # The pathspec is deliberately NOT part of this change: sdd-verify Step 6b,
+    # sdd-archive Step 0 and the archive-gate hook must keep hashing the same tree, and
+    # it is asserted unchanged below.
+    local f
+    for f in "$REPO_DIR/skills/sdd-verify/SKILL.md" "$REPO_DIR/skills/sdd-archive/SKILL.md"; do
+        assert_file_exists "$f" || return 1
+        local flat
+        flat="$(flatten_file "$f")"
+        assert_not_matches "$flat" 'mktemp\)"; rm -f' \
+            "${f##*/skills/}: the unlink-then-let-git-recreate temp index (CWE-377)" || return 1
+        assert_matches "$flat" 'tmp_dir="\$\(mktemp -d\)"' \
+            "${f##*/skills/}: the private temp DIRECTORY that replaces it" || return 1
+        # shellcheck disable=SC2016  # matching the literal $tmp_dir as written in the skill
+        assert_matches "$flat" 'GIT_INDEX_FILE="\$tmp_dir/index"' \
+            "${f##*/skills/}: the index living inside that directory" || return 1
+        # The hash itself must not have moved: same pathspec, same exclusions.
+        assert_matches "$flat" "git add -A -- \. ':\(exclude\)openspec' ':\(exclude\)\.kurama'" \
+            "${f##*/skills/}: the pathspec, byte-identical across all three computations" || return 1
+    done
+    return 0
+}
+
+test_t_the_docs_point_at_the_linter() {
+    # docs/concepts.md is where delta-spec structure is documented for a human.
+    # A mechanical gate nobody knows about gets worked around rather than fixed.
+    local f="$REPO_DIR/docs/concepts.md"
+    assert_file_exists "$f" || return 1
+    local flat
+    flat="$(flatten_file "$f")"
+    assert_matches "$flat" 'skills/_shared/lint-spec\.sh' \
+        "docs/concepts.md naming the linter and its path" || return 1
+    assert_matches "$flat" 'file:line: LEVEL: message' \
+        "the finding format a reader will see" || return 1
+    assert_matches "$flat" 'fewer scenarios than the same requirement' \
+        "the MODIFIED whole-block check documented as the motivating case" || return 1
+    return 0
+}
+
+echo -e "${BOLD}UNIT-T (issue #89): delta-spec linter + the skills that run it${NC}"
+run_test "lint-spec.sh ships in _shared and is shellcheck-clean" test_t_the_linter_ships_and_is_a_well_formed_shell_script
+run_test "lint-spec.sh is portable bash 3.2 (no bash-4, no rg/fd/jq)" test_t_the_linter_is_portable_bash_3_2
+run_test "a clean delta is silent and exits 0" test_t_a_clean_delta_is_silent_and_exits_zero
+run_test "an unknown delta section is an ERROR" test_t_an_unknown_delta_section_is_an_error
+run_test "a requirement with no RFC 2119 keyword is an ERROR" test_t_a_requirement_without_an_rfc_2119_keyword_is_an_error
+run_test "a requirement with no scenario is an ERROR" test_t_a_requirement_without_a_scenario_is_an_error
+run_test "a scenario missing GIVEN/WHEN/THEN is an ERROR" test_t_a_scenario_missing_given_when_then_is_an_error
+run_test "malformed and duplicate scenario IDs are ERRORs" test_t_malformed_and_duplicate_scenario_ids_are_errors
+run_test "a partial MODIFIED block names the baseline count (#80)" test_t_a_partial_modified_block_names_the_baseline_count
+run_test "a RENAMED entry must name both requirements" test_t_a_renamed_entry_must_name_both_requirements
+run_test "template braces ERROR, TBD/TODO/XXX WARN" test_t_placeholders_error_and_open_markers_warn
+run_test "a REMOVED entry with no reason is an ERROR" test_t_a_removed_entry_without_a_reason_is_an_error
+run_test "a change-directory argument lints its domain specs" test_t_a_change_directory_argument_lints_its_domain_specs
+run_test "usage errors exit 2 and never report a pass" test_t_usage_errors_exit_two_and_never_report_a_pass
+run_test "Kurama's own delta specs lint clean (dogfood)" test_t_kuramas_own_delta_specs_lint_clean
+run_test "sdd-spec lints its own output before persisting" test_t_sdd_spec_lints_its_own_output_before_persisting
+run_test "sdd-verify gates on the linter at CRITICAL" test_t_sdd_verify_gates_on_the_linter_at_critical
+run_test "sdd-archive refuses to merge a spec with ERRORs" test_t_sdd_archive_refuses_to_merge_a_spec_with_errors
+run_test "the linter wiring is new on this branch (origin/main clean)" test_t_the_linter_wiring_is_new_on_this_branch
+run_test "the Tree-Hash index lives in a private temp dir (CWE-377)" test_t_the_tree_hash_index_lives_in_a_private_temp_dir
+run_test "docs/concepts.md points at the linter" test_t_the_docs_point_at_the_linter
+
+echo ""
+
+# ============================================================================
 # UNIT-N (issue #99) — the assertion helpers themselves
 #
 # assert_matches is shared by every contract case in this file, so a flake in it
