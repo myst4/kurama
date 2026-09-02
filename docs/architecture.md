@@ -39,14 +39,14 @@ graph TB
         L2_Orch -->|"DAG phase"| L2_Archive
 
         L2_Store[("Artifact Store<br/>files under openspec/")]
-        L2_Registry[("Skill Registry<br/>auto-discover coding skills<br/>+ project conventions")]
+        L2_Standards[("standards:<br/>ordered file list in<br/>openspec/config.yaml")]
         L2_Spec -.->|"persist"| L2_Store
         L2_Design -.->|"persist"| L2_Store
         L2_Apply -.->|"persist"| L2_Store
-        L2_Orch -.->|"resolves once"| L2_Registry
-        L2_Orch -.->|"pre-resolved paths"| L2_Explore
-        L2_Orch -.->|"pre-resolved paths"| L2_Apply
-        L2_Orch -.->|"pre-resolved paths"| L2_Verify
+        L2_Orch -.->|"reads once"| L2_Standards
+        L2_Orch -.->|"forwards paths"| L2_Explore
+        L2_Orch -.->|"forwards paths"| L2_Apply
+        L2_Orch -.->|"forwards paths"| L2_Verify
     end
 
     subgraph "Level 3 — Full Agent Teams"
@@ -66,7 +66,7 @@ graph TB
 
     style L2_Orch fill:#4CAF50,color:#fff,stroke:#333
     style L2_Store fill:#2196F3,color:#fff,stroke:#333
-    style L2_Registry fill:#9C27B0,color:#fff,stroke:#333
+    style L2_Standards fill:#9C27B0,color:#fff,stroke:#333
     style L3_Queue fill:#FF9800,color:#fff,stroke:#333
 ```
 
@@ -119,15 +119,15 @@ graph TB
     │         │         │         │         │         │
     └─────────┴─────────┴────┬────┴─────────┴─────────┘
                              │
-               (receive pre-resolved compact rules
+               (receive the standards: file paths
                 from the orchestrator's launch prompt)
                              │
                  ┌───────────▼───────────┐      ┌────────────────────┐
-                 │    SUB-AGENT USES     │      │   SKILL REGISTRY   │
-                 │   skills as directed  │      │                    │
-                 │ • React, TDD, etc.   │      │ • Your coding      │
-                 │ • Project conventions │      │   skills + paths   │
-                 └───────────────────────┘      │ • Project conven- │
+                 │    SUB-AGENT READS    │      │     standards:     │
+                 │   every listed file   │      │                    │
+                 │ • CLAUDE.md, AGENTS   │      │ • The project's    │
+                 │ • Project conventions │      │   own file paths   │
+                 └───────────────────────┘      │ • Companion skill │
                                                 │   tions (agents.md)│
                            ORCHESTRATOR ────────▶ resolves once/session
                                                 └────────────────────┘
@@ -161,18 +161,17 @@ kurama/
 ├── .claude-plugin/                    ← Claude Code plugin packaging (alternative to manual copy)
 │   ├── plugin.json                    ← name/version (from VERSION)/description/skills path
 │   └── marketplace.json               ← Single-entry marketplace example for `/plugin marketplace add`
-├── skills/                            ← 28 skill files (all installed by default) + shared conventions
+├── skills/                            ← 27 skill files (all installed by default) + shared conventions
 │   ├── manifest.json                  ← Declares every skill (group: sdd-core | quality | review | optional | tdd) + per-harness install targets; installers read this instead of a hardcoded list. Every group ships by default, and none of them carries language-specific knowledge
 │   ├── _shared/                       ← Shared conventions (referenced by all skills) + shipped helper scripts
-│   │   └── build-skill-registry.sh   ← Writes .kurama/skill-registry.md (index only, no model in the loop)
-│   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: the canonical DAG, change-size path, Phase I/O table, and Sections A-D (skill loading, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
+│   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: the canonical DAG, change-size path, Phase I/O table, and Sections A-D (project standards, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
 │   │   ├── orchestrator-sdd-protocol.md ← Orchestrator session protocol loaded on demand when a cycle starts: SDD Session Preflight, Entry Routing, Automatic Mode Gatekeeper. Extracted from the orchestrator prompt so a non-SDD session never pays for it
 │   │   ├── review-ledger-contract.md  ← Lens selection triage (the orchestrator's decision procedure) + the shared blocking/ledger rules every review lens obeys
-│   │   ├── persistence-contract.md    ← Store resolution, sub-agent context protocol, skill loading
+│   │   ├── persistence-contract.md    ← Store resolution, sub-agent context protocol, where standards: is read from
 │   │   ├── openspec-convention.md     ← File paths, directory structure, config reference — Kurama's own convention, NOT the upstream OpenSpec CLI format
-│   │   ├── skill-resolver.md          ← Canonical orchestrator protocol for compact-rule injection
+│   │   ├── delegation.md              ← Canonical delegator contract: the Project Standards block, launch rules, and the reap step
 │   │   └── test-runners.md            ← Project commands (test / single-test / build), CONFIGURED at sdd-init rather than detected, plus a suggestion table of common-ecosystem defaults that carries no authority
-│   ├── sdd-init/SKILL.md             ← Bootstraps project + builds skill registry
+│   ├── sdd-init/SKILL.md             ← Bootstraps project + proposes the standards: list
 │   ├── sdd-new/SKILL.md              ← Meta-skill: starts a new SDD change (exploration + proposal)
 │   ├── sdd-continue/SKILL.md         ← Meta-skill: resumes a change from persisted state
 │   ├── sdd-ff/SKILL.md               ← Meta-skill: fast-forwards remaining phases with auto-continue
@@ -184,9 +183,8 @@ kurama/
 │   ├── sdd-apply/SKILL.md            ← v2.0: TDD workflow support
 │   ├── sdd-verify/SKILL.md           ← v2.0: Real test execution + spec compliance matrix
 │   ├── sdd-archive/SKILL.md
-│   ├── skill-registry/SKILL.md       ← Runs _shared/build-skill-registry.sh (writes .kurama/skill-registry.md)
 │   ├── judgment-day/SKILL.md         ← Dual blind review + fix loop
-│   ├── skill-creator/SKILL.md        ← Authors a new skill and wires it into registry/manifest/suite
+│   ├── skill-creator/SKILL.md        ← Authors a new skill and wires it into manifest/index/suite
 │   ├── tdd/SKILL.md                  ← RED-GREEN-REFACTOR module (`tdd` group, installed by default; activation stays opt-in per project — opt out with `install.sh --without tdd`)
 │   ├── issue-creation/SKILL.md       ← GitHub issue creation workflow
 │   └── branch-pr/SKILL.md            ← Branch + pull request workflow
@@ -226,6 +224,5 @@ kurama/
 
 # Generated in target projects (not in this repo):
 .kurama/
-├── skill-registry.md                  ← Skill INDEX for sub-agents, built by skills/_shared/build-skill-registry.sh
 └── sdd/{change-name}/                 ← Machine-local cycle markers (state.md, verify-report.md, archive-report.md) read by the deterministic hooks
 ```

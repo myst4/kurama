@@ -13,7 +13,7 @@ between them is the whole design:
 | Store | Scope | Holds |
 |-------|-------|-------|
 | `openspec/` | **committed** | the SDD artifacts of each change — exploration, brainstorm ledger, proposal, spec, design, tasks, verify/archive reports, and the main specs |
-| `.kurama/` | machine-local, gitignored | harness state: cycle markers, the skill registry |
+| `.kurama/` | machine-local, gitignored | harness state: the SDD cycle markers |
 | **`MEMORY.md`** | **committed** | durable team knowledge about the project |
 
 **Artifacts are committed; cycle state is not.** An artifact records *what was
@@ -59,9 +59,6 @@ The same file also carries `persona:` — a **top-level** key, not part of
 
 `.kurama/` is machine-local harness infrastructure, never a committed artifact:
 
-- `.kurama/skill-registry.md` — the skill + convention INDEX, built by
-  `skills/_shared/build-skill-registry.sh` at install, at re-sync, and by
-  `/sdd-init` / `/skill-registry` (see [docs/sub-agents.md](sub-agents.md)).
 - `.kurama/sdd/{change-name}/` — the three cycle markers (`state.md`,
   `verify-report.md`, `archive-report.md`) the deterministic hooks read. The
   hooks run outside the model and read only the filesystem, at these fixed

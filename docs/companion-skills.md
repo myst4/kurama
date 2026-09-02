@@ -1,9 +1,8 @@
 # Companion Skills (optional)
 
 Kurama ships a complete SDD pipeline, but it does not live in a vacuum. When other
-Agent-Skills-format skills are installed alongside it, the
-[skill registry](../skills/skill-registry/SKILL.md) discovers them automatically and
-the orchestrator can pair them into the SDD phases.
+Agent-Skills-format skills are installed alongside it, you can bind them to every SDD
+phase by adding their path to the `standards:` list in `openspec/config.yaml`.
 **[superpowers](https://github.com/obra/superpowers)** — a set of **14 process
 skills** for AI coding agents — is the reference companion. Every pairing below is
 **optional by design**: Kurama never takes a hard dependency on superpowers (or any
@@ -17,28 +16,45 @@ the orchestrator prompt is that instruction, so a natural-language feature reque
 enters `/sdd-new` even when a session-level skill advertises itself as mandatory
 for any creative work.
 
-## Zero-config discovery
+## How to wire one in
 
-There is nothing to wire up. superpowers installs as ordinary `*/SKILL.md` files in a
-user-level skills directory (e.g. `~/.claude/skills/`), which is exactly where
-[`build-skill-registry.sh`](../skills/_shared/build-skill-registry.sh) — the script
-[`skill-registry`](../skills/skill-registry/SKILL.md) runs — already scans. If
-superpowers is installed, the registry indexes its process skills into
-`.kurama/skill-registry.md` on the next build, and the orchestrator resolves them by
-trigger like any other skill — **no manifest edits, no config flags, no per-project
-setup**. If it is not installed, the registry simply finds nothing and the phases behave
-exactly as before.
+Nothing is discovered for you — that is the point. A companion skill reaches sub-agents
+because you wrote its path into `standards:`, and for no other reason:
+
+```yaml
+# openspec/config.yaml
+standards:
+  - CLAUDE.md
+  - ~/.claude/skills/superpowers/skills/systematic-debugging/SKILL.md
+```
+
+Paths may be repo-relative or `~`-relative. Every phase sub-agent then reads that file
+in full before it starts work, in the order you listed. A path that cannot be read comes
+back as a one-line note in the phase's `risks` — never a silent skip, never a block — so
+a moved or renamed companion tells you it moved instead of quietly doing nothing.
+
+Where the file actually lives depends on how superpowers was installed: a plain
+user-level install puts it under `~/.claude/skills/<skill>/SKILL.md`, while a plugin
+install nests it under the plugin directory, e.g.
+`~/.claude/plugins/superpowers/skills/<skill>/SKILL.md`. Check the real path on your
+machine before writing it down — `standards:` records paths, it does not search for them.
+
+Remove the line and the pairing is gone; the pipeline runs identically without it.
 
 ## Recommended pairings
 
-Each row is a suggestion the orchestrator MAY act on when the matching skill is
-present. None is required; none changes phase control flow.
+Each row is a suggestion. None is required; none changes phase control flow. The
+`standards:` list is global to the cycle, so a skill you add there is read by every
+phase — the touchpoint column says where it actually earns its place.
 
-| superpowers skill | Kurama touchpoint | What it adds |
-|-------------------|-------------------|--------------|
-| `systematic-debugging` | `sdd-apply` and `sdd-verify`-FAIL fix loops | Root-cause investigation before any fix — no patch lands until the failure is understood. |
-| `verification-before-completion` | `sdd-verify` / `sdd-archive` gates | Reinforces the completion gates with fresh, captured evidence before a change is declared done or archived. |
-| `receiving-code-review` | 4R review lenses and `judgment-day` | A rigorous way to process review findings — verify each point technically instead of performative agreement — when consuming lens or judge output. |
+| superpowers skill | Kurama touchpoint | What it adds | Likely path |
+|-------------------|-------------------|--------------|-------------|
+| `systematic-debugging` | `sdd-apply` and `sdd-verify`-FAIL fix loops | Root-cause investigation before any fix — no patch lands until the failure is understood. | `~/.claude/plugins/superpowers/skills/systematic-debugging/SKILL.md` |
+| `verification-before-completion` | `sdd-verify` / `sdd-archive` gates | Reinforces the completion gates with fresh, captured evidence before a change is declared done or archived. | `~/.claude/plugins/superpowers/skills/verification-before-completion/SKILL.md` |
+| `receiving-code-review` | 4R review lenses and `judgment-day` | A rigorous way to process review findings — verify each point technically instead of performative agreement — when consuming lens or judge output. | `~/.claude/plugins/superpowers/skills/receiving-code-review/SKILL.md` |
+
+Those paths are the plugin layout; a user-level install drops the `plugins/superpowers/`
+segment (`~/.claude/skills/<skill>/SKILL.md`). Verify yours before adding it.
 
 **`brainstorming` is deliberately NOT paired.** It was listed here against `sdd-explore` /
 `sdd-propose` — both **sub-agents**, and brainstorming is *dialogue*: ask one question, wait for

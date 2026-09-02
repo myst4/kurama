@@ -54,7 +54,7 @@ which keeps the path inside the repo and therefore guarded.
 Both markers are always on disk. The hooks run outside the model and read only the
 filesystem, at fixed paths, so the persistence contract makes
 `.kurama/sdd/<change>/{state,verify-report,archive-report}.md` **cycle markers** —
-harness infrastructure written on every cycle, like `.kurama/skill-registry.md` — and
+harness infrastructure written on every cycle, like the `.kurama/sdd/` markers — and
 both hooks see the same three files. `sdd-archive` writing `archive-report.md` is what
 retires the cycle; nothing else clears the guard.
 
