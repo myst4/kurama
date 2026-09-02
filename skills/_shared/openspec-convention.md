@@ -187,6 +187,25 @@ other pipeline settings) into every phase prompt, where a propagated value wins 
 value (same precedence as `compliance_mode` and `tdd`). `sdd-ff` always
 fast-forwards its phases in `auto` regardless of this setting — fast-forwarding IS the auto behavior.
 
+The top-level `standards` block is an ORDERED LIST of file paths — repo-relative, or
+`~`-relative for a file outside the repo. It is the project's own declaration of what every
+phase sub-agent must read before it works: the orchestrator forwards the list VERBATIM, in
+this order, as the `## Project Standards (files to read)` block of every phase prompt, and
+the sub-agent reads each path in full before starting. Nothing is discovered at runtime and
+nothing is matched by trigger — a file reaches a sub-agent because it is written here, and
+for no other reason. Typical entries are the project's own `CLAUDE.md`/`AGENTS.md`, its
+in-repo convention skills, and any companion skill the team deliberately wants applied
+(`docs/companion-skills.md`). Kurama's own skills are NOT listed here; the orchestrator and
+the phase skills reach those by direct path.
+
+**A missing path is loud, and never a blocker.** When a listed file cannot be read, the
+sub-agent notes it as one line in the envelope's `risks` — `standards: {path} not found` —
+and continues the phase. A silent skip is forbidden (`#41` fail-loud rule): a standard the
+team declared and that nobody read must show up in the return, not vanish. Equally, a typo
+in this list never stops a cycle. An absent or empty `standards` block simply means the
+project declares no standards; the `## Project Standards (files to read)` block is then
+omitted, which is a correct delegation and not a degradation.
+
 The top-level `tdd` block is the single switch for the OPTIONAL TDD module. It holds
 EXACTLY two keys: `enabled` (bool) and `single_test_command` (string). `enabled` is the
 ONLY activator of the RED → GREEN → REFACTOR workflow — there are NO silent heuristics
@@ -230,6 +249,15 @@ schema: spec-driven
 execution_mode: supervised  # supervised | auto; supervised stops at human gates, auto continues unless blocked/verify FAIL
 
 persona: neutral  # neutral | argentino; conversation tone ONLY — artifacts keep the project's language. Preset registry: skills/_shared/personas.md
+
+# Files every phase sub-agent reads IN FULL at phase start, in this order. Repo-relative
+# or ~-relative. Forwarded verbatim as `## Project Standards (files to read)`.
+# A path that cannot be read is a one-line note in the envelope's risks, never a block.
+# Empty or absent => this project declares no standards. Kurama's own skills do not go here.
+standards:
+  - CLAUDE.md
+  - .claude/skills/api-conventions/SKILL.md
+  - ~/.claude/skills/superpowers/skills/systematic-debugging/SKILL.md
 
 context: |
   Tech stack: {detected stack}
