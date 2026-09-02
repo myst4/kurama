@@ -17,7 +17,6 @@ You are a sub-agent responsible for creating the TASK BREAKDOWN. You take the pr
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid`)
 - Pipeline settings propagated per phase, including `tdd.enabled` (and
   `tdd.single_test_command` when enabled). A propagated value WINS over any value read
   from `openspec/config.yaml` (same precedence as `compliance_mode`).
@@ -38,9 +37,7 @@ From the orchestrator:
   — for a `small` change they were never meant to exist separately. Do return `blocked` if
   the proposal itself lacks those sections, naming `sdd-propose` as the producing phase.
 
-- **engram**: Read `sdd/{change-name}/proposal` (required), `sdd/{change-name}/spec` (required for `standard`; inline in the proposal for `small`), `sdd/{change-name}/design` (same). Save as `sdd/{change-name}/tasks`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write `tasks.md` to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
+Read `openspec/changes/{change-name}/proposal.md` (required), `openspec/changes/{change-name}/specs/` (required for `standard`; inline in the proposal for `small`) and `openspec/changes/{change-name}/design.md` (same), then write `openspec/changes/{change-name}/tasks.md`. Read and follow `skills/_shared/openspec-convention.md`.
 
 ## What to Do
 
@@ -58,10 +55,9 @@ From the design document, identify:
 
 Resolve `tdd.enabled` with the SAME precedence as `compliance_mode`:
 
-1. the value propagated in your launch prompt (its home is `openspec/config.yaml` `tdd.enabled`
-   for `openspec`/`hybrid`, or the `sdd-init/{project}` context artifact for `engram`) —
+1. the value propagated in your launch prompt (its home is `openspec/config.yaml` `tdd.enabled`) —
    a propagated value WINS;
-2. else read `tdd.enabled` from `openspec/config.yaml` (`openspec`/`hybrid`);
+2. else read `tdd.enabled` from `openspec/config.yaml`;
 3. else default OFF (standard checklist).
 
 When `tdd.enabled` is **true**, expand behavior tasks per the "TDD Task Expansion" format
@@ -78,7 +74,7 @@ TDD"* — surface it in the return envelope's `risks`, then produce the
 
 ### Step 3: Write tasks.md
 
-**IF mode is `openspec` or `hybrid`:** Create the task file:
+Create the task file:
 
 ```
 openspec/changes/{change-name}/
@@ -87,8 +83,6 @@ openspec/changes/{change-name}/
 ├── design.md
 └── tasks.md               ← You create this
 ```
-
-**IF mode is `engram`:** Do NOT create any `openspec/` directories or files. Compose the tasks content in memory — you will persist it in Step 4.
 
 #### Task File Format
 
@@ -122,7 +116,7 @@ openspec/changes/{change-name}/
 
 **Leave the evidence slot empty.** `sdd-apply` appends a **Work Unit Evidence** block (its
 Step 3c: test command + exact result, harness/runtime, rollback boundary) under each unit as it
-completes it — in every mode, with `tdd.enabled` true or false. Do NOT pre-fill, stub, or
+completes it — with `tdd.enabled` true or false. Do NOT pre-fill, stub, or
 placeholder those lines here: evidence is produced by execution, and a pre-written block is
 exactly the unbacked claim the gate exists to prevent. The size budget below covers the PLANNED
 checklist only; the evidence `sdd-apply` adds later never counts against it.
@@ -190,8 +184,7 @@ Phase 5: Cleanup (if needed)
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `tasks`
-- topic_key: `sdd/{change-name}/tasks`
-- type: `architecture`
+- path: `openspec/changes/{change-name}/tasks.md`
 
 ### Step 5: Return Summary
 

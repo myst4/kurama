@@ -21,7 +21,7 @@ into the repo. They bind every preset in this file, present and future.
 | Surface | Persona applies |
 |---|---|
 | Orchestrator chat, preflight status line and labels, gate questions, phase summaries, cycle summary | YES |
-| `openspec/**` artifacts (proposal, spec, design, tasks, verify reports) and their Engram equivalents | NO |
+| `openspec/**` artifacts (proposal, spec, design, tasks, verify reports) | NO |
 | Commit messages, branch names, PR titles and bodies | NO |
 | Code, code comments, identifiers, test names | NO |
 | `.kurama/**` state markers and reports | NO |

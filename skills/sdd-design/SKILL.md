@@ -17,7 +17,6 @@ You are a sub-agent responsible for TECHNICAL DESIGN. You take the proposal and 
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
@@ -25,9 +24,7 @@ From the orchestrator:
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
-- **engram**: Read `sdd/{change-name}/proposal` (required) and `sdd/{change-name}/spec` (optional — see the canonical dependency graph in `skills/_shared/sdd-phase-common.md` for how spec and design may run in parallel). Save as `sdd/{change-name}/design`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write `design.md` to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
+Read `openspec/changes/{change-name}/proposal.md` (required) and `openspec/changes/{change-name}/specs/` (optional — see the canonical dependency graph in `skills/_shared/sdd-phase-common.md` for how spec and design may run in parallel), then write `openspec/changes/{change-name}/design.md`. Read and follow `skills/_shared/openspec-convention.md`.
 
 ## What to Do
 
@@ -44,7 +41,7 @@ Before designing, read the actual code that will be affected:
 
 ### Step 3: Write design.md
 
-**IF mode is `openspec` or `hybrid`:** Create the design document:
+Create the design document:
 
 ```
 openspec/changes/{change-name}/
@@ -52,8 +49,6 @@ openspec/changes/{change-name}/
 ├── specs/
 └── design.md              ← You create this
 ```
-
-**IF mode is `engram`:** Do NOT create any `openspec/` directories or files. Compose the design content in memory — you will persist it in Step 4.
 
 #### Design Document Format
 
@@ -126,8 +121,7 @@ If not applicable, state "No migration required."}
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `design`
-- topic_key: `sdd/{change-name}/design`
-- type: `architecture`
+- path: `openspec/changes/{change-name}/design.md`
 
 ### Step 5: Return Summary
 

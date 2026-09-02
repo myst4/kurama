@@ -82,13 +82,12 @@ For a `small` change the spec and design arrive as inline sections of the propos
      (`skill-resolver.md` → *Why Not Compact Rules?*), which is why they are the exception
      and not the default.
 2. If no Project Standards block was provided, check for `SKILL: Load` instructions. If present, read those exact skill files in full.
-3. If neither was provided, search for the skill registry as a fallback:
-   a. `mem_search(query: "skill-registry", project: "{project}")` — if found, `mem_get_observation(id)` for full content
-   b. Fallback: read `.kurama/skill-registry.md` from the project root. Check with `test -f` or
+3. If neither was provided, look for the skill registry as a fallback:
+   a. Read `.kurama/skill-registry.md` from the project root. Check with `test -f` or
       your harness's Read tool — never with a finder: `.kurama/` is both hidden AND gitignored,
       so `fd`/`rg` skip it even with hidden flags. A read that ERRORED is a broken check, not a
       missing registry (`skill-resolver.md` → *Step 1*).
-   c. From the registry's **skills index** (`Trigger | Skill | Path`), match triggers to your
+   b. From the registry's **skills index** (`Trigger | Skill | Path`), match triggers to your
       current task and **read the exact listed `SKILL.md` paths**. The registry's *Compact
       Rules* section is the delegator's opt-in budget surface, not your default; fall back to a
       skill's compact rules only if its listed path cannot be read, and note that in `risks`.
@@ -96,67 +95,23 @@ For a `small` change the spec and design arrive as inline sections of the propos
 
 NOTE: the preferred path is (1) — standards resolved by the orchestrator, which by default sends SKILL.md paths for you to read in full. Paths (2) and (3) are fallbacks for backwards compatibility. Searching the registry is SKILL LOADING, not delegation. If `## Project Standards` is present, IGNORE any `SKILL: Load` instructions — they are redundant.
 
-## B. Artifact Retrieval (Engram Mode)
+## B. Artifact Retrieval
 
-**CRITICAL**: `mem_search` returns 300-char PREVIEWS, not full content. You MUST call `mem_get_observation(id)` for EVERY artifact. **Skipping this produces wrong output.**
+Read every upstream artifact from its file under `openspec/`. The exact paths are in
+`openspec-convention.md`; the read and failure semantics are in `persistence-contract.md`.
 
-**Run all searches in parallel** — do NOT search sequentially.
-
-```
-mem_search(query: "sdd/{change-name}/{artifact-type}", project: "{project}") → save ID
-```
-
-Then **run all retrievals in parallel**:
-
-```
-mem_get_observation(id: {saved_id}) → full content (REQUIRED)
-```
-
-Do NOT use search previews as source material.
-
-### Retrieval failure semantics
-
-An upstream artifact "cannot be retrieved" when the search returns no result, or returns a result whose title does not match `sdd/{change-name}/{artifact-type}` (in `engram`/`hybrid`), or its file is absent (in `openspec`/`hybrid`).
-
-- **REQUIRED artifact missing** → do NOT silently proceed. Return your envelope with `status: blocked`, name the missing artifact in `executive_summary`, and set `next_recommended` to the phase that produces it (per the Canonical Phase DAG above).
-- **OPTIONAL artifact missing** → proceed with the phase, and note the absence in `risks` (e.g. "spec not found — proceeded from proposal only").
-
-Which upstream artifacts are required vs optional for your phase is declared in your phase SKILL.md. When in doubt, treat a dependency drawn as a solid edge in the DAG as required and a parallel-branch sibling (`spec ‖ design`) as optional.
+Which upstream artifacts are required vs optional for your phase is declared in your phase
+SKILL.md. When in doubt, treat a dependency drawn as a solid edge in the DAG as required and a
+parallel-branch sibling (`spec ‖ design`) as optional. A missing REQUIRED artifact means
+`status: blocked` naming it in `executive_summary`, with `next_recommended` set to the phase
+that produces it; a missing OPTIONAL one is a note in `risks`.
 
 ## C. Artifact Persistence
 
-Every phase that produces an artifact MUST persist it — downstream phases retrieve your output from the store, so returning without persisting leaves them nothing to read. If persistence fails, follow the recovery rule below rather than dropping the artifact.
-
-### Engram mode
-
-```
-mem_save(
-  title: "sdd/{change-name}/{artifact-type}",
-  topic_key: "sdd/{change-name}/{artifact-type}",
-  type: "architecture",
-  project: "{project}",
-  capture_prompt: false,
-  content: "{your full artifact markdown}"
-)
-```
-
-`capture_prompt: false` is mandatory on every SDD artifact save — automated artifacts must never capture the user's prompt (see `engram-convention.md`).
-
-`topic_key` enables upserts — saving again updates, not duplicates.
-
-If `mem_save` fails, retry once; if it still fails, write the full artifact to the filesystem fallback at `.kurama/sdd/{change-name}/{artifact-type}.md` and report the fallback path in `risks`. See `persistence-contract.md` → *Write Failure Recovery*. A failed save is never fatal — the artifact stays recoverable.
-
-### OpenSpec mode
-
-File was already written during the phase's main step. No additional action needed.
-
-### Hybrid mode
-
-Do BOTH: write the file to the filesystem AND call `mem_save` as above. The filesystem file is authoritative and the Engram entry is a searchable mirror; stamp `last_updated` (ISO 8601) in the artifact frontmatter and follow the same failure-recovery rule if the mirror write fails. See `persistence-contract.md` → *Hybrid Mode*.
-
-### Cycle markers — every mode, and NOT a fallback
-
-Two artifacts are ALSO written to `.kurama/sdd/{change-name}/` unconditionally, in every mode above including `engram`: `verify-report.md` (`sdd-verify` Step 7) and `archive-report.md` (`sdd-archive` Step 5), alongside the orchestrator's `state.md`. The deterministic hooks read only the filesystem — they cannot query Engram — so these disk copies are what make the archive gate and the write guard work outside `openspec` mode. This is *in addition to* the mode's own persistence, never a replacement, and it is unrelated to the `mem_save`-failure recovery rule above: the marker is written whether or not the save succeeded. Full contract: `persistence-contract.md` → *Hook-visible cycle markers*.
+Your artifact file under `openspec/` was already written during the phase's main step — that
+file IS the persistence, and there is no second store. Path and shape: `openspec-convention.md`.
+Write-failure handling, and the `.kurama/` cycle markers that `sdd-verify` and `sdd-archive`
+also write: `persistence-contract.md`.
 
 ## D. Return Envelope
 
@@ -169,7 +124,7 @@ Every phase MUST return a structured envelope to the orchestrator:
 - `detailed_report`: (optional) full phase output — this is where a phase's own "Return Summary" format lives; omit if already inline
 - `artifacts`: list of artifact keys/paths written (include any `.kurama/sdd/` fallback path used)
 - `next_recommended`: the next SDD phase to run, or "none"
-- `risks`: risks discovered, fallbacks used, or hybrid reconciliation notes; "None" if there are none
+- `risks`: risks discovered or fallbacks used; "None" if there are none
 - `skill_resolution`: how skills were loaded — `injected` (received Project Standards from orchestrator), `fallback-registry` (self-loaded from registry), `fallback-path` (loaded via SKILL: Load path), or `none` (no skills loaded). This field is REQUIRED in every envelope.
 - `key_learnings`: the envelope's CLOSING section — 1-5 gotchas, edge cases, or non-obvious decisions this phase discovered. Omitted entirely when the phase found nothing non-obvious. Shape and rules below.
 
@@ -178,7 +133,7 @@ Example:
 ```markdown
 **Status**: success
 **Summary**: Proposal created for `{change-name}`. Defined scope, approach, and rollback plan.
-**Artifacts**: Engram `sdd/{change-name}/proposal` | `openspec/changes/{change-name}/proposal.md`
+**Artifacts**: `openspec/changes/{change-name}/proposal.md`
 **Next**: sdd-spec or sdd-design
 **Risks**: None
 **Skill Resolution**: injected — 3 skills (react-19, typescript, tailwind-4)
@@ -188,13 +143,14 @@ Example:
 ### Key Learnings — the envelope's closing section
 
 Close the final report message with a `## Key Learnings` section: a **numbered list of 1-5
-items**, each a gotcha, an edge case, or a non-obvious decision this phase discovered. A memory
-engine extracts these **verbatim**, with no model re-reading them, so the shape below is a
-contract and not style advice:
+items**, each a gotcha, an edge case, or a non-obvious decision this phase discovered. Whatever
+memory engine the developer runs — claude-mem, something else, or none at all — harvests these
+**verbatim**, with no model re-reading them, so the shape below is a contract and not style
+advice:
 
 - Each item is a **standalone factual sentence of at least 20 characters and 4 words**. Those
-  two numbers are Engram's **extraction thresholds**, not a readability preference: an item
-  under either one is dropped silently, and nobody is told. Do not "simplify" them away.
+  two numbers are the usual extraction thresholds, not a readability preference: an item under
+  either one is dropped silently, and nobody is told. Do not "simplify" them away.
 - Write each item so it survives on its own — **what** was learned, **why it matters**, and
   **where** it lives (repo-relative path, module, or artifact key). The reader is a future
   session with no memory of this cycle.
@@ -215,15 +171,12 @@ output, and not to the artifact body persisted in Section C.
 2. A MODIFIED delta block must carry every scenario of the requirement it modifies; a partial block deletes the omitted scenarios at archive time (`skills/_shared/openspec-convention.md`).
 ```
 
-**How this relates to the two memory stores.** Key Learnings feeds BOTH and replaces NEITHER —
-the boundary between the four stores is the table in `docs/persistence.md`:
+**How this relates to team memory.** Kurama does not manage the developer's own memory tooling;
+whatever engine they run — or none — reads this section passively. What Kurama *does* own is
+`sdd-learn`, which curates the **team's** committed `MEMORY.md` at cycle close, and these items
+are its richest raw input. It still applies its own admission test ("would a teammate waste an
+hour rediscovering this?"), so a learning written here is a *candidate*, not an entry. The store
+boundary is the table in `docs/persistence.md`.
 
-- **Engram** captures the section **passively**, for **one developer's** cross-session recall.
-  Machine-local, never committed, no curation step: it is simply there next session.
-- **`sdd-learn`** curates the **team's** committed `MEMORY.md` at cycle close, and these items
-  are its richest raw input. It still applies its own admission test ("would a teammate waste
-  an hour rediscovering this?"), so a learning written here is a *candidate*, not an entry.
-
-So a phase writes its learnings once and both stores are served. Skipping the section costs the
-developer their passive recall AND leaves `sdd-learn` reconstructing the cycle from artifacts
-that, by the rule above, deliberately do not contain it.
+Skipping the section leaves `sdd-learn` reconstructing the cycle from artifacts that, by the
+rule above, deliberately do not contain it.

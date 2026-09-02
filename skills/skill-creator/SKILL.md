@@ -78,8 +78,8 @@ is to point at them rather than restate them:
 | Section | What it governs | Your skill's job |
 |---|---|---|
 | **A. Skill Loading** | How the agent resolves `## Project Standards`, then `SKILL: Load`, then the registry | Nothing — never describe a fifth resolution order |
-| **B. Artifact Retrieval** | Reading prior artifacts in Engram mode, and what a retrieval failure means | Name which artifacts you need, not how to fetch them |
-| **C. Artifact Persistence** | Writing the phase output in `engram` / `openspec` / `hybrid`, plus cycle markers | Name what you write; the mode is not yours to choose |
+| **B. Artifact Retrieval** | Reading prior artifacts from `openspec/`, and what a retrieval failure means | Name which artifacts you need, not how to fetch them |
+| **C. Artifact Persistence** | Writing the phase output as a file under `openspec/`, plus the `.kurama/` cycle markers | Name what you write, not where the harness puts it |
 | **D. Return Envelope** | The single return contract — `status`, `executive_summary`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`, closing `key_learnings` | Put your own report format inside `detailed_report`; never define a second envelope |
 
 Section D wins over any per-skill summary wording. A skill that invents field names produces

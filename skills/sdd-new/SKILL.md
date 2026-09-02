@@ -28,17 +28,24 @@ issue-linked, that name carries the issue number — `{issue}-{slug}`, resolved 
 
 ### 1. Init check
 
-Confirm SDD is initialized for this project — a `sdd-init/{project}` context artifact (engram)
-or `openspec/config.yaml` (openspec/hybrid) exists. Use the Recovery Rule from
-`skills/_shared/persistence-contract.md` to look it up. If nothing is found, delegate `sdd-init`
-first (it detects the stack, asks the explicit TDD question, and persists the pipeline settings) and
-present its summary before continuing.
+Confirm SDD is initialized for this project — `openspec/config.yaml` exists. Check it with
+`test -f` or Read, never a finder. If nothing is found, delegate `sdd-init` first (it detects the
+stack, asks the explicit TDD question, and persists the pipeline settings) and present its summary
+before continuing.
 
-Read the pipeline settings (`artifact_store.mode`, `execution_mode`, `compliance_mode`,
-`tdd.enabled`, `tdd.single_test_command`) ONCE and propagate them into every sub-agent prompt — a
-propagated value always wins over any stale value in `config.yaml` or the context artifact.
-`execution_mode` (`supervised` | `auto`, default `supervised`) decides how the proposal gate below
-behaves.
+Read the pipeline settings (`execution_mode`, `compliance_mode`, `tdd.enabled`,
+`tdd.single_test_command`) ONCE and propagate them into every sub-agent prompt — a propagated
+value always wins over any stale value in `config.yaml`. `execution_mode` (`supervised` | `auto`,
+default `supervised`) decides how the proposal gate below behaves.
+
+**Stale `artifact_store.mode`.** If the config still carries an `artifact_store.mode` key with ANY value,
+print exactly one line and continue — never block, never
+rewrite the user's config:
+
+> `artifact_store.mode` is unsupported since 6.3.0; artifacts are files under `openspec/`. Move
+> `.kurama/sdd/<change>/*.md` to `openspec/changes/<change>/` if you want the old ones.
+
+Then proceed with the cycle as normal.
 
 ### 1.5. Brainstorm gate
 
@@ -91,8 +98,7 @@ recommended.
 
 If the user chooses to brainstorm, follow `skills/sdd-brainstorm/SKILL.md` **INLINE** — it is
 dialogue, and a sub-agent has no human on the other side. It returns a decision ledger persisted
-at `sdd/{change-name}/brainstorm` (`openspec/changes/{change-name}/brainstorm.md` in
-openspec/hybrid). `sdd-brainstorm` ships in the `optional` group: if it does not resolve, say so
+at `openspec/changes/{change-name}/brainstorm.md`. `sdd-brainstorm` ships in the `optional` group: if it does not resolve, say so
 in one line and continue to Explore — never block the cycle on an optional module.
 
 ### 2. Explore

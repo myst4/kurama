@@ -1,7 +1,7 @@
 ---
 name: sdd-init
 description: >
-  Initialize Spec-Driven Development context in any project. Detects stack, conventions, and bootstraps the active persistence backend.
+  Initialize Spec-Driven Development context in any project. Detects stack and conventions, then bootstraps the openspec/ tree.
   Trigger: When user wants to initialize SDD in a project, or says "sdd init", "iniciar sdd", "openspec init".
 license: MIT
 metadata:
@@ -11,33 +11,14 @@ metadata:
 
 ## Purpose
 
-You are a sub-agent responsible for initializing the Spec-Driven Development (SDD) context in a project. You detect the project stack and conventions, then bootstrap the active persistence backend.
+You are a sub-agent responsible for initializing the Spec-Driven Development (SDD) context in a project. You detect the project stack and conventions, then bootstrap the `openspec/` tree.
 
 You are an EXECUTOR for this phase, not the orchestrator. Do the initialization work yourself. Do NOT launch sub-agents, do NOT call `delegate` or `task`, and do NOT hand execution back unless you hit a real blocker that must be reported upstream.
 
 ## Execution and Persistence Contract
 
-- If mode is `engram`:
-  Do NOT create `openspec/` directory.
-
-  **Save project context**:
-  ```
-  mem_save(
-    title: "sdd-init/{project-name}",
-    topic_key: "sdd-init/{project-name}",
-    type: "architecture",
-    project: "{project-name}",
-    capture_prompt: false,
-    content: "{detected project context markdown}"
-  )
-  ```
-  `topic_key` enables upserts — re-running init updates the existing context, not duplicates.
-  `capture_prompt: false` because this is an automated init artifact, not a human decision
-  (see `skills/_shared/engram-convention.md` → *Prompt Capture*).
-
-  (See `skills/_shared/engram-convention.md` for full naming conventions.)
-- If mode is `openspec`: Read and follow `skills/_shared/openspec-convention.md`. Run full bootstrap.
-- If mode is `hybrid`: Read and follow BOTH convention files. Run openspec bootstrap AND persist context to Engram.
+Artifacts are files under `openspec/` — there is no store to choose and nothing to ask.
+Read and follow `skills/_shared/openspec-convention.md`, and run the full bootstrap.
 
 ## What to Do
 
@@ -182,9 +163,9 @@ Read the project to understand:
     workflow as `workflow_coexistence_source`, so a later session can see WHY the setting
     exists. Surface both in the return envelope's summary.
 
-### Step 2: Initialize Persistence Backend
+### Step 2: Bootstrap the `openspec/` Tree
 
-If mode resolves to `openspec`, create this directory structure:
+Create this directory structure:
 
 ```
 openspec/
@@ -194,9 +175,9 @@ openspec/
     └── archive/             ← Completed changes
 ```
 
-### Step 3: Generate Config (openspec mode)
+### Step 3: Generate Config
 
-Based on what you detected, create the config when in `openspec` mode:
+Based on what you detected, create the config:
 
 ```yaml
 # openspec/config.yaml
@@ -245,16 +226,14 @@ rules:
 
 # Optional TDD module — single opt-in switch (see skills/tdd/SKILL.md).
 # Only `enabled` and `single_test_command` live here; test_command/build_command/
-# coverage_threshold stay under rules.verify. In engram mode these two keys live in
-# the sdd-init/{project} context artifact instead of this file.
+# coverage_threshold stay under rules.verify.
 tdd:
   enabled: false               # opt-in switch for the optional TDD module (RED → GREEN → REFACTOR)
   single_test_command: ""      # e.g. "npm test -- {file}"; runs ONE test/scenario for a fast RED cycle
 
 # Optional Kanban module — GitHub Projects board sync (see skills/kanban-github/SKILL.md).
 # Installed by default (manifest group `optional`); activation is opt-in per project
-# and REQUIRES a configured GitHub CLI (gh). In engram mode these keys live in the
-# sdd-init/{project} context artifact instead of this file.
+# and REQUIRES a configured GitHub CLI (gh).
 kanban:
   enabled: false             # opt-in switch; set true only after the gh prerequisite checks pass
   user: ""                   # optional assignee override; empty => @me (the active gh account owns every harness-created issue)
@@ -318,10 +297,8 @@ The script prints one line — `skill-registry: N skills (U user, P project) →
    `## User Skills` table holds the number of rows the script reported. Check with `test -f`
    or your Read tool, never with `fd`/`rg` — `.kurama/` is hidden AND gitignored, so a finder
    skips it even with hidden flags.
-2. `.kurama/skill-registry.md` is harness infrastructure, NOT an SDD project artifact, so it
-   is written in EVERY mode. The persistence-mode gates that suppress project files (e.g.
-   `openspec/`) never apply to `.kurama/`.
-3. If engram is available, **ALSO save to engram**: `mem_save(title: "skill-registry", topic_key: "skill-registry", type: "config", project: "{project}", capture_prompt: false, content: "{registry markdown}")` (`capture_prompt: false` — automated build output, not a human decision)
+2. `.kurama/skill-registry.md` is machine-local harness infrastructure, NOT an SDD project
+   artifact. It is never committed and never written into `openspec/`.
 
 **If the script is missing, STOP and report it in `risks`** — do not scan by hand. There is
 no fallback on purpose: one implementation of the scan, or two that drift apart. Tell the
@@ -338,7 +315,6 @@ See `skills/skill-registry/SKILL.md` for the surrounding protocol.
 **Pipeline settings are part of the persisted context.** SDD phases need a single home
 for the settings that steer the whole cycle:
 
-- `artifact_store.mode`: `engram | openspec | hybrid`
 - `execution_mode`: `supervised | auto` (chosen in Step 1)
 - `persona`: `neutral | argentino` (chosen in Step 1; conversation tone only — never reaches an artifact)
 - `compliance_mode`: `behavioral | static` (chosen in Step 1)
@@ -348,33 +324,13 @@ for the settings that steer the whole cycle:
 - `kanban.enabled`: `true | false` (from the explicit Kanban question in Step 1 — the single switch for the optional GitHub Projects board sync)
 - `kanban.owner`, `kanban.repo`, `kanban.project_number`, `kanban.project_id`, `kanban.status_field_id`, `kanban.merge_method`, `kanban.stages.*` (only when `kanban.enabled` is `true` — the board wiring cached during onboarding), plus the OPTIONAL `kanban.user` (empty => `@me`) and the OPTIONAL `kanban.size_field_id` + `kanban.sizes.*` (only when the board has a Size field)
 
-Settings home per mode:
-- `openspec` / `hybrid`: `openspec/config.yaml` (written in Step 3) is the home; in
-  `hybrid` the Engram context mirrors it.
-- `engram`: the `sdd-init/{project-name}` context artifact is the home — it
-  MUST carry the settings above (there is no `config.yaml`).
+**Settings home: `openspec/config.yaml`, written in Step 3.** There is exactly one, and it
+is committed with the project.
 
 **Propagation contract (the orchestrator honors this):** the orchestrator reads these
 settings once and injects them into EVERY phase prompt. On conflict, the value
-propagated in the phase prompt WINS over any stale value in `config.yaml` or the
-context artifact. Record the settings explicitly in the persisted context so the
-orchestrator can propagate them.
-
-If mode is `engram`:
-```
-mem_save(
-  title: "sdd-init/{project-name}",
-  topic_key: "sdd-init/{project-name}",
-  type: "architecture",
-  project: "{project-name}",
-  capture_prompt: false,
-  content: "{your detected project context from Steps 1-4, including the pipeline settings block}"
-)
-```
-
-If mode is `openspec` or `hybrid`: the config (with the pipeline settings) was already written in Step 3.
-
-If mode is `hybrid`: also call `mem_save` as above (write to BOTH backends).
+propagated in the phase prompt WINS over any stale value in `config.yaml`. Record the
+settings explicitly in the config so the orchestrator can propagate them.
 
 ### Step 6: Return Envelope
 
@@ -385,31 +341,27 @@ it is the ONLY return contract for this phase. sdd-init BUILDS the skill registr
 rather than consuming it, so `skill_resolution` is `none` (no project skills were
 loaded to perform init).
 
-Phase-specific fields to surface in `detailed_report` (adapt wording to the mode):
+Phase-specific fields to surface in `detailed_report`:
 
 - **Project**: {name}
 - **Stack**: {detected stack}
-- **Persistence**: {engram | openspec | hybrid}
 - **Execution mode**: {supervised | auto} — {user's answer to the explicit question}
 - **Persona**: {neutral | argentino} — {user's answer to the explicit question}
 - **Compliance mode**: {behavioral | static} — {test infra detected? one-line rationale}
 - **TDD**: {enabled | disabled} — {user's answer to the explicit question; single_test_command if enabled}
 - **Kanban**: {enabled | disabled} — {user's answer; when enabled: project_number + stage mapping + merge_method; when a `gh` prerequisite failed: which check and the fix command}
-- **Settings home**: `sdd-init/{project}` context artifact (engram) or `openspec/config.yaml` (openspec/hybrid)
-- **Skill registry**: `.kurama/skill-registry.md` (+ Engram `skill-registry` when available)
+- **Settings home**: `openspec/config.yaml`
+- **Skill registry**: `.kurama/skill-registry.md`
 
-Populate the envelope fields per mode:
+Populate the envelope fields:
 
-- `artifacts`: what was written — for `openspec`/`hybrid`, `openspec/config.yaml` plus
-  the created directories (and the Engram `sdd-init/{project}` observation for
-  `hybrid`); for `engram`, the Engram `sdd-init/{project}` observation ID. Every mode also
-  writes `.kurama/skill-registry.md`, which is harness infrastructure rather than a project
-  artifact and is therefore never suppressed by a persistence mode.
+- `artifacts`: what was written — `openspec/config.yaml` plus the created directories, and
+  `.kurama/skill-registry.md`, which is machine-local harness infrastructure rather than a
+  committed project artifact.
 - `next_recommended`: `sdd-explore` (or `sdd-new` when the user already has a change name).
-- `risks`: when Engram was the resolved backend but was unavailable, note the degrade to the
-  `.kurama/sdd/` filesystem fallback; when the user asked for Kanban but the module was
-  absent or a `gh` prerequisite check failed, note that `kanban.enabled` was recorded
-  `false` and the exact command to fix it (re-run `/sdd-init` afterward); otherwise `None`.
+- `risks`: when the user asked for Kanban but the module was absent or a `gh` prerequisite
+  check failed, note that `kanban.enabled` was recorded `false` and the exact command to fix
+  it (re-run `/sdd-init` afterward); otherwise `None`.
 
 ## Rules
 

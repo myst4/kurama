@@ -17,15 +17,12 @@ You are a sub-agent responsible for ARCHIVING. You merge delta specs into the ma
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-- **engram**: Read `sdd/{change-name}/explore` (optional), `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks`, `sdd/{change-name}/verify-report` (all required). Merge the delta `spec` into the cross-change main specs `sdd-specs/{project}/{domain}` (Step 2). Record all observation IDs in the archive report for traceability. Save as `sdd/{change-name}/archive-report`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Perform merge and archive folder moves.
-- **hybrid**: Follow BOTH conventions — persist archive report to Engram (with observation IDs), upsert the merged main specs to `sdd-specs/{project}/{domain}` AND perform filesystem merge + archive folder moves.
+Read `openspec/changes/{change-name}/exploration.md` (optional) plus `proposal.md`, `specs/`, `design.md`, `tasks.md` and `verify-report.md` under `openspec/changes/{change-name}/` (all required). Read and follow `skills/_shared/openspec-convention.md`. Perform merge and archive folder moves, then save the report to `openspec/changes/{change-name}/archive-report.md`.
 
 ### Missing required inputs (failure semantics)
 
@@ -45,7 +42,7 @@ Do block when the inline spec is missing, empty, or carries no `### Requirement:
 incomplete requirement set into the main specs, which is worse than not archiving — the main
 specs are the source of truth and a silent partial merge is unrecoverable without git history.
 
-The exploration artifact (`explore` in engram, `exploration.md` in openspec) is OPTIONAL — if absent, note it in `risks` and continue; do NOT block.
+The exploration artifact (`openspec/changes/{change-name}/exploration.md`) is OPTIONAL — if absent, note it in `risks` and continue; do NOT block.
 
 ## Mechanical Copy Contract (MANDATORY)
 
@@ -70,14 +67,11 @@ until someone needs it.
    symlink), STOP with source and destination both unchanged. Do NOT append a suffix, pick
    another name, overwrite, merge, or delete anything. Return `status: blocked` naming both paths
    and let a human resolve it.
-5. **No shell, no archive.** In `openspec`/`hybrid` mode, if the platform's tool allowlist does
-   not grant shell access, return `status: blocked` with the reason
+5. **No shell, no archive.** If the platform's tool allowlist does not grant shell access,
+   return `status: blocked` with the reason
    `shell access required for mechanical archive copy is unavailable` and
    `next_recommended: sdd-archive`. Do NOT fall back to Read/Write copying. A blocked archive is
-   recoverable; a silently corrupted source of truth is not. In `engram` mode there is no byte
-   copy to protect, but the Step 2 *Merge preservation readback* still applies — run it on temp
-   files, or, without a shell, enumerate both heading/scenario-ID lists verbatim in the phase
-   result and state the comparison explicitly.
+   recoverable; a silently corrupted source of truth is not.
 
 **Scope.** This contract governs reproduction WITHOUT transformation. The delta merge in Step 2
 (applying ADDED / MODIFIED / REMOVED / RENAMED into an EXISTING main spec) is a transformation and
@@ -90,19 +84,16 @@ Step 2 — which is equally mandatory.
 
 BEFORE any merge or move, retrieve the verification report and gate on it. Archiving an unverified or failing change would consolidate broken behavior into the source of truth.
 
-**Retrieve the verify report:**
-- **engram**: `mem_search("sdd/{change-name}/verify-report")` → `mem_get_observation(id)`.
-- **openspec**: read `openspec/changes/{change-name}/verify-report.md`.
-- **hybrid**: read file-first (`openspec/changes/{change-name}/verify-report.md`), fall back to Engram if absent.
-- **EVERY mode**: `sdd-verify` Step 7 also writes the full report to
-  `.kurama/sdd/{change-name}/verify-report.md`. Read it when the mode's primary store does not
-  produce the report — and note that this is the exact file `archive-gate.sh` gates on, so if it
-  is missing the hook will refuse the archive no matter what you found in Engram. A missing marker
-  with a report present in the backend is a `risks` entry naming the path, not a reason to
-  self-authorize an override.
+**Retrieve the verify report:** read `openspec/changes/{change-name}/verify-report.md`.
+
+`sdd-verify` Step 7 also writes the full report to `.kurama/sdd/{change-name}/verify-report.md`.
+Read that mirror when the artifact itself is absent — and note that this is the exact file
+`archive-gate.sh` gates on, so if it is missing the hook will refuse the archive no matter what
+the artifact says. A missing marker with the artifact present is a `risks` entry naming the path,
+not a reason to self-authorize an override.
 
 **Gate:**
-- If the verify report is MISSING (not found in any store / not provided) → return `status: blocked`, name the missing `verify-report`, set `next_recommended: sdd-verify`. Do NOT archive.
+- If the verify report is MISSING (not found at either path / not provided) → return `status: blocked`, name the missing `verify-report`, set `next_recommended: sdd-verify`. Do NOT archive.
 - If the verdict is `FAIL`, or the report lists any unresolved CRITICAL issue → return `status: blocked`, summarize the failing items, set `next_recommended: sdd-verify`. Do NOT archive.
 - If the verdict is `PASS` or `PASS WITH WARNINGS` → run the **content binding revalidation** below, then proceed to Step 1.
 
@@ -127,9 +118,9 @@ live_tree="$(GIT_INDEX_FILE="$tmp_dir/index" git write-tree)"
 rm -rf -- "$tmp_dir"
 ```
 
-- Read the RECORDED hash from the report's `Tree-Hash` line — `openspec/changes/{change-name}/verify-report.md`
-  in openspec/hybrid, `.kurama/sdd/{change-name}/verify-report.md` in every mode including `engram`.
-  If the report carries no such line, fall back to the `sdd/{change-name}/state` artifact (the
+- Read the RECORDED hash from the report's `Tree-Hash` line — `openspec/changes/{change-name}/verify-report.md`,
+  or the `.kurama/sdd/{change-name}/verify-report.md` mirror.
+  If the report carries no such line, fall back to `openspec/changes/{change-name}/state.yaml` (the
   orchestrator stamped `Reviewed-Tree` there) or to the value the orchestrator passed inline.
 - If `live_tree` ≠ the recorded hash → the code changed after verification → return
   `status: blocked`, `executive_summary: "verify receipt stale — re-run sdd-verify"`,
@@ -177,13 +168,9 @@ you found them, return `status: blocked` with `next_recommended: sdd-spec`, and 
 offending `file:line: ERROR: message` lines VERBATIM in `executive_summary` / `risks`. Do NOT
 merge the clean domains and skip the broken one, do NOT edit the delta yourself to make it
 lint, and do NOT proceed on the reasoning that the merge would "probably" be fine. A blocked
-archive is recoverable; a malformed requirement admitted into `openspec/specs/` stays, and in
-`engram` mode there is no git history to recover it from.
+archive is recoverable; a malformed requirement admitted into `openspec/specs/` stays.
 
 - `WARNING:` lines do NOT block. Record them in `risks` and continue.
-- **In `engram` mode**, write the retrieved delta spec artifact to a temp file
-  (`mktemp "${TMPDIR:-/tmp}/sdd-archive-spec.XXXXXX.md"`) and lint that path. The refusal is
-  identical — engram has LESS recovery, not more.
 - **Small changes**: lint the proposal's `## Spec (inline)` delta the same way, by extracting
   that section to a temp file. Inline is where the delta lives on that path, not an exemption.
 - **NEITHER path exists** → the linter is not installed in this harness. This is NOT a refusal:
@@ -194,25 +181,7 @@ archive is recoverable; a malformed requirement admitted into `openspec/specs/` 
 
 ### Step 2: Sync Delta Specs to Main Specs
 
-**IF mode is `engram`:** Merge the change's delta into the cross-change MAIN SPEC artifacts `sdd-specs/{project}/{domain}` (one per domain) — the engram equivalent of the filesystem merge below. This is what makes specs a living source of truth in engram mode; do NOT skip it. The delta `spec` artifact (`sdd/{change-name}/spec`) concatenates all domains under domain headers (`# Delta for {Domain}`). Split it by domain and, FOR EACH domain:
-
-1. Retrieve the current main spec: `mem_search("sdd-specs/{project}/{domain}")` → `mem_get_observation(id)`.
-2. Apply the delta with the canonical semantics from `skills/_shared/openspec-convention.md` →
-   *Delta Spec Sections*. That section is the single definition, shared with `sdd-spec` (the
-   writer) and with the filesystem merge below — there is no engram-specific variant:
-   - ADDED → append to the main spec's Requirements section
-   - MODIFIED → REPLACE the WHOLE matching requirement block, scenarios included (match by `### Requirement: {name}`, verbatim)
-   - REMOVED → delete the matching requirement block (the delta must carry `(Reason: ...)`)
-   - RENAMED → rewrite the heading in place, KEEPING the existing scenarios and their `S-{req}-{n}` IDs; never delete-and-recreate
-   - PRESERVE every requirement the delta does NOT mention
-   - Run the **Merge preservation readback** (below, in the openspec branch) before upserting: write the RETRIEVED main spec and your MERGED text to two temp files and compare their `### Requirement:` / `#### Scenario:` lines. Every line present before and absent after MUST be accounted for by the delta, or you BLOCK. This matters MORE in engram mode than on the filesystem: there is no git history to recover a dropped scenario from.
-   - If NO main spec exists yet for the domain, the delta IS the full spec — use it directly as the new main spec (first-cycle baseline).
-3. Refresh the frontmatter `last_updated` to today (ISO), then upsert:
-   `mem_save(title/topic_key: "sdd-specs/{project}/{domain}", type: "architecture", project: "{project}", capture_prompt: false, content: {merged spec})`. The stable `topic_key` upserts in place, and `capture_prompt: false` keeps this automated main-spec upsert from capturing the user prompt (see `skills/_shared/engram-convention.md`).
-
-Then continue to Step 3 (the archive report records the observation IDs for traceability).
-
-**IF mode is `openspec` or `hybrid`:** For each delta spec in `openspec/changes/{change-name}/specs/`:
+For each delta spec in `openspec/changes/{change-name}/specs/`:
 
 #### If Main Spec Exists (`openspec/specs/{domain}/spec.md`)
 
@@ -274,8 +243,7 @@ wrote a MODIFIED block without copying the full requirement. Do NOT write it thr
 `$main_spec` from `$before_snapshot`, return `status: blocked` with
 `next_recommended: sdd-spec`, and name the EXACT scenario IDs that would have been deleted,
 quoting the diff verbatim in `executive_summary` / `risks`. Scenarios lost from the source of
-truth are unrecoverable without git history — and in engram mode, unrecoverable at all. A blocked
-archive is neither.
+truth are unrecoverable without git history. A blocked archive is not.
 
 An accounted-for removal that is still large keeps the existing destructive-merge rule: WARN the
 orchestrator and ask for confirmation before proceeding.
@@ -317,15 +285,9 @@ The copy lands on a temp file in the target directory and is only promoted after
 passes, so a failed copy never leaves a half-written main spec. Paste the `diff -r` output —
 empty — into the phase result.
 
-#### Hybrid: mirror the merged spec to Engram
-
-**IF mode is `hybrid`:** after each domain's filesystem merge, ALSO upsert the merged main spec to its Engram artifact `sdd-specs/{project}/{domain}` (refresh the frontmatter `last_updated`). The filesystem copy is authoritative; Engram mirrors it. If the two diverge, the FILE wins — reconcile from the file and note it in `risks`.
-
 ### Step 3: Move to Archive
 
-**IF mode is `engram`:** Skip — there are no `openspec/` directories to move. The archive report in Engram serves as the audit trail.
-
-**IF mode is `openspec` or `hybrid`:** Move the ENTIRE change folder to the archive with a date
+Move the ENTIRE change folder to the archive with a date
 prefix, using a mechanical shell move. NEVER Read each artifact and Write it into the archive —
 that routes the whole audit trail through model generation:
 
@@ -386,7 +348,7 @@ What makes this block correct here, and not merely copied from somewhere:
 - Compare against the PRE-MOVE snapshot only. Never against a post-move source, a staged tree, or
   a model readback of either side.
 - **No `diff -r` exclusions are needed.** In kurama the archive report never lands inside the
-  moved folder: Step 5 writes it to the mode's store and to
+  moved folder: Step 5 writes it to `openspec/changes/{change-name}/archive-report.md` and to
   `.kurama/sdd/{change-name}/archive-report.md`, both outside `$destination`. The archived tree
   must therefore be byte-identical to the snapshot, with nothing added and nothing missing.
 - `openspec/` is excluded from the Step 0 `Tree-Hash` pathspec, so this move does NOT invalidate
@@ -396,9 +358,9 @@ What makes this block correct here, and not merely copied from somewhere:
 
 ### Step 4: Verify Archive
 
-**IF mode is `openspec` or `hybrid`:** The Mechanical Copy Contract IS the verification — the
-verbatim `diff -r` readback output from Steps 2 and 3 MUST appear in the phase result, and empty
-output is the only thing that passes. In addition, confirm:
+The Mechanical Copy Contract IS the verification — the verbatim `diff -r` readback output from
+Steps 2 and 3 MUST appear in the phase result, and empty output is the only thing that passes.
+In addition, confirm:
 - [ ] Verbatim `diff -r` readback output included in the result, and EMPTY (Step 2 spec copy, Step 3 folder move)
 - [ ] Merge preservation readback ran on every domain whose main spec already existed, and every removed requirement heading / scenario ID is accounted for by the delta (Step 2)
 - [ ] Main specs updated correctly (per domain)
@@ -409,13 +371,11 @@ output is the only thing that passes. In addition, confirm:
 A failed, skipped, or unreported `diff -r` FAILS the phase regardless of the checkboxes above —
 agent self-report is never evidence of byte-identity.
 
-**IF mode is `engram`:** Confirm each affected `sdd-specs/{project}/{domain}` main spec was upserted, that the Merge preservation readback ran for every domain that already had a main spec, and that all artifact observation IDs — including `explore` (if present) and `verify-report` — are recorded in the archive report.
-
-**IN EVERY mode:** confirm the cycle markers on disk with `test -f` or Read — never a finder, since `.kurama/` is hidden AND gitignored:
+**In addition:** confirm the cycle markers on disk with `test -f` or Read — never a finder, since `.kurama/` is hidden AND gitignored:
 - [ ] `.kurama/sdd/{change-name}/verify-report.md` is present (written by `sdd-verify` Step 7)
 - [ ] `.kurama/sdd/{change-name}/archive-report.md` — Step 5 writes it next; the cycle is not closed until it exists
 
-Those two files are what the hooks read. An archive that leaves them wrong is not finished, whatever the backend says.
+Those two files are what the hooks read. An archive that leaves them wrong is not finished.
 
 ### Step 5: Persist Archive Report
 
@@ -423,13 +383,11 @@ Those two files are what the hooks read. An archive that leaves them wrong is no
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `archive-report`
-- topic_key: `sdd/{change-name}/archive-report`
-- type: `architecture`
-- capture_prompt: `false` — the archive report is an automated SDD artifact; never capture the user prompt (see `skills/_shared/engram-convention.md`)
+- path: `openspec/changes/{change-name}/archive-report.md`
 
-Per E2, if `mem_save` of the archive report or a merged main spec fails, retry once; if it still fails, write a filesystem fallback copy under `.kurama/sdd/{change-name}/` and report it as a concern in `risks`. Do NOT silently drop the merge or the report.
+Per E2, if the write of the archive report or a merged main spec fails, retry once; if it still fails, return `status: blocked` naming the failing path (`persistence-contract.md` → *Write failure*). Do NOT silently drop the merge or the report.
 
-**Then, in EVERY mode, also write the archive report to
+**Then also write the archive report to
 `.kurama/sdd/{change-name}/archive-report.md`.** Unconditional, exactly like the verify report
 (`sdd-verify` Step 7) — and it is the marker that CLOSES the cycle for the deterministic hooks:
 
@@ -452,7 +410,7 @@ Return to the orchestrator:
 ## Change Archived
 
 **Change**: {change-name}
-**Archived to**: `openspec/changes/archive/{YYYY-MM-DD}-{change-name}/` (openspec/hybrid) | Engram archive report (engram) | inline (none)
+**Archived to**: `openspec/changes/archive/{YYYY-MM-DD}-{change-name}/`
 
 ### Specs Synced
 | Domain | Action | Details |
@@ -470,8 +428,7 @@ Return to the orchestrator:
 
 ### Source of Truth Updated
 The following specs now reflect the new behavior:
-- `openspec/specs/{domain}/spec.md` (openspec/hybrid)
-- Engram main spec `sdd-specs/{project}/{domain}` (engram/hybrid)
+- `openspec/specs/{domain}/spec.md`
 
 ### SDD Cycle Complete
 The change has been fully planned, implemented, verified, and archived.
@@ -482,17 +439,16 @@ Ready for the next change.
 
 - ALWAYS run Step 0 first: NEVER archive when the verify report is missing or its verdict is `FAIL` / has unresolved CRITICAL issues, UNLESS an explicit user-authorized override is passed — and when it is, record the override verbatim in the archive report
 - ALWAYS revalidate the **content binding** in Step 0 when the report carries a `Tree-Hash`: recompute the live reviewed-tree hash (throwaway index, excluding `openspec/` and `.kurama/` — byte-identical to sdd-verify Step 6b and archive-gate.sh) and BLOCK on a mismatch with `"verify receipt stale — re-run sdd-verify"`. Only the same explicit override bypasses it; a legacy report with no `Tree-Hash` falls back to the verdict gate alone
-- ALWAYS write `.kurama/sdd/{change-name}/archive-report.md` on a successful archive, in EVERY mode (Step 5). It is the only signal that retires the cycle for `orchestrator-write-guard.sh`; without it the guard blocks the orchestrator indefinitely after the change is closed
-- ALWAYS run `skills/_shared/lint-spec.sh` over the delta BEFORE merging it (Step 1a), in EVERY mode — resolve it with `test -f` (never a finder). An `ERROR:` line REFUSES the merge: nothing is written, `status: blocked` with `next_recommended: sdd-spec`, findings quoted verbatim. `WARNING:` lines go to `risks` and do not block. A missing script is stated plainly in the report and falls back to the Step 2 preservation readback — never a silent pass
+- ALWAYS write `.kurama/sdd/{change-name}/archive-report.md` on a successful archive (Step 5). It is the only signal that retires the cycle for `orchestrator-write-guard.sh`; without it the guard blocks the orchestrator indefinitely after the change is closed
+- ALWAYS run `skills/_shared/lint-spec.sh` over the delta BEFORE merging it (Step 1a) — resolve it with `test -f` (never a finder). An `ERROR:` line REFUSES the merge: nothing is written, `status: blocked` with `next_recommended: sdd-spec`, findings quoted verbatim. `WARNING:` lines go to `risks` and do not block. A missing script is stated plainly in the report and falls back to the Step 2 preservation readback — never a silent pass
 - ALWAYS sync delta specs BEFORE moving to archive
 - Archival is a MECHANICAL filesystem operation: copy and move artifacts with `cp`/`cp -R`/`mv`/`git mv` in the shell, NEVER through model Read/Write — a model can truncate or alter bytes silently while reporting success, and only an independent `diff -r` catches it
 - ALWAYS run `diff -r` after every archive copy and move (source or pre-move snapshot vs. destination) and include its VERBATIM output in the phase result; EMPTY output is the only passing evidence, and a skipped, missing, or unreported `diff -r` FAILS the phase — agent self-report is never sufficient
 - On a destination collision (the target already exists as a file, directory, or symlink), REFUSE: leave source and destination untouched and return `status: blocked` naming both paths. Never append a suffix, choose another name, overwrite, merge, or delete
-- If shell access is unavailable in `openspec`/`hybrid` mode, return `status: blocked` with `shell access required for mechanical archive copy is unavailable` — NEVER fall back to Read/Write copying
+- If shell access is unavailable, return `status: blocked` with `shell access required for mechanical archive copy is unavailable` — NEVER fall back to Read/Write copying
 - Resolve ADDED / MODIFIED / REMOVED / RENAMED from `skills/_shared/openspec-convention.md` → *Delta Spec Sections* — the canonical definition `sdd-spec` also writes against; do not re-derive it
 - A `MODIFIED` block REPLACES the entire matching requirement, scenarios included. ALWAYS run the **Merge preservation readback** (Step 2) before a merged main spec becomes the source of truth, and BLOCK with `next_recommended: sdd-spec` when a requirement heading or scenario ID disappears without the delta accounting for it — that is a partial MODIFIED block, and writing it through deletes behavior permanently
 - `RENAMED` rewrites the requirement heading in place and PRESERVES its scenarios and their `S-{req}-{n}` IDs; never implement a rename as a delete plus a re-create
-- In engram mode, main specs ARE the `sdd-specs/{project}/{domain}` artifacts — merge deltas there exactly as openspec merges into `openspec/specs/{domain}/spec.md`; never skip the merge
 - When merging into existing specs, PRESERVE requirements not mentioned in the delta
 - A missing REQUIRED upstream artifact → return `status: blocked` naming it (Section D); never archive an incomplete audit trail silently
 - Use ISO date format (YYYY-MM-DD) for archive folder prefix

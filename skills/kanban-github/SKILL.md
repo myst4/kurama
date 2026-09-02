@@ -38,10 +38,8 @@ presence on disk is not activation.
   file being installed NEVER auto-activate the board.
 - `sdd-init` asks the enable question explicitly (default `false`) — the same
   place and manner it asks the TDD question.
-- The settings home mirrors the other pipeline settings:
-  - `openspec` / `hybrid`: the top-level `kanban:` block in `openspec/config.yaml`.
-  - `engram`: the `kanban` block in the `sdd-init/{project}` context
-    artifact (there is no `config.yaml` in these modes).
+- The settings home mirrors the other pipeline settings: the top-level `kanban:`
+  block in `openspec/config.yaml`.
 
 ## Prerequisite: a configured GitHub CLI
 
@@ -112,8 +110,7 @@ persists it. All later card moves reuse these cached values — no rediscovery p
 ```yaml
 # Optional Kanban module — GitHub Projects board sync (see skills/kanban-github/SKILL.md).
 # Installed by default (manifest group `optional`); activation is opt-in per project
-# and REQUIRES a configured GitHub CLI (gh). In engram mode these keys live in the
-# sdd-init/{project} context artifact instead of this file.
+# and REQUIRES a configured GitHub CLI (gh).
 kanban:
   enabled: false             # opt-in switch; set true only after the gh prerequisite checks pass
   user: ""                   # optional assignee override; empty => @me (the active gh account owns every harness-created issue)

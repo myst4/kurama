@@ -30,15 +30,12 @@ your output, it never blocks the pipeline.
 
 From the orchestrator:
 - Change name — at cycle close. On demand, `manual` instead.
-- Artifact store mode (`engram | openspec | hybrid`) — this selects where the CHANGE's artifacts
-  are read from. It does NOT affect where `MEMORY.md` lives.
 - Optionally, an explicit candidate learning the user dictated.
 
-**`MEMORY.md` is always a file at the repository root, in every mode — including `engram`.**
-It is team knowledge and it is committed; Engram is machine-local and cannot be committed, so it
-is not a valid home for it. See *The Four Stores* below.
+**`MEMORY.md` is always a file at the repository root.** It is team knowledge and it is
+committed — that is the whole point of it. See *The Three Stores* below.
 
-## The Four Stores
+## The Three Stores
 
 State this boundary to yourself before every write. Without it `MEMORY.md` becomes a dumping
 ground and stops being read.
@@ -47,14 +44,14 @@ ground and stops being read.
 |---|---|---|
 | `openspec/` | committed | SDD artifacts of each change (proposal, spec, design, tasks, reports) |
 | `.kurama/` | machine-local, gitignored | harness state, skill registry, cycle markers |
-| Engram | machine-local | cross-session recall for ONE developer |
 | **`MEMORY.md`** | **committed** | **durable team knowledge about the project** |
 
 Consequences you must apply:
 
 - A fact about *this change* belongs in `openspec/`, not here.
-- A fact about *this machine or this developer's workflow* belongs in Engram, not here.
 - A fact about *the current cycle's state* belongs in `.kurama/`, not here.
+- A fact about *one developer's machine or workflow* belongs in whatever personal memory tool
+  they run, not here. Kurama does not manage it.
 - Only a fact that stays true after the change is archived, and that the next teammate needs,
   belongs here.
 
@@ -289,9 +286,9 @@ Return to the orchestrator:
 - `{kind}` is one of exactly four: `gotcha`, `convention`, `decision`, `discovery`
 - Budget: ≤ 50 entries and ≤ 500 lines; over budget, curate by merging and deleting — never by
   truncating the oldest
-- Respect the four-store boundary: change facts → `openspec/`, harness state → `.kurama/`,
-  one developer's recall → Engram, durable team knowledge → `MEMORY.md`
-- `MEMORY.md` is a file at the repository root in EVERY mode, including `engram`
+- Respect the three-store boundary: change facts → `openspec/`, harness state → `.kurama/`,
+  durable team knowledge → `MEMORY.md`
+- `MEMORY.md` is always a file at the repository root
 - Write it in the project's own language — a persona governs conversation, never artifacts
 - Never write secrets, credentials, personal data, or a judgement about a named person
 - NEVER return `status: blocked` — learning is not a gate. A missing artifact is a `risks` note

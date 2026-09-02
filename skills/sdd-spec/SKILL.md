@@ -17,19 +17,16 @@ You are a sub-agent responsible for writing SPECIFICATIONS. You take the proposa
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-- **engram**: Read `sdd/{change-name}/proposal` (required) AND the main spec `sdd-specs/{project}/{domain}` for each affected domain (baseline — may legitimately not exist yet, see Step 3). If specs span multiple domains, concatenate into a single artifact with domain headers. Save as `sdd/{change-name}/spec`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — read the baseline file-first (filesystem authoritative, Engram mirror), persist to Engram (single concatenated artifact) AND write domain files to filesystem.
+Read `openspec/changes/{change-name}/proposal.md` (required) AND the main spec `openspec/specs/{domain}/spec.md` for each affected domain (baseline — may legitimately not exist yet, see Step 3), then write the delta spec under `openspec/changes/{change-name}/specs/{domain}/spec.md`. Read and follow `skills/_shared/openspec-convention.md`.
 
 ### Missing required inputs (failure semantics)
 
-The **proposal** (`sdd/{change-name}/proposal`) is a REQUIRED input. If it cannot be retrieved, do NOT proceed or invent one: return the envelope with `status: blocked`, name the missing artifact in `executive_summary`, and set `next_recommended: sdd-propose`. A missing MAIN SPEC is NOT a blocker — it is an empty baseline (see Step 3).
+The **proposal** (`openspec/changes/{change-name}/proposal.md`) is a REQUIRED input. If it cannot be retrieved, do NOT proceed or invent one: return the envelope with `status: blocked`, name the missing artifact in `executive_summary`, and set `next_recommended: sdd-propose`. A missing MAIN SPEC is NOT a blocker — it is an empty baseline (see Step 3).
 
 ## What to Do
 
@@ -44,22 +41,11 @@ From the proposal's "Affected Areas", determine which spec domains are touched. 
 
 For each affected domain, read the CURRENT source-of-truth spec so your delta describes CHANGES to it. On a first cycle a domain may have no baseline yet — that is an EMPTY BASELINE, not an error: when the baseline is empty, write a FULL spec for that domain (see Step 4) and do NOT return `blocked`.
 
-**IF mode is `openspec`:** If `openspec/specs/{domain}/spec.md` exists, read it to understand CURRENT behavior. If it does not exist, treat the domain as an empty baseline.
-
-**IF mode is `engram`:** Read the main spec for each affected domain from Engram (per `skills/_shared/engram-convention.md`):
-
-```
-mem_search(query: "sdd-specs/{project}/{domain}", project: "{project}") → get ID (if any)
-mem_get_observation(id) → full main spec (baseline)
-```
-
-If the artifact is absent, that is the empty baseline. Do NOT rely on "specs already retrieved" — retrieve them here yourself.
-
-**IF mode is `hybrid`:** Read file-first (filesystem is authoritative; Engram is a searchable mirror). Use `openspec/specs/{domain}/spec.md` as the baseline if it exists; otherwise fall back to the Engram main spec `sdd-specs/{project}/{domain}`. If the two diverge, the FILE wins — note the reconciliation in your return envelope.
+If `openspec/specs/{domain}/spec.md` exists, read it to understand CURRENT behavior. If it does not exist, treat the domain as an empty baseline. Do NOT rely on "specs already retrieved" — retrieve them here yourself.
 
 ### Step 4: Write Delta Specs
 
-**IF mode is `openspec` or `hybrid`:** Create specs inside the change folder:
+Create specs inside the change folder:
 
 ```
 openspec/changes/{change-name}/
@@ -69,8 +55,6 @@ openspec/changes/{change-name}/
         └── spec.md          ← Delta spec
 ```
 
-**IF mode is `engram`:** Do NOT create any `openspec/` directories or files. Compose the spec content in memory — you will persist it in Step 5.
-
 #### MODIFIED Requirements Workflow (CRITICAL — read this before writing any delta)
 
 A `## MODIFIED Requirements` block is a **whole-requirement replacement, not a patch**. Canonical
@@ -79,7 +63,7 @@ exactly:
 
 ```
 1. LOCATE the requirement in the baseline you read in Step 3
-   (openspec/specs/{domain}/spec.md, or the Engram main spec sdd-specs/{project}/{domain})
+   (openspec/specs/{domain}/spec.md)
 2. COPY the ENTIRE requirement block — from `### Requirement:` through the LAST of its
    scenarios, INCLUDING every scenario you are not touching
 3. PASTE that whole block under `## MODIFIED Requirements`
@@ -94,8 +78,8 @@ exactly:
 - `sdd-archive` REPLACES the whole matching requirement in the main spec with your MODIFIED
   block. It merges blocks, never scenarios — it cannot tell a deliberate deletion from a
   scenario you simply did not paste.
-- So every scenario you did NOT copy is DELETED from the source of truth, silently. In
-  `openspec`/`hybrid` mode it survives only in git history; in `engram` mode it is gone.
+- So every scenario you did NOT copy is DELETED from the source of truth, silently. It
+  survives only in git history.
 - Concretely: a requirement with five scenarios, edited by pasting only the one scenario you
   changed, archives as a requirement with ONE scenario. Four are lost.
 - Adding behavior WITHOUT changing existing behavior? Use `ADDED`. ADDED appends and can never
@@ -243,11 +227,8 @@ fi
 [ -n "$linter" ] && bash "$linter" openspec/changes/{change-name}/specs
 ```
 
-- **openspec / hybrid**: run it on `openspec/changes/{change-name}/specs` (the directory —
-  it lints every domain spec under it).
-- **engram**: your spec is composed in memory, so write it to a temp file
-  (`mktemp "${TMPDIR:-/tmp}/sdd-spec.XXXXXX.md"`) and lint that path, then delete it. There is
-  no reason for engram mode to skip a check the filesystem modes get.
+Run it on `openspec/changes/{change-name}/specs` (the directory — it lints every domain spec
+under it).
 
 What to do with the result:
 
@@ -274,8 +255,7 @@ What to do with the result:
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `spec`
-- topic_key: `sdd/{change-name}/spec`
-- type: `architecture`
+- path: `openspec/changes/{change-name}/specs/{domain}/spec.md`
 
 ### Step 6: Return Summary
 
@@ -316,7 +296,7 @@ Ready for design (sdd-design). If design already exists, ready for tasks (sdd-ta
 - Deleting a scenario on purpose is legitimate: delete it from the copied full block AND say so in the `(Previously: ...)` line, so the archive's preservation readback can account for it
 - `REMOVED` requirements MUST carry `(Reason: ...)` and SHOULD carry `(Migration: ...)` when consumers, persisted behavior, docs, or tests are affected
 - `RENAMED` requirements MUST state old and new names explicitly and SHOULD carry `(Migration: ...)`; never model a rename as REMOVED + ADDED — that discards the requirement's scenario history and its stable scenario IDs
-- **ALWAYS run `skills/_shared/lint-spec.sh` on your own output before persisting it (Step 4b)**, in EVERY mode — resolve it with `test -f` (never a finder), fix every `ERROR:` it reports and re-run until clean, return `status: blocked` quoting the findings verbatim if you cannot, and state plainly that the check did not run when the script is absent. A structural defect you did not catch here merges into `openspec/specs/` at archive time, and that directory has exactly one writer
+- **ALWAYS run `skills/_shared/lint-spec.sh` on your own output before persisting it (Step 4b)** — resolve it with `test -f` (never a finder), fix every `ERROR:` it reports and re-run until clean, return `status: blocked` quoting the findings verbatim if you cannot, and state plainly that the check did not run when the script is absent. A structural defect you did not catch here merges into `openspec/specs/` at archive time, and that directory has exactly one writer
 - Apply any `rules.specs` from `openspec/config.yaml`
 - **Size budget**: Spec artifact MUST be under 650 words. Prefer requirement tables over narrative descriptions. Each scenario: 3-5 lines max. This budget NEVER justifies trimming scenarios out of a `MODIFIED` block — completeness outranks it (see *MODIFIED Requirements Workflow*).
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

@@ -1,7 +1,7 @@
 ---
 name: skill-registry
 description: >
-  Rebuild the project skill registry by running _shared/build-skill-registry.sh, then report the counts and save the result to engram when available.
+  Rebuild the project skill registry by running _shared/build-skill-registry.sh, then report the counts.
   Trigger: When user says "update skills", "skill registry", "actualizar skills", "update registry", or after installing/removing skills.
 license: MIT
 metadata:
@@ -96,30 +96,7 @@ shows up as sub-agents quietly ignoring conventions, never as an error.
 Reporting completion without this check is a protocol violation. "I finished" is
 not evidence; the file on disk is.
 
-## Step 3: Save to Engram (when available)
-
-If the `mem_save` tool is available, also store the registry so it survives the
-session:
-
-```
-mem_save(
-  title: "skill-registry",
-  topic_key: "skill-registry",
-  type: "config",
-  project: "{project}",
-  capture_prompt: false,
-  content: "{the registry markdown you just read back}"
-)
-```
-
-`topic_key` makes it an upsert — running again updates the same observation.
-`capture_prompt: false` because the registry is an automated build output, not a
-human decision (`_shared/engram-convention.md` → *Prompt Capture*).
-
-The file on disk is the guarantee; Engram is the cross-session bonus. Never skip
-Step 1 because Engram already holds a copy.
-
-## Step 4: Return Summary
+## Step 3: Return Summary
 
 ```markdown
 ## Skill Registry Updated
@@ -128,7 +105,6 @@ Step 1 because Engram already holds a copy.
 **Location**: .kurama/skill-registry.md
 **Skills**: {N} ({U} user, {P} project)
 **Conventions**: {number of rows in the Project Conventions table}
-**Engram**: {saved / not available}
 
 ### Next Steps
 The orchestrator reads this registry once per session and passes pre-resolved
@@ -145,9 +121,8 @@ is in the file, and re-typing it is the token cost this skill exists to remove.
 - NEVER add a compact-rules or summary section to `.kurama/skill-registry.md`
 - If the script is missing, report `blocked` and stop — there is no fallback scan
 - ALWAYS verify the file landed before reporting success; a missing registry degrades silently
-- ALWAYS save to engram if `mem_save` is available
-- The registry is written in EVERY persistence mode — `.kurama/` is harness
-  infrastructure, and the mode gates that suppress `openspec/` never apply to it
+- The registry lives under `.kurama/` — machine-local harness infrastructure,
+  never a committed artifact, and never written into `openspec/`
 - The script owns which directories are scanned, what is excluded and how
   duplicates resolve. Changing that behaviour means changing the script, never
   this file: one implementation, or two that disagree.

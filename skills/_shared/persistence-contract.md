@@ -1,81 +1,45 @@
 # Persistence Contract (shared across all SDD skills)
 
-> **Scope — these modes govern SDD ARTIFACTS, not implementation code.** Everything in this contract about "writing" or "project files" refers to *SDD artifacts* (exploration, proposal, spec, design, tasks, apply-progress, verify-report, archive-report, state). It does NOT restrict the implementation code that `sdd-apply` writes. Writing source files, tests, and required configuration is **ALWAYS allowed and REQUIRED in every mode** — including `engram` — because producing that code is the entire point of the apply phase.
+> **Scope — this contract governs SDD ARTIFACTS, not implementation code.** Everything below about "writing" or "project files" refers to *SDD artifacts* (exploration, brainstorm, proposal, spec, design, tasks, apply-progress, verify-report, archive-report). It does NOT restrict the implementation code that `sdd-apply` writes. Writing source files, tests, and required configuration is **ALWAYS allowed and REQUIRED** — producing that code is the entire point of the apply phase.
 
-## Engram Availability Check (once, at cycle start)
+## The one store, and the one state directory
 
-Before the first phase of a cycle, the orchestrator MUST determine whether Engram is reachable by attempting **one cheap Engram call** — e.g. `mem_search(query: "sdd", project: "{project}")`.
+There is exactly ONE artifact store and it is the filesystem:
 
-- Call returns (even with zero results) → Engram is **available**.
-- Call errors, times out, or the `mem_*` tools are absent → Engram is **unavailable**.
+| What | Where | Committed? | Who reads it |
+|------|-------|-----------|--------------|
+| **Artifacts** — exploration, brainstorm ledger, proposal, spec, design, tasks, verify report, archive report | `openspec/` (paths in `openspec-convention.md`) | Yes — they are the deliverable | Downstream phases, humans, code review |
+| **Cycle state** — `state.md`, the cycle markers, the skill registry | `.kurama/` | No — gitignored, machine-local | The orchestrator, `scripts/sdd-status.sh`, the deterministic hooks |
 
-Run this check once and propagate the result to every phase prompt. Do not re-probe on each phase.
+That split is the whole contract. Artifacts are the repo's memory of *what was decided*; `.kurama/` is the harness's memory of *where this cycle is*. Never write an artifact into `.kurama/`, and never move cycle state into `openspec/`.
 
-## Mode Resolution
+**No modes.** There is no `artifact_store.mode` setting. Files under `openspec/` are the only artifact store; every phase reads and writes them the same way in every project. A config that still carries `artifact_store.mode` is handled by `sdd-new`/`sdd-continue` — one line, then the cycle proceeds normally.
 
-The orchestrator passes `artifact_store.mode` with one of: `engram | openspec | hybrid`.
+## Behavior
 
-Default resolution (when orchestrator does not explicitly set a mode):
-1. If Engram is available → use `engram`
-2. If Engram is unavailable → use `engram` degraded to the **`.kurama/sdd/` filesystem fallback** (see *Harness State & Filesystem Fallback* below), and warn the user. Persistence is never skipped — dropping it would lose cross-session recovery entirely.
+- **Read** — retrieve upstream artifacts from the paths in `openspec-convention.md`.
+- **Write** — the phase writes its artifact file during its main step. There is no separate persistence step afterwards.
+- **Write failure** — a filesystem write failure is a genuine blocker; there is no second store. Return `status: blocked` naming the failing path.
 
-`openspec` and `hybrid` are NEVER used by default — only when explicitly passed.
+### Retrieval failure semantics
 
-**Removed mode.** `none` (persist nothing, return artifacts inline) no longer exists. A workflow whose premise is that specs are the source of truth cannot advance those specs when nothing survives the session: `sdd-archive` had nothing to merge, so the main specs never moved. If a resolved mode is `none` — an old config or a stale prompt — report it as unsupported and name `openspec` as the replacement; do NOT proceed writing nothing.
+An upstream artifact "cannot be retrieved" when its file is absent or unreadable.
 
-### Engram unavailable while `engram`/`hybrid` is selected
+- **REQUIRED artifact missing** → do NOT silently proceed. Return `status: blocked`, name the missing artifact in `executive_summary`, and set `next_recommended` to the phase that produces it (per the Canonical Phase DAG in `sdd-phase-common.md`).
+- **OPTIONAL artifact missing** → proceed, and note the absence in `risks`.
 
-If `engram` (default or explicit) is selected but Engram is unavailable at cycle start, degrade to the `.kurama/sdd/` filesystem fallback with a user warning — read and write SDD artifacts as markdown under `.kurama/sdd/{change-name}/` instead of Engram. This preserves compaction recovery without creating `openspec/` in the repo. For `hybrid`, an unavailable Engram is non-fatal because the filesystem is authoritative (see *Hybrid Mode*): continue file-only and note the missing mirror as a risk.
+## Harness State (`.kurama/`)
 
-## Behavior Per Mode
+`.kurama/` is the **harness state directory** — gitignored infrastructure, never repo-tracked. It holds:
 
-| Mode | Read from | Write to | SDD artifact files |
-|------|-----------|----------|--------------------|
-| `engram` | Engram | Engram (+ the `.kurama/` cycle markers) | Never in `openspec/` (code still written) |
-| `openspec` | Filesystem | Filesystem (+ the `.kurama/` cycle markers) | Yes |
-| `hybrid` | Filesystem (authoritative), Engram mirror as fallback | Both (+ the `.kurama/` cycle markers) | Yes |
+- `.kurama/skill-registry.md` — the compact skill registry
+- `.kurama/sdd/{change-name}/` — the cycle markers below
 
-The `Read from` / `Write to` / `SDD artifact files` columns describe where **SDD artifacts** go — never the implementation code, which `sdd-apply` always writes to the project.
+Nothing under `.kurama/` is an artifact. It is machine-local: wiping it loses the current cycle's position, never a decision.
 
-The three `.kurama/` **cycle markers** are mode-independent harness infrastructure and are written in EVERY row above — see *Hook-visible cycle markers* below.
+### Hook-visible cycle markers
 
-When `engram` is degraded to the `.kurama/sdd/` filesystem fallback (Engram unavailable), read and write SDD artifacts as markdown under `.kurama/sdd/{change-name}/` — the harness state directory, not repo-tracked `openspec/`.
-
-### Hybrid Mode
-
-Persists every artifact to BOTH the filesystem and Engram simultaneously:
-- Filesystem (OpenSpec): the **authoritative**, human-readable, version-controllable source of truth
-- Engram: a **searchable mirror** for cross-session recovery, compaction survival, and deterministic search
-
-**Authority**: the filesystem is authoritative; Engram is only a mirror.
-
-Write to filesystem (per `openspec-convention.md`) AND to Engram (per `engram-convention.md`) for every artifact. Stamp each artifact's frontmatter with `last_updated` (ISO 8601) in BOTH stores so divergence is detectable.
-
-**Read behavior — file-first**: read the filesystem artifact as the source of truth. Consult the Engram mirror only when the file is absent.
-
-**Divergence handling**: if the file and the Engram mirror disagree (e.g. a prior Engram write failed while the file write succeeded, or `last_updated` differs), **the file wins**. Re-sync Engram from the file and record the reconciliation in the phase's return envelope (`risks`).
-
-**Write behavior**: the filesystem write is required and makes the operation durable. Attempt the Engram mirror write too; if it fails, retry once, then follow *Write Failure Recovery* and report it as a risk — because the file is authoritative, a missing mirror never halts the cycle.
-
-Token cost warning: hybrid consumes MORE tokens per operation. Use only when you need both a version-controllable source of truth AND cross-session Engram recovery.
-
-## Harness State & Filesystem Fallback
-
-`.kurama/` is the **harness state directory** — gitignored infrastructure, not repo-tracked SDD artifacts. Consistent with the `skill-registry` skill (which writes `.kurama/skill-registry.md` in every mode), the persistence-mode gates that suppress `openspec/` never apply to `.kurama/`. It holds:
-
-- `.kurama/skill-registry.md` — the compact skill registry (written in every mode)
-- `.kurama/sdd/{change-name}/{artifact-type}.md` — the SDD artifact **fallback store**
-
-The `.kurama/sdd/` store is used when Engram is the intended backend but is unavailable or fails:
-
-- Engram unavailable at cycle start (degraded `engram` mode) → read/write all SDD artifacts here.
-- A single `mem_save` fails mid-cycle → write that artifact here (see *Write Failure Recovery*).
-
-Filenames mirror the Engram naming: the title/topic_key `sdd/{change-name}/{artifact-type}` maps to `.kurama/sdd/{change-name}/{artifact-type}.md`, so recovery and downstream retrieval use the same identifiers regardless of backend.
-
-### Hook-visible cycle markers (written in EVERY mode)
-
-The two shipped Claude Code hooks — `orchestrator-write-guard.sh` and `archive-gate.sh` — are *mechanisms*, not prose: they run outside the model and can read only the filesystem. Neither can query Engram. So three markers are written under `.kurama/sdd/{change-name}/` in **EVERY** mode, `engram` included. They are harness infrastructure exactly like `.kurama/skill-registry.md`, so the persistence-mode gates never apply to them:
+The two shipped Claude Code hooks — `orchestrator-write-guard.sh` and `archive-gate.sh` — are *mechanisms*, not prose: they run outside the model and read only the filesystem, and they read it at fixed paths under `.kurama/`. Three markers are written there:
 
 | Marker | Written by | When | Read by |
 |--------|-----------|------|---------|
@@ -85,161 +49,64 @@ The two shipped Claude Code hooks — `orchestrator-write-guard.sh` and `archive
 
 Binding rules:
 
-- **In addition, never instead.** `engram` still saves the artifact to Engram; `openspec`/`hybrid` still write the `openspec/` file and it stays authoritative. The `.kurama/` copy is a mechanical mirror for the hooks and for offline tooling; if the two ever disagree, the Engram/`openspec/` copy wins.
+- **In addition, never instead.** `verify-report.md` and `archive-report.md` are ALSO written as artifacts under `openspec/changes/{change-name}/`, which stays authoritative. The `.kurama/` copy is a mechanical mirror for the hooks and for offline tooling; if the two ever disagree, the `openspec/` copy wins.
 - **Full content, never a stub.** `verify-report.md` MUST be the COMPLETE report markdown: the gate parses the `### Verdict` line and the Content Binding `Tree-Hash:` line straight out of this file.
-- **`archive-report.md` is mandatory on a successful archive, in every mode.** It is the ONLY marker that tells the write guard the cycle is over; without it the guard keeps blocking the orchestrator long after the change was archived, and the gate keeps auto-detecting a closed change.
+- **`archive-report.md` is mandatory on a successful archive.** It is the ONLY marker that tells the write guard the cycle is over; without it the guard keeps blocking the orchestrator long after the change was archived, and the gate keeps auto-detecting a closed change.
 - Writing these markers never disturbs the verify→archive content binding: the receipt pathspec excludes `.kurama/` (see `sdd-verify` Step 6b).
-- Report a failed marker write in the phase's `risks`. Where `.kurama/sdd/` is *only* the mirror, that is a WARNING and the phase continues; where it is also the store (degraded `engram`), it is the artifact write itself and follows *Write Failure Recovery*.
+- Report a failed marker write in the phase's `risks`. The marker is a mirror, so a failed write is a WARNING and the phase continues — the artifact itself is already durable under `openspec/`.
 
-Why this is not optional: with the report only in Engram, `archive-gate.sh` found nothing on disk and blocked EVERY legitimate archive — training the model to reach for `KURAMA_ARCHIVE_OVERRIDE=1`, which bypasses the pipeline's most important gate. One mode-independent on-disk path makes both hooks work in all three modes without a line of hook bash changing.
-
-## Write Failure Recovery
-
-When a persistence write fails, recover instead of aborting:
-
-**`engram` mode** — if `mem_save` fails:
-1. **Retry once.**
-2. If it still fails, **write the full artifact** to `.kurama/sdd/{change-name}/{artifact-type}.md` and continue the phase.
-3. **Report the fallback** in the return envelope `risks`, naming the artifact and the `.kurama/sdd/` path so the orchestrator and downstream phases can locate it.
-
-**`hybrid` mode** — the filesystem file is authoritative and is written first, so the artifact is already durable. If the Engram mirror write fails, retry once, then leave the mirror missing and record the reconciliation gap in `risks`; the next reader falls back to the file (file-first reads). No `.kurama/sdd/` copy is needed because the `openspec/` file already holds the content.
-
-**`openspec` mode** — a filesystem write failure is a genuine blocker (there is no second store). Return `status: blocked` naming the failing path.
-
-
-A persistence failure never silently drops an artifact and never halts the cycle in `engram`/`hybrid` — the artifact stays recoverable from `.kurama/sdd/` or the authoritative file. The old "the pipeline BREAKS" framing is retired: missing persistence is a reported, recoverable risk, not a fatal dead end.
+Why this is not optional: a hook cannot read anything but the filesystem, and it must find the marker without knowing which change is active. One fixed on-disk path makes both hooks work without a line of hook bash changing.
 
 ## State Persistence (Orchestrator)
 
-The orchestrator persists DAG state after each phase transition to enable SDD recovery after compaction.
+The orchestrator persists DAG state after each phase transition so an SDD cycle survives compaction:
 
-| Mode | Persist State | Recover State |
-|------|--------------|---------------|
-| `engram` | `mem_save(topic_key: "sdd/{change-name}/state")` **AND** write `.kurama/sdd/{change-name}/state.md` | `mem_search("sdd/{change-name}/state")` → `mem_get_observation(id)`; `.kurama/sdd/{change-name}/state.md` as fallback |
-| `engram` (degraded) | Write `.kurama/sdd/{change-name}/state.md` | Read `.kurama/sdd/{change-name}/state.md` |
-| `openspec` | Write `openspec/changes/{change-name}/state.yaml` **AND** `.kurama/sdd/{change-name}/state.md` | Read `openspec/changes/{change-name}/state.yaml` |
-| `hybrid` | Both: write `state.yaml` AND `mem_save` — plus `.kurama/sdd/{change-name}/state.md` | Filesystem first (authoritative); Engram mirror as fallback |
+- Write `openspec/changes/{change-name}/state.yaml` — the committed, human-readable cycle state.
+- Write `.kurama/sdd/{change-name}/state.md` — the machine-local cycle marker.
 
-The `engram (degraded)` row applies whenever Engram is unavailable at cycle start (see *Engram Availability Check*): state survives compaction via `.kurama/sdd/` instead of being lost.
+Recover by reading `state.yaml` (authoritative), falling back to `state.md`.
 
-`.kurama/sdd/{change-name}/state.md` is a **cycle marker written in every row above**, not only in the degraded one (see *Hook-visible cycle markers*). It is what `orchestrator-write-guard.sh` reads to know a cycle is active — persist state to Engram/`openspec/` as the row says, and write this file alongside it after every phase transition. It stays until `sdd-archive` writes `.kurama/sdd/{change-name}/archive-report.md`, which retires the cycle; do NOT delete it by hand.
+`.kurama/sdd/{change-name}/state.md` is what `orchestrator-write-guard.sh` reads to know a cycle is active. It stays until `sdd-archive` writes `.kurama/sdd/{change-name}/archive-report.md`, which retires the cycle; do NOT delete it by hand.
 
 ## Common Rules
 
-> **Every rule below governs SDD ARTIFACTS only** (exploration, proposal, spec, design, tasks, apply-progress, verify-report, archive-report, state) — never the implementation code `sdd-apply` writes. In these rules, "project files" means *SDD artifact files*. Implementation code (source, tests, required configuration) is **ALWAYS written to the project in every mode**, including `engram`; the mode only decides where the SDD artifacts live.
+> **Every rule below governs SDD ARTIFACTS only** — never the implementation code `sdd-apply` writes, which is always written to the project.
 
-- `engram` → do NOT write SDD artifact files into the repo; persist SDD artifacts to Engram and return observation IDs. If Engram is unavailable or a save fails, fall back to `.kurama/sdd/` (see *Harness State & Filesystem Fallback* and *Write Failure Recovery*). Implementation code is still written to the project as normal
-- `openspec` → write SDD artifact files ONLY to paths defined in `openspec-convention.md`
-- `hybrid` → persist SDD artifacts to BOTH filesystem (authoritative) AND Engram (mirror); follow both conventions
-- EVERY mode → additionally write the three `.kurama/sdd/{change-name}/` cycle markers (`state.md`, `verify-report.md`, `archive-report.md`). They are harness infrastructure, not repo-tracked artifacts, so the mode gates above never suppress them — and they are the only thing the deterministic hooks can see
-- NEVER force `openspec/` creation unless orchestrator explicitly passed `openspec` or `hybrid`
-- If no mode is resolvable, follow *Mode Resolution*: `engram` when Engram is available, else the `.kurama/sdd/` fallback — never skip persistence, and never write `openspec/` unless `openspec`/`hybrid` was explicitly passed
+- Write SDD artifact files ONLY to the paths defined in `openspec-convention.md`.
+- Additionally write the three `.kurama/sdd/{change-name}/` cycle markers (`state.md`, `verify-report.md`, `archive-report.md`). They are harness infrastructure, not repo-tracked artifacts, and they are the only thing the deterministic hooks can see.
+- Never invent a second artifact store. If a file cannot be written, that is a blocker to report, not a reason to persist somewhere else.
 
 ## Sub-Agent Context Rules
 
-Sub-agents launch with a fresh context and NO access to the orchestrator's instructions or memory protocol.
+Sub-agents launch with a fresh context and NO access to the orchestrator's instructions.
 
 Who reads, who writes:
-- Non-SDD (general task): orchestrator searches engram, passes summary in prompt; sub-agent saves discoveries via `mem_save`
-- SDD (phase with dependencies): sub-agent reads artifacts directly from backend; sub-agent saves its artifact
-- SDD (phase without dependencies, e.g. explore): nobody reads; sub-agent saves its artifact
+- Non-SDD (general task): the orchestrator passes the relevant context in the prompt; the sub-agent returns its discoveries inline in its envelope.
+- SDD (phase with dependencies): the sub-agent reads upstream artifacts directly from `openspec/`; the sub-agent writes its own artifact.
+- SDD (phase without dependencies, e.g. explore): nobody reads; the sub-agent writes its artifact.
 
 Why this split:
-- Orchestrator reads for non-SDD: it knows what context is relevant; sub-agents doing their own searches waste tokens on irrelevant results
-- Sub-agents read for SDD: SDD artifacts are large; inlining them in the orchestrator prompt would consume the entire context window
-- Sub-agents always write: they have the complete detail on what happened; nuance is lost by the time results flow back to the orchestrator
+- SDD artifacts are large; inlining them in the orchestrator prompt would consume the entire context window.
+- Sub-agents always write: they have the complete detail on what happened; nuance is lost by the time results flow back to the orchestrator.
 
 ## Orchestrator Prompt Instructions for Sub-Agents
 
-The orchestrator injects the ONE persistence/retrieval block that matches the resolved `artifact_store.mode` (plus the degraded-Engram case). **Never inject `mem_save` instructions for `openspec`** — those modes do not call Engram; instructing a sub-agent to `mem_save` there contradicts the mode and may invoke tools that are absent. There is no single "MANDATORY for all modes" block — the wording is parametrized per mode below.
-
-### Non-SDD (general task) — inject only when Engram is available
-
-```
-PERSISTENCE (MANDATORY):
-If you make important discoveries, decisions, or fix bugs, you MUST save them to engram before returning:
-  mem_save(title: "{short description}", type: "{decision|bugfix|discovery|pattern}",
-           project: "{project}", content: "{What, Why, Where, Learned}")
-Do NOT return without saving what you learned. This is how the team builds persistent knowledge across sessions.
-```
-
-If Engram is unavailable, omit this block (the sub-agent returns discoveries inline in its envelope instead).
-
-This general-task save records a genuine discovery/decision, so it does NOT set `capture_prompt: false` —
-it keeps the default (`true`). The `capture_prompt: false` flag is reserved for automated SDD artifact
-saves (see the SDD persistence variants below and `engram-convention.md` → *Prompt Capture*).
-
 ### SDD retrieval preamble (phases with upstream dependencies)
 
-Inject the variant matching the mode. In every variant: if a REQUIRED upstream artifact cannot be retrieved, the sub-agent returns `status: blocked` naming it (see `sdd-phase-common.md` Section B); an OPTIONAL one that is missing is noted in `risks`.
-
-**`engram`:**
 ```
-Artifact store mode: engram
-Read these artifacts before starting (search returns truncated previews):
-  mem_search(query: "sdd/{change-name}/{type}", project: "{project}") → get ID
-  mem_get_observation(id: {id}) → full content (REQUIRED)
+Read these artifacts before starting, from the paths defined in openspec-convention.md.
 ```
 
-**`hybrid`:** same as `engram` but READ FILE-FIRST — read the `openspec/` artifact file as the source of truth; call `mem_get_observation` only if the file is absent. If file and mirror diverge, the file wins.
-
-**`openspec`:**
-```
-Artifact store mode: openspec
-Read these artifacts before starting from the paths defined in openspec-convention.md.
-```
-
-**degraded `engram` (Engram unavailable):** read upstream artifacts from `.kurama/sdd/{change-name}/{type}.md`.
+If a REQUIRED upstream artifact cannot be retrieved, the sub-agent returns `status: blocked` naming it (see `sdd-phase-common.md` Section B); an OPTIONAL one that is missing is noted in `risks`.
 
 ### SDD persistence (phases that produce an artifact)
 
-Inject the variant matching the mode:
-
-**`engram`:**
 ```
-PERSISTENCE (engram): after completing your work, call:
-  mem_save(
-    title: "sdd/{change-name}/{artifact-type}",
-    topic_key: "sdd/{change-name}/{artifact-type}",
-    type: "architecture",
-    project: "{project}",
-    capture_prompt: false,
-    content: "{your full artifact markdown}"
-  )
-If mem_save fails, retry once; if it still fails, write the artifact to .kurama/sdd/{change-name}/{artifact-type}.md
-and report the fallback path in your envelope risks. Do not return without persisting the artifact somewhere the
-next phase can read it.
+PERSISTENCE: write the artifact file to the path defined in openspec-convention.md.
+Do not return without writing it — downstream phases read your output from that file.
 ```
 
-`capture_prompt: false` is REQUIRED on every SDD artifact save — these are automated pipeline
-outputs, not human decisions, so they must not capture the orchestrator's launch prompt (see
-`engram-convention.md` → *Prompt Capture*).
-
-When the artifact is `verify-report` or `archive-report`, append to the injected block: *"Additionally
-write the full artifact to `.kurama/sdd/{change-name}/{artifact-type}.md`. This is a cycle marker read by
-the deterministic hooks, required in EVERY mode — not a fallback, and not conditional on the Engram save
-failing."* (see *Hook-visible cycle markers*).
-
-**`hybrid`:**
-```
-PERSISTENCE (hybrid): write the artifact file per openspec-convention.md (AUTHORITATIVE) AND call mem_save
-(mirror) with capture_prompt: false, stamping last_updated (ISO 8601) in the frontmatter of both. If the
-mem_save mirror write fails, retry once, then leave it and note the reconciliation gap in risks — the file
-remains the source of truth.
-```
-
-**`openspec`:**
-```
-PERSISTENCE (openspec): write the artifact file ONLY to the path defined in openspec-convention.md.
-Do NOT call mem_save — Engram is not used in this mode.
-```
-
-
-**degraded `engram` (Engram unavailable):**
-```
-PERSISTENCE (engram fallback): Engram is unavailable this cycle. Write the artifact to
-.kurama/sdd/{change-name}/{artifact-type}.md and report the path in your envelope artifacts.
-```
+When the artifact is `verify-report` or `archive-report`, append: *"Additionally write the full artifact to `.kurama/sdd/{change-name}/{artifact-type}.md`. This is a cycle marker read by the deterministic hooks — a mirror of the artifact, not a substitute for it."* (see *Hook-visible cycle markers*).
 
 ## Skill Registry
 

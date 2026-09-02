@@ -18,9 +18,8 @@ You are a sub-agent responsible for creating PROPOSALS. You take the exploration
 From the orchestrator:
 - Change name (e.g., "add-dark-mode")
 - Exploration analysis (from sdd-explore) OR direct user description
-- OPTIONALLY, a brainstorm ledger reference (`sdd/{change-name}/brainstorm`) from the
-  orchestrator's brainstorm gate — see *Step 3c* below
-- Artifact store mode (`engram | openspec | hybrid`)
+- OPTIONALLY, a brainstorm ledger reference (`openspec/changes/{change-name}/brainstorm.md`) from
+  the orchestrator's brainstorm gate — see *Step 3c* below
 
 ## Execution and Persistence Contract
 
@@ -28,10 +27,7 @@ From the orchestrator:
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
-- **engram**: Read `sdd/{change-name}/explore` (optional), `sdd/{change-name}/brainstorm` (optional) and `sdd-init/{project}` (optional). Save artifact as `sdd/{change-name}/proposal`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem. Retrieve dependencies from Engram (primary) with filesystem fallback.
-- Never force `openspec/` creation unless user requested file-based persistence or mode is `hybrid`.
+Read `openspec/changes/{change-name}/exploration.md` (optional) and `openspec/changes/{change-name}/brainstorm.md` (optional), then write `openspec/changes/{change-name}/proposal.md`. Read and follow `skills/_shared/openspec-convention.md`.
 
 ## What to Do
 
@@ -40,20 +36,16 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 2: Create Change Directory
 
-**IF mode is `openspec` or `hybrid`:** create the change folder structure:
+Create the change folder structure:
 
 ```
 openspec/changes/{change-name}/
 └── proposal.md
 ```
 
-**IF mode is `engram`:** Do NOT create any `openspec/` directories. Skip this step.
-
 ### Step 3: Read Existing Specs
 
-**IF mode is `openspec` or `hybrid`:** If `openspec/specs/` has relevant specs, read them to understand current behavior that this change might affect.
-
-**IF mode is `engram`:** Existing context was already retrieved from Engram in the Persistence Contract. Skip filesystem reads.
+If `openspec/specs/` has relevant specs, read them to understand current behavior that this change might affect.
 
 ### Step 3b: Classify the Change Size
 
@@ -85,9 +77,8 @@ and `sdd-design` delegations. The information is collapsed, never omitted — `s
 ### Step 3c: Read the Brainstorm Ledger (when one exists)
 
 The orchestrator's brainstorm gate may have produced a decision ledger before you were launched
-(`sdd/{change-name}/brainstorm` in engram, `openspec/changes/{change-name}/brainstorm.md` in
-openspec/hybrid). It is OPTIONAL upstream: a clear request never had one, and its absence is
-normal and never blocks you.
+(`openspec/changes/{change-name}/brainstorm.md`). It is OPTIONAL upstream: a clear request never
+had one, and its absence is normal and never blocks you.
 
 When it exists, map it — it is the record of what a human actually decided, and the proposal is
 where those decisions become binding:
@@ -228,8 +219,7 @@ The system {MUST/SHALL/SHOULD} {do something specific}.
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `proposal`
-- topic_key: `sdd/{change-name}/proposal`
-- type: `architecture`
+- path: `openspec/changes/{change-name}/proposal.md`
 
 ### Step 6: Return Summary
 

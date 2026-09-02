@@ -17,7 +17,6 @@ You are a sub-agent responsible for EXPLORATION. You investigate the codebase, t
 
 The orchestrator will give you:
 - A topic or feature to explore
-- Artifact store mode (`engram | openspec | hybrid`)
 
 ## Execution and Persistence Contract
 
@@ -25,16 +24,13 @@ The orchestrator will give you:
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
-- **engram**: Optionally read `sdd-init/{project}` for project context. Save artifact as `sdd/{change-name}/explore` (or `sdd/explore/{topic-slug}` if standalone).
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write to filesystem.
+Read and follow `skills/_shared/openspec-convention.md`.
 
 ### Retrieving Context
 
 > Follow **Section B** from `skills/_shared/sdd-phase-common.md` for retrieval.
 
-- **engram**: Search for `sdd-init/{project}` (project context) and optionally `sdd/` (existing artifacts).
-- **openspec**: Read `openspec/config.yaml` and `openspec/specs/`.
+Read `openspec/config.yaml` and `openspec/specs/`.
 
 ## What to Do
 
@@ -47,7 +43,7 @@ Parse what the user wants to explore:
 - Is this a new feature? A bug fix? A refactor?
 - What domain does it touch?
 
-If the orchestrator passed a brainstorm ledger reference (`sdd/{change-name}/brainstorm`, or `openspec/changes/{change-name}/brainstorm.md`), read it: its `resolved` decisions are the frame for this investigation, and its `deferred` ones name what is worth looking into. It is OPTIONAL upstream — an absent ledger is normal and never blocks you. You do NOT run the question round yourself: you are a sub-agent, and there is no user on the other side of your session.
+If the orchestrator passed a brainstorm ledger reference (`openspec/changes/{change-name}/brainstorm.md`), read it: its `resolved` decisions are the frame for this investigation, and its `deferred` ones name what is worth looking into. It is OPTIONAL upstream — an absent ledger is normal and never blocks you. You do NOT run the question round yourself: you are a sub-agent, and there is no user on the other side of your session.
 
 ### Step 3: Investigate the Codebase
 
@@ -81,8 +77,7 @@ If there are multiple approaches, compare them:
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `explore`
-- topic_key: `sdd/{change-name}/explore` (or `sdd/explore/{topic-slug}` if standalone)
-- type: `architecture`
+- path: `openspec/changes/{change-name}/exploration.md`
 
 ### Step 6: Return Structured Analysis
 

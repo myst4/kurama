@@ -46,7 +46,7 @@ Every finding carries one severity. Blocking is a property of severity, not of c
 
 Follow the **Skill Resolver Protocol** (`_shared/skill-resolver.md`) before launching ANY sub-agent:
 
-1. Obtain the skill registry (engram → `.kurama/skill-registry.md` from the project root → skip if none)
+1. Obtain the skill registry (`.kurama/skill-registry.md` from the project root → skip if none)
 2. Identify the target files/scope — what code will the judges review?
 3. Match relevant skills from the registry's **Compact Rules** by:
    - **Code context**: file extensions/paths of the target (e.g., `.tsx` → react-19, typescript)

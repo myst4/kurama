@@ -121,25 +121,16 @@ a scoped re-review verifies the fix diff against the ledger; in judgment-day the
 `jd-fix-agent`. Anything still open after round 2 is reported to the user as open — the loop
 never extends.
 
-## Ledger persistence honors the artifact store
+## Ledger persistence
 
-The orchestrator persists the merged ledger according to the resolved
-`artifact_store.mode`:
+The orchestrator writes the merged ledger to `openspec/changes/{change-name}/review-ledger.md`.
+Ad-hoc judgment-day without a change writes `openspec/reviews/{target-slug}/ledger.md`, where
+`target-slug` = `pr-{number}` when reviewing a PR, else the current branch name kebab-cased,
+else a kebab-case slug of the user-stated review target.
 
-- **`engram`**: upsert the topic `sdd/{change-name}/review-ledger` via `mem_save` with
-  `capture_prompt: false` (an automated artifact must never capture the user prompt). Ad-hoc
-  judgment-day without a change uses `review/{target-slug}/ledger`, where `target-slug` =
-  `pr-{number}` when reviewing a PR, else the current branch name kebab-cased, else a
-  kebab-case slug of the user-stated review target.
-- **`openspec`**: write `openspec/changes/{change-name}/review-ledger.md`.
-- **`hybrid`**: write `openspec/changes/{change-name}/review-ledger.md` (authoritative) and
-  mirror it to the `sdd/{change-name}/review-ledger` engram topic (`mem_save` with
-  `capture_prompt: false`); the file wins on divergence.
-- **degraded `engram`** (Engram unavailable): write the ledger to
-  `.kurama/sdd/{change-name}/review-ledger.md`, the same filesystem fallback every other
-  artifact uses. The ledger is never left unpersisted — an inline-only ledger does not
-  survive compaction, and a review → fix → re-review loop that loses its ledger mid-way
-  re-reports findings that were already resolved.
+The ledger is never left unpersisted — an inline-only ledger does not survive compaction, and a
+review → fix → re-review loop that loses its ledger mid-way re-reports findings that were
+already resolved.
 
 ## Scoped validation
 
