@@ -39,13 +39,9 @@ during `sdd-init` ("codebase looks test-first — enable TDD?") and nothing more
 This removes the old opt-out trap where existing tests forced the whole cycle onto
 test-after projects.
 
-Where the flag lives is mode-dependent — the same settings-home rule as
-[compliance_mode](persistence.md#where-pipeline-settings-are-configured):
-
-| Mode | Where the `tdd` flag lives |
-|------|-----------------------------|
-| `openspec` / `hybrid` | The top-level `tdd:` block in `openspec/config.yaml`, written by `sdd-init`. |
-| `engram` | The `tdd` flag in the `sdd-init/{project}` context artifact (there is no `config.yaml` in these modes). |
+The flag lives in the top-level `tdd:` block of `openspec/config.yaml`, written by
+`sdd-init` — the same settings home as
+[compliance_mode](persistence.md#where-pipeline-settings-are-configured).
 
 The orchestrator reads the flag once and propagates `tdd: true|false` into **every**
 phase prompt. On conflict — a stale file value vs. a freshly propagated prompt
@@ -78,10 +74,9 @@ which is what keeps the RED cycle tight. Leave it empty to auto-detect from
 TDD is a per-project switch you can flip at any time — a project that started
 without it can adopt the cycle mid-stream. On an already-initialized project:
 
-| Mode | How to enable |
-|------|----------------|
-| `openspec` / `hybrid` | Edit `openspec/config.yaml`: set `tdd.enabled: true` and fill `tdd.single_test_command` (the fast single-test invocation; leave empty to auto-detect). |
-| `engram` | The flag lives in the `sdd-init/{project}` settings bundle, not a file. Re-run `/sdd-init` (it upserts the bundle and asks the enable question again), or update `tdd.enabled` / `tdd.single_test_command` in that artifact directly. |
+Edit `openspec/config.yaml`: set `tdd.enabled: true` and fill
+`tdd.single_test_command` (the fast single-test invocation; leave empty to
+auto-detect).
 
 The **next cycle** picks up the resolved flag: `sdd-tasks` plans
 RED → GREEN → REFACTOR subtasks, `sdd-apply` runs them, and `sdd-verify` audits

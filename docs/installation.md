@@ -11,7 +11,6 @@ For manual installation or specific tools, see below.
 - [Install scope: global vs. project (trial a repo)](#install-scope-global-vs-project-trial-a-repo)
   - [Machine-local files and your `.gitignore`](#machine-local-files-and-your-gitignore)
   - [When the repo already has its own workflow](#when-the-repo-already-has-its-own-workflow)
-- [Engram (optional persistence engine)](#engram-optional-persistence-engine)
 - [Session identity: persona and name](#session-identity-persona-and-name)
 - [Claude Code](#claude-code)
 - [OpenCode](#opencode)
@@ -51,8 +50,6 @@ The setup script:
   prompt — see [Hooks below](#hooks-installed-automatically))
 - Handles OpenCode's special case (commands + JSON config merge)
 - For OpenCode: asks single vs multi-model mode (or use `--opencode-mode`)
-- Asks **once** whether to use [Engram](#engram-optional-persistence-engine) as
-  the persistence engine (or use `--with-engram` / `--without-engram`)
 
 Two flags control **where** it installs:
 
@@ -148,7 +145,7 @@ Where project scope writes, per harness:
 The install **receipt** (`.kurama-install-manifest.json`) lands at the **repo
 root** for project scope (in the skills dir for global scope), and records the
 scope, version, every installed file, the touched `settings.json`, any Pi
-packages, any Engram MCP registrations, the `.gitignore` carrying the managed
+packages, the `.gitignore` carrying the managed
 machine-local block, and — for OpenCode — the `opencode.json` it merged agents
 into plus the resolved `--opencode-mode`/`--opencode-profile`, so
 `uninstall.sh`, `update.sh`, and `doctor.sh` (all of which accept the same
@@ -207,12 +204,6 @@ The install summary reports which of the three happened:
 **failure** naming the file — a `.gitignore` rule does not untrack something
 already committed, so it prints the `git rm --cached` fix.
 
-> **Engram in project scope is written as the bare `engram` command** when it
-> comes from Homebrew, so `.mcp.json` / `opencode.json` stay shareable. Kurama
-> resolves the Homebrew symlink (`/opt/homebrew/bin/engram` → the Cellar) to
-> decide that. A non-Homebrew install keeps its **absolute** path on purpose:
-> a GUI-launched client does not always inherit your shell `PATH`.
-
 ### When the repo already has its own workflow
 
 If the prompt file Kurama merges into (`CLAUDE.md`, `AGENTS.md`, …) already
@@ -238,49 +229,6 @@ records the answer as `workflow_coexistence`. No default is chosen silently.
 
 ---
 
-## Engram (optional persistence engine)
-
-By default Kurama persists SDD artifacts to its built-in **markdown fallback**
-(`openspec/` / `.kurama/`) — no external dependency. Optionally, it can use
-[Engram](https://github.com/Gentleman-Programming/engram) as a persistent memory
-engine that survives compaction and cross-session recovery.
-
-`setup.sh` asks **once per run** — `Use Engram as the persistence engine? [y/N]`
-— or you can decide non-interactively with `--with-engram` / `--without-engram`
-(non-interactive default is **no**).
-
-**With yes**, setup does two things:
-
-1. **Ensures the `engram` binary.** If it is not on `PATH`: on macOS with
-   Homebrew it offers (with explicit consent) to run
-   `brew tap Gentleman-Programming/homebrew-tap && brew install engram`;
-   otherwise it prints the
-   [releases guide](https://github.com/Gentleman-Programming/engram/releases)
-   and continues without blocking (the MCP registration still lands and
-   activates once the binary is present). This is the only place setup runs a
-   network command, and only after you say yes.
-2. **Registers the Engram MCP server into the client being configured.** The
-   exact config file and JSON shape differ per client — each is written in that
-   client's own shape. JSON edits go through **jq** with a backup and an atomic write; if
-   `jq` is missing it prints guided manual steps and **never** `sed`-edits JSON.
-   Codex uses TOML (`[mcp_servers.engram]`, block-upserted).
-
-| Client | Config file (global) | Config file (project scope) | Key / shape |
-|--------|----------------------|-----------------------------|-------------|
-| Claude Code | `~/.claude.json` | `<repo>/.mcp.json` | `mcpServers.engram = { command, args: ["mcp","--tools=agent"] }` |
-| OpenCode | `~/.config/opencode/opencode.json` | `<repo>/opencode.json` | `mcp.engram = { command: [cmd,"mcp","--tools=agent"], type: "local" }` |
-| Codex | `~/.codex/config.toml` | *(skipped — Codex has a single global MCP config; run with global scope)* | `[mcp_servers.engram]` (TOML) |
-| Pi | *(nothing extra)* | *(nothing extra)* | Engram on Pi is provided by the [Pi package stack](#optional-pi-package-stack) (`gentle-engram`) — no separate MCP registration |
-
-**With no**, nothing Engram-related is written; the harness stays on the
-markdown fallback (`openspec/` / `.kurama/`), and the setup summary says so.
-Every file Engram registration touches is recorded in the install receipt
-(`engram_mcp[]`), so `doctor.sh` can report them and `uninstall.sh` can **remove
-the `engram` server** from each one — jq for JSON (or the same block strip for
-Codex's TOML), backup + atomic, leaving every other MCP server and key intact.
-
----
-
 ## Session identity: persona and name
 
 Two settings shape how the orchestrator **talks to you**. Neither one changes
@@ -299,7 +247,7 @@ vocabulary of the half that was already going out in your language.**
 Kurama ships no voice of its own by default, which is why it coexists with
 Claude Code's output style, a harness persona package, and whatever else already sets a tone.
 The register is therefore a **setting, not a hardcode**: a top-level `persona:`
-key resolved by the same preflight that resolves the artifact store.
+key resolved by the session preflight.
 
 | Value | Effect |
 |-------|--------|
@@ -311,8 +259,7 @@ code change.
 
 **Where it lives:** `openspec/config.yaml` — a **committed** file, deliberately,
 so the whole team shares the same register rather than each machine picking its
-own. In `engram` mode there is no `config.yaml`, so the value rides in the
-`sdd-init/{project}` context artifact along with every other pipeline setting
+own, alongside every other pipeline setting
 (see [persistence.md](persistence.md#where-pipeline-settings-are-configured)).
 `sdd-init` asks the persona question once and persists the answer there.
 
@@ -402,7 +349,7 @@ cp -r skills/_shared \
 
 Append the contents of [`examples/claude-code/CLAUDE.md`](../examples/claude-code/CLAUDE.md) to your existing `CLAUDE.md`.
 
-The example is intentionally lean to avoid token bloat in always-loaded system prompts. Critical engram calls are inlined in each skill file. This keeps your existing assistant identity and adds SDD as an orchestration overlay.
+The example is intentionally lean to avoid token bloat in always-loaded system prompts. The critical retrieval and persistence steps are inlined in each skill file. This keeps your existing assistant identity and adds SDD as an orchestration overlay.
 
 </details>
 
@@ -824,23 +771,20 @@ The packages install in this **exact order**, at **pinned** versions:
 
 | # | Command | Package (what it adds) |
 |---|---------|------------------------|
-| 1 | `pi install npm:gentle-engram@0.1.10` | `gentle-engram` — persistent memory shared across sessions, compactions, and MCP agents |
-| 2 | `pi install npm:pi-mcp-adapter@2.11.0` | `pi-mcp-adapter` — MCP (Model Context Protocol) adapter extension |
-| 3 | `npm exec --yes --package gentle-engram@0.1.10 -- pi-engram init` | one-time `pi-engram` initialization (uses the `gentle-engram` pin) |
-| 4 | `pi install npm:pi-subagents-j0k3r@1.4.1` | `pi-subagents-j0k3r` — markdown-defined subagents, delegated task tools, history, model profiles |
-| 5 | `pi install npm:@juicesharp/rpiv-ask-user-question@2.0.0` | `@juicesharp/rpiv-ask-user-question` — structured ask-user questionnaire with typed options |
-| 6 | `pi install npm:pi-web-access@0.13.0` | `pi-web-access` — web search, URL fetch, repo cloning, PDF/YouTube extraction |
-| 7 | `pi install npm:@juicesharp/rpiv-todo@2.0.0` | `@juicesharp/rpiv-todo` — live todo overlay that survives `/reload` and compaction |
-| 8 | `pi install npm:pi-btw@0.4.1` | `pi-btw` — parallel side conversations via `/btw` |
+| 1 | `pi install npm:pi-mcp-adapter@2.11.0` | `pi-mcp-adapter` — MCP (Model Context Protocol) adapter extension |
+| 2 | `pi install npm:pi-subagents-j0k3r@1.4.1` | `pi-subagents-j0k3r` — markdown-defined subagents, delegated task tools, history, model profiles |
+| 3 | `pi install npm:@juicesharp/rpiv-ask-user-question@2.0.0` | `@juicesharp/rpiv-ask-user-question` — structured ask-user questionnaire with typed options |
+| 4 | `pi install npm:pi-web-access@0.13.0` | `pi-web-access` — web search, URL fetch, repo cloning, PDF/YouTube extraction |
+| 5 | `pi install npm:@juicesharp/rpiv-todo@2.0.0` | `@juicesharp/rpiv-todo` — live todo overlay that survives `/reload` and compaction |
+| 6 | `pi install npm:pi-btw@0.4.1` | `pi-btw` — parallel side conversations via `/btw` |
 
-That is **7 `pi install` packages plus the one-time `pi-engram init`** (step 3, which
-reuses `gentle-engram` rather than being an eighth package). The pins are **hardcoded**
+That is **6 `pi install` packages**. The pins are **hardcoded**
 in `setup.sh`; to refresh one, run
 `npm view <package> version` and update the pin in the script.
 
 > **`gentle-pi` is deliberately excluded.** The stack **never** installs `gentle-pi`.
-> `gentle-pi` and `gentle-engram` are third-party npm package names, as published on the
-> registry — identifiers, not endorsements.
+> `gentle-pi` is a third-party npm package name, as published on the
+> registry — an identifier, not an endorsement.
 > `gentle-pi` is a competing, batteries-included Pi harness that ships its own orchestrator
 > and skill wiring — the same orchestration surface Kurama's Pi setup already owns.
 > Installing it alongside this setup would create a **direct conflict** over that
@@ -901,7 +845,6 @@ The omp set applies the real contract differences:
 |---|---|---|
 | `effort:` | `thinkingLevel:` | omp's field name |
 | `find` | `glob` | omp's tool name |
-| `memory_search`, `memory_get`, … | *(dropped)* | omp has no built-in mem tools: its own memory is an autonomous pipeline read via `memory://`, and Engram arrives as MCP tools whose names depend on the registered server |
 | *(implicit)* | `spawns: ""` | makes "phases are executors and never delegate" mechanical instead of prose |
 | *(n/a)* | `read-summarize: false` | on the read-only lenses and the fix agent — they adjudicate exact lines, and structural summaries would hide the code they must judge |
 
@@ -998,9 +941,9 @@ line per check and exits non-zero on any hard failure. It verifies: the receipt
 and each recorded file exist (missing = fail) and match the repo source
 (drift = warning), the installed version vs the repo `VERSION`, balanced
 orchestrator markers, the Claude Code hooks (scripts + the `settings.json`
-block), the recorded Engram MCP registrations, and the environment tooling
+block), and the environment tooling
 (`gh` present + authenticated + project scope, `pi` + the package stack via
-`pi list`, `engram` present + responding).
+`pi list`).
 
 For **project scope** it adds two findings that a receipt alone cannot answer:
 
@@ -1009,9 +952,9 @@ For **project scope** it adds two findings that a receipt alone cannot answer:
   with the `git rm --cached` fix (see
   [Machine-local files and your `.gitignore`](#machine-local-files-and-your-gitignore)).
 - **Installed, never initialized** — a receipt with no `openspec/config.yaml`
-  and no `.kurama/` settings bundle means `sdd-init` never ran: the install is
+  means `sdd-init` never ran: the install is
   structurally complete and functionally inert, because no phase has an
-  `artifact_store.mode`, `execution_mode` or `tdd` setting to read. Reported as
+  `execution_mode` or `tdd` setting to read. Reported as
   *"installed, never initialized; run `/sdd-init`"* — a **warning**, since it is
   also what every correct install looks like in the minute before you run it.
 

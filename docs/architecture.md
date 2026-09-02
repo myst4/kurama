@@ -38,7 +38,7 @@ graph TB
         L2_Orch -->|"DAG phase"| L2_Verify
         L2_Orch -->|"DAG phase"| L2_Archive
 
-        L2_Store[("Pluggable Store<br/>engram | openspec | hybrid")]
+        L2_Store[("Artifact Store<br/>files under openspec/")]
         L2_Registry[("Skill Registry<br/>auto-discover coding skills<br/>+ project conventions")]
         L2_Spec -.->|"persist"| L2_Store
         L2_Design -.->|"persist"| L2_Store
@@ -80,7 +80,7 @@ graph TB
 | DAG-based phase orchestration | — | ✅ | ✅ |
 | Parallel phases (spec ∥ design) | — | ✅ | ✅ |
 | Structured result envelope | — | ✅ | ✅ |
-| Pluggable artifact store | — | ✅ | ✅ |
+| File-backed artifact store | — | ✅ | ✅ |
 | **Skill auto-discovery** | — | ✅ | ✅ |
 | Shared task queue with claim/heartbeat | — | — | ✅ |
 | Teammate ↔ teammate communication | — | — | ✅ |
@@ -168,8 +168,7 @@ kurama/
 │   │   ├── sdd-phase-common.md        ← Most load-bearing shared file: the canonical DAG, change-size path, Phase I/O table, and Sections A-D (skill loading, retrieval, persistence, envelope), loaded by all 8 SDD phase skills
 │   │   ├── orchestrator-sdd-protocol.md ← Orchestrator session protocol loaded on demand when a cycle starts: SDD Session Preflight, Entry Routing, Automatic Mode Gatekeeper. Extracted from the orchestrator prompt so a non-SDD session never pays for it
 │   │   ├── review-ledger-contract.md  ← Lens selection triage (the orchestrator's decision procedure) + the shared blocking/ledger rules every review lens obeys
-│   │   ├── persistence-contract.md    ← Mode resolution, sub-agent context protocol, skill loading
-│   │   ├── engram-convention.md       ← Supplementary: deterministic naming & recovery
+│   │   ├── persistence-contract.md    ← Store resolution, sub-agent context protocol, skill loading
 │   │   ├── openspec-convention.md     ← File paths, directory structure, config reference — Kurama's own convention, NOT the upstream OpenSpec CLI format
 │   │   ├── skill-resolver.md          ← Canonical orchestrator protocol for compact-rule injection
 │   │   └── test-runners.md            ← Project commands (test / single-test / build), CONFIGURED at sdd-init rather than detected, plus a suggestion table of common-ecosystem defaults that carries no authority
@@ -197,7 +196,7 @@ kurama/
 │   ├── concepts.md                   ← Delta specs, RFC 2119 keywords, archive cycle
 │   ├── installation.md               ← Per-tool setup (automated + manual + plugin/extension)
 │   ├── migration.md                  ← Breaking-change and upgrade guide (current + previous series)
-│   ├── persistence.md                ← Artifact store modes and OpenSpec file structure
+│   ├── persistence.md                ← The three stores and OpenSpec file structure
 │   ├── sub-agents.md                 ← SDD phase sub-agent reference, native subagents, and agent-teams mode
 │   ├── tdd.md                        ← Optional TDD module: activation, cycle, verify audits
 │   ├── hooks.md                      ← Optional Claude Code hooks: prose-to-mechanism quality gates
@@ -228,5 +227,5 @@ kurama/
 # Generated in target projects (not in this repo):
 .kurama/
 ├── skill-registry.md                  ← Skill INDEX for sub-agents, built by skills/_shared/build-skill-registry.sh
-└── sdd/{change-name}/                 ← Engram fallback store (unavailable-at-start or mid-cycle mem_save failure)
+└── sdd/{change-name}/                 ← Machine-local cycle markers (state.md, verify-report.md, archive-report.md) read by the deterministic hooks
 ```

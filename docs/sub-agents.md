@@ -44,13 +44,13 @@ manual copy step is needed:
 
 Every sub-agent returns a structured envelope (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`) to the orchestrator, closed by a `## Key Learnings` section. The canonical field list, description, and example live in [`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md), Section D — see it there instead of duplicating it here.
 
-**Key Learnings** is that closing section: 1-5 numbered items, each a gotcha, an edge case, or a non-obvious decision the phase discovered, written as a standalone sentence (at least 20 characters and 4 words — Engram's extraction thresholds, not style advice) that names *what*, *why it matters*, and *where*. It is **omitted entirely** when the phase found nothing non-obvious, it never restates `executive_summary`, and it never carries a secret or an absolute machine path. It applies to the phase's final text response, not to intermediate tool output or to the persisted artifact body. The same section serves the two memory stores without replacing either — Engram captures it passively for one developer, and `sdd-learn` curates the team's committed `MEMORY.md` from it at cycle close; the boundary between the four stores is the table in [docs/persistence.md](persistence.md#memorymd--durable-team-knowledge).
+**Key Learnings** is that closing section: 1-5 numbered items, each a gotcha, an edge case, or a non-obvious decision the phase discovered, written as a standalone sentence (at least 20 characters and 4 words — a hard floor, not style advice) that names *what*, *why it matters*, and *where*. It is **omitted entirely** when the phase found nothing non-obvious, it never restates `executive_summary`, and it never carries a secret or an absolute machine path. It applies to the phase's final text response, not to intermediate tool output or to the persisted artifact body. `sdd-learn` curates the team's committed `MEMORY.md` from that section at cycle close; the boundary between the three stores is the table in [docs/persistence.md](persistence.md#the-three-stores).
 
 ### Sub-Agent Context Protocol
 
 Sub-agents start with a **fresh context**. The canonical injection and fallback protocol — how the orchestrator resolves the registry, matches skills, injects their paths as `## Project Standards (skills to load)`, and how sub-agents report `skill_resolution` back — lives in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md); this section only summarizes it: if no `## Project Standards` block arrives, sub-agents fall back to registry lookup or explicit `SKILL: Load` paths.
 
-Sub-agents are also instructed to save discoveries, decisions, and bug fixes to engram automatically (non-SDD sub-agents) or via the mandatory persist step (SDD phases).
+SDD phase sub-agents are also instructed to persist their discoveries, decisions, and bug fixes via the mandatory persist step.
 
 The same contract closes the cycle it opens: once the envelope has been read, validated and synthesized, the orchestrator **reaps the sub-agent** — a delegation is not complete while a finished agent is still holding its context in the agent list. On Claude Code that is the shutdown request to the named teammate; on a harness with no termination primitive it is holding no reference to the agent and saying so. The single exception, and the way to declare it, is in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) → *Step 5*: keep an agent alive only while you still intend to send it a follow-up message, and name that intent when you decide it.
 
@@ -58,23 +58,21 @@ The same contract closes the cycle it opens: once the envelope has been read, va
 
 ## Shared Conventions
 
-`skills/_shared/` contains eight files. `sdd-phase-common.md` is loaded directly by all 8 SDD phase skills (explore through archive) — it is the most load-bearing shared file in the system. Critical engram calls (`mem_search`, `mem_save`, `mem_get_observation`) are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
+`skills/_shared/` contains seven files. `sdd-phase-common.md` is loaded directly by all 8 SDD phase skills (explore through archive) — it is the most load-bearing shared file in the system. The critical retrieval and persistence steps are also **inlined directly in each skill** so sub-agents don't need to follow multi-hop file references.
 
 | File | Purpose |
 |------|---------|
 | `sdd-phase-common.md` | Sections A-D: skill loading, artifact retrieval, persistence, and the return envelope. Loaded directly by every SDD phase skill. |
 | `orchestrator-sdd-protocol.md` | The orchestrator's session-level SDD procedure: the four-value session preflight, routing a natural-language request into the pipeline, and the `auto`-mode phase gate. Loaded when a cycle starts, not before — the orchestrator prompt carries the trigger, this file carries the procedure. |
-| `persistence-contract.md` | Mode resolution rules, sub-agent context protocol, skill registry loading protocol |
-| `engram-convention.md` | Supplementary reference for deterministic naming (`sdd/{change-name}/{artifact-type}`) and two-step recovery. Critical calls are inlined in skills. |
+| `persistence-contract.md` | Store resolution rules, sub-agent context protocol, skill registry loading protocol |
 | `openspec-convention.md` | Filesystem paths for each artifact, directory structure, config.yaml reference, and archive layout. **Not** the upstream OpenSpec CLI format — see the note at the top of that file. |
 | `skill-resolver.md` | **Canonical** protocol for delegators to resolve skills from the registry and inject their paths |
-| `review-ledger-contract.md` | **Canonical** shared contract for the 4R review lenses + refuter: sweep budget, precision gate, candidate-causal admission, findings-ledger schema, adversarial verification, severity floor, and artifact-store-aware persistence. |
+| `review-ledger-contract.md` | **Canonical** shared contract for the 4R review lenses + refuter: sweep budget, precision gate, candidate-causal admission, findings-ledger schema, adversarial verification, severity floor, and ledger persistence. |
 | `test-runners.md` | Per-runner detect → full-suite + single-test command table, used by the optional TDD module (`skills/tdd/SKILL.md`) |
 
 **Why inline + shared:**
 - **Sub-agents fail multi-hop chains** — A 3-hop read chain (skill → convention file → actual instructions) breaks non-Claude models. Inlining the critical calls eliminates this.
-- **Deterministic recovery** — Engram artifact naming follows a strict `sdd/{change}/{type}` convention with `topic_key`, so any skill can reliably find artifacts created by other skills.
-- **Consistent mode behavior** — All skills resolve `engram | openspec | hybrid` the same way. `openspec` and `hybrid` are never chosen automatically.
+- **Deterministic recovery** — artifact paths follow a strict `openspec/changes/{change-name}/` convention, so any skill can reliably find artifacts created by other skills.
 
 ---
 
@@ -114,9 +112,7 @@ All lenses share one contract, [`skills/_shared/review-ledger-contract.md`](../s
 pre-existing findings become follow-ups), a **severity floor** (only `BLOCKER`/`CRITICAL`
 gate; `WARNING`/`SUGGESTION` are recorded once as `info`), sweep budget 1 (standard) / 2
 (4R), refuter verdicts with 2-of-3 voting in 4R, and max 2 fix rounds. The merged
-findings ledger persists per the artifact store (engram `topic_key
-sdd/{change-name}/review-ledger`, openspec `openspec/changes/{change}/review-ledger.md`,
-or in the `.kurama/sdd/` fallback when Engram is unavailable).
+findings ledger persists to `openspec/changes/{change-name}/review-ledger.md`.
 
 ---
 
@@ -132,8 +128,6 @@ Sub-agents start with a **fresh context** — they do not know what user skills 
 4. `/skill-registry`, on demand
 
 The skill and `sdd-init` **run that script** — neither scans the directories itself, and there is no fallback scan. One implementation, or two that drift apart. A missing script is a broken install: both stop and say so, and `doctor.sh` reports it.
-
-If engram is available the registry is also saved there (`topic_key: skill-registry`), as a cross-session bonus. The file on disk is the guarantee.
 
 Once the registry exists, resolving it and injecting skills into each delegation follows the canonical protocol in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) — see that file for the full resolution order, injection format, fallback chain, and the `skill_resolution` feedback loop.
 
@@ -264,8 +258,8 @@ Pi's format differs from Claude's in three ways:
 - **`tools` is a YAML list of Pi tool names.** Read-only lenses, the refuter,
   and the two judges declare `tools: [read]`; `jd-fix-agent` declares
   `[read, bash]`; SDD phase executors carry the fuller phase set (`read`,
-  `grep`, `find`, `write`, and the `memory_*` tools that back the `engram`
-  store), plus `edit` and/or `bash` only where a phase needs them. `bash` is
+  `grep`, `find`, `write`), plus `edit` and/or `bash` only where a phase needs
+  them. `bash` is
   granted just to the phases that shell out — `sdd-init`, `sdd-explore`,
   `sdd-apply`, `sdd-verify`, `sdd-archive` — while the pure planning/writing
   phases (`sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`) omit it; in
@@ -287,8 +281,8 @@ Pi's format differs from Claude's in three ways:
 
 | Agent(s) | `tools` (Pi) |
 |----------|--------------|
-| `sdd-apply` | phase set incl. `write`, `edit`, `bash`, `memory_*` |
-| `sdd-design` | phase set incl. `write`, `edit`, `memory_*` (no `bash`) |
+| `sdd-apply` | phase set incl. `write`, `edit`, `bash` |
+| `sdd-design` | phase set incl. `write`, `edit` (no `bash`) |
 | Other 7 SDD phases | phase set (read/inspect + phase-specific); `bash` only on `sdd-init`/`sdd-explore`/`sdd-verify`/`sdd-archive`, not on `sdd-propose`/`sdd-spec`/`sdd-tasks` |
 | `review-risk`, `review-readability`, `review-reliability`, `review-resilience` | `[read]` |
 | `review-refuter`, `jd-judge-a`, `jd-judge-b` | `[read]` |
@@ -318,16 +312,11 @@ because their frontmatter is not omp's task-agent contract. Kurama's Claude and 
 agents are therefore **invisible** to omp, and without this set the SDD cycle silently
 degrades to inline execution with no per-phase context isolation.
 
-omp's format differs from Pi's in four ways:
+omp's format differs from Pi's in three ways:
 
 - **`thinkingLevel`, not `effort`.** Same values (`low`/`medium`/`high`), different
   field name. A stray `effort:` is ignored, so the reasoning hint would be silently lost.
 - **`glob`, not `find`.** Same capability, omp's name for the tool.
-- **No `memory_*` tools.** omp has no built-in mem tools: its own memory is an
-  autonomous pipeline read through `memory://` with the `read` tool, and Engram — when a
-  project uses it — arrives as MCP tools whose names depend on the registered server. So
-  the portable allowlist is the file tools plus `read`, and the `openspec` store is the
-  fully supported path with nothing extra to install.
 - **`spawns: ""` on every agent.** This makes "phases are executors and never delegate"
   mechanical rather than prose. omp reinforces it a second time: at
   `task.maxRecursionDepth` the `task` tool is stripped from child sessions entirely.
