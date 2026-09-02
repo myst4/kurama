@@ -145,8 +145,8 @@ Where project scope writes, per harness:
 The install **receipt** (`.kurama-install-manifest.json`) lands at the **repo
 root** for project scope (in the skills dir for global scope), and records the
 scope, version, every installed file, the touched `settings.json`, any Pi
-packages, the `.gitignore` carrying the managed
-machine-local block, and — for OpenCode — the `opencode.json` it merged agents
+packages, the `.gitignore` carrying the managed machine-local block, and — for
+OpenCode — the `opencode.json` it merged agents
 into plus the resolved `--opencode-mode`/`--opencode-profile`, so
 `uninstall.sh`, `update.sh`, and `doctor.sh` (all of which accept the same
 `--scope`/`--path`) operate on exactly what was installed.
@@ -259,8 +259,8 @@ code change.
 
 **Where it lives:** `openspec/config.yaml` — a **committed** file, deliberately,
 so the whole team shares the same register rather than each machine picking its
-own, alongside every other pipeline setting
-(see [persistence.md](persistence.md#where-pipeline-settings-are-configured)).
+own, alongside every other pipeline setting (see
+[persistence.md](persistence.md#where-pipeline-settings-are-configured)).
 `sdd-init` asks the persona question once and persists the answer there.
 
 **Changing it later** — either way works: re-run `sdd-init`, which upserts the
