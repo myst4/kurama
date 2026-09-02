@@ -1990,13 +1990,13 @@ test_kurama_state_survives_mode_removal() {
     assert_file_exists "$f" || return 1
     grep -q '.kurama/sdd/' "$f" \
         || { echo "the .kurama/sdd/ marker directory disappeared from the persistence contract"; return 1; }
-    # sdd-init still writes the registry there, and still says it is machine-local rather
-    # than a committed artifact — the property the mode gates used to express.
-    local init="$REPO_DIR/skills/sdd-init/SKILL.md"
-    grep -q '.kurama/skill-registry.md' "$init" \
-        || { echo "sdd-init no longer writes .kurama/skill-registry.md"; return 1; }
-    grep -qi 'harness infrastructure' "$init" \
-        || { echo "sdd-init no longer states the registry is harness infrastructure"; return 1; }
+    # And it is still declared machine-local and gitignored rather than a committed
+    # artifact — the property the mode gates used to express. #137 emptied `.kurama/`
+    # of everything but those markers, so this is now the whole of what lives there.
+    grep -qi 'gitignored' "$f" \
+        || { echo "the persistence contract no longer states .kurama/ is gitignored"; return 1; }
+    grep -qi 'machine-local' "$f" \
+        || { echo "the persistence contract no longer states .kurama/ is machine-local"; return 1; }
     return 0
 }
 
@@ -2047,56 +2047,6 @@ test_orchestrator_prompt_delegates_heavy_blocks() {
             return 1
         fi
     done
-}
-
-test_phase_skill_loading_reads_paths_by_default() {
-    # #79.1. `skill-resolver.md` is the canonical resolution protocol: the delegator passes
-    # exact SKILL.md PATHS by default and compact rules are an opt-in low-token trade, because
-    # a digest is lossy by construction and goes stale silently. `sdd-phase-common.md` is the
-    # file EVERY phase agent reads at startup, and it used to order the opposite on BOTH of its
-    # surfaces — "Do NOT read any SKILL.md files" on the injected path, and "apply the
-    # registry's Compact Rules" on the registry fallback. A sub-agent obeys the file it is told
-    # to load, not the protocol it never sees, so the startup file wins in practice and the
-    # canonical default is dead letter. Both surfaces are pinned here, against the canonical
-    # file in the same test so a future flip of the default fails loudly instead of drifting.
-    local common="$REPO_DIR/skills/_shared/sdd-phase-common.md"
-    local resolver="$REPO_DIR/skills/_shared/skill-resolver.md"
-    assert_file_exists "$common" || return 1
-    assert_file_exists "$resolver" || return 1
-
-    # The canonical rule this test measures against. If it ever flips, this test is stale and
-    # must be re-pointed — never deleted, or the contradiction returns unobserved.
-    grep -qi 'opt-in' "$resolver" \
-        || { echo "skill-resolver.md no longer calls compact rules opt-in — this test is stale"; return 1; }
-
-    # Surface 1 — the injected path. The contradictory order must be gone...
-    if grep -qF 'Do NOT read any SKILL.md files' "$common"; then
-        echo "sdd-phase-common.md still forbids reading SKILL.md on the injected path"; return 1
-    fi
-    # ...and the DEFAULT block shape must be named, with the instruction to read it in full.
-    grep -qF 'Project Standards (skills to load)' "$common" \
-        || { echo "sdd-phase-common.md never names the default 'skills to load' block"; return 1; }
-    grep -qiF 'read each listed file in full' "$common" \
-        || { echo "sdd-phase-common.md does not tell the phase agent to read the listed SKILL.md files"; return 1; }
-    # The opt-in shape stays documented — removing it would strand the low-token mode the
-    # delegator is still allowed to choose.
-    grep -qF 'Project Standards (auto-resolved)' "$common" \
-        || { echo "sdd-phase-common.md dropped the opt-in auto-resolved block"; return 1; }
-
-    # Surface 2 — the registry fallback. It must route through the index, not Compact Rules.
-    if grep -qF 'Compact Rules** section, apply rules' "$common"; then
-        echo "sdd-phase-common.md fallback still applies compact rules instead of reading paths"; return 1
-    fi
-    grep -qF '**skills index**' "$common" \
-        || { echo "sdd-phase-common.md fallback never routes through the registry's skills index"; return 1; }
-
-    # #41 invariant, untouched by the above: `.kurama/` is hidden AND gitignored, so existence
-    # is `test -f` or Read — a finder reports "missing" for a file that is right there.
-    grep -qF 'test -f' "$common" \
-        || { echo "sdd-phase-common.md lost the fail-loud check for .kurama/skill-registry.md"; return 1; }
-    grep -qi 'never with a finder' "$common" \
-        || { echo "sdd-phase-common.md no longer bans finders as an existence check"; return 1; }
-    return 0
 }
 
 test_preflight_resolves_no_dangling_delivery_value() {
@@ -5047,7 +4997,7 @@ run_test "--version prints the version" test_version_flag
 run_test "--version exits with code 0" test_version_exits_zero
 run_test "Install writes an install manifest" test_install_writes_install_manifest
 run_test "Default install includes optional groups" test_default_install_includes_optional_groups
-run_test "--without optional excludes the group's five skills (23 skills)" test_without_optional_excludes_optional_group
+run_test "--without optional excludes the group's five skills (22 skills)" test_without_optional_excludes_optional_group
 run_test "--without quality excludes judgment-day (27 skills)" test_without_quality_excludes_judgment_day
 run_test "--without quality --without optional (22 skills)" test_without_both_groups
 run_test "--without sdd-core is rejected" test_reject_without_required_group
@@ -5094,7 +5044,7 @@ echo ""
 
 echo -e "${BOLD}Review lens group (G1, default-on)${NC}"
 run_test "review lenses install by default" test_review_lenses_installed_by_default
-run_test "--without review excludes the 5 lenses (23 skills)" test_without_review_excludes_lenses
+run_test "--without review excludes the 5 lenses (22 skills)" test_without_review_excludes_lenses
 echo ""
 
 echo -e "${BOLD}Kanban module (Phase 9, optional group, default-on)${NC}"
@@ -5128,7 +5078,6 @@ run_test "dropped harnesses are rejected by name" test_dropped_harnesses_rejecte
 run_test "dropped harness artifacts are gone" test_dropped_harness_artifacts_are_gone
 run_test ".kurama state survives the mode removal" test_kurama_state_survives_mode_removal
 run_test "orchestrator prompt delegates heavy blocks to _shared" test_orchestrator_prompt_delegates_heavy_blocks
-run_test "phase skill loading reads SKILL.md paths by default" test_phase_skill_loading_reads_paths_by_default
 run_test "preflight resolves no dangling delivery value" test_preflight_resolves_no_dangling_delivery_value
 run_test "absent change size resolves to standard" test_change_size_absent_means_standard
 run_test "small change collapses spec/design, never omits" test_small_change_collapses_without_omitting
@@ -7011,7 +6960,7 @@ test_g_setup_without_review_is_a_full_review_free_setup() {
     assert_dir_exists "$base/judgment-day" || return 1    # quality still on
     local count
     count=$(find "$base" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "full setup --without review lands 23 skills" || return 1
+    assert_eq "22" "$count" "full setup --without review lands 22 skills" || return 1
     # A genuinely full setup: Claude Code hooks were still installed.
     assert_file_exists "$HOME/.claude/settings.json" || return 1
     return 0
@@ -7089,7 +7038,7 @@ test_g_wrapper_forwards_group_flags() {
     [ -d "$HOME/.claude/skills/review-risk" ] && { echo "--without review not forwarded through the wrapper"; return 1; }
     local count
     count=$(find "$HOME/.claude/skills" -name SKILL.md | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "wrapper --without review lands 23 skills" || return 1
+    assert_eq "22" "$count" "wrapper --without review lands 22 skills" || return 1
     return 0
 }
 
@@ -9031,6 +8980,380 @@ run_test "the user's name never lands in a committed file" test_l_user_name_neve
 run_test "session identity resolves without an SDD cycle (#102)" test_l_session_identity_resolves_without_an_sdd_cycle
 run_test "sdd-learn installs by default (optional group)" test_l_sdd_learn_installs_by_default
 run_test "sdd-learn is a well-formed, registered skill" test_l_sdd_learn_is_a_well_formed_registered_skill
+
+echo ""
+
+# ============================================================================
+# UNIT-AD (issue #137): the project declares its standards, nothing discovers them
+#
+# Kurama used to resolve sub-agent standards at delegation time: a script scanned
+# every skills directory it could find, wrote `.kurama/skill-registry.md`, and the
+# orchestrator matched trigger text over it on every launch. Measured on a real
+# repo the registry held ~112 rows — 13 of Kurama's own skills, ~99 of the
+# developer's personal collection (marketing, design, browser QA) and ZERO of the
+# project's own conventions. The orchestrator ran a four-step resolution in the
+# thin thread to choose among nothing.
+#
+# 6.3.0 replaces the whole subsystem with a committed list: `standards:` in
+# `openspec/config.yaml`, an ordered set of file paths every phase sub-agent reads
+# in full at phase start, forwarded verbatim by the orchestrator. What binds a
+# sub-agent is what the project wrote there, and nothing else.
+#
+# The cases below pin the parts a future sync could quietly undo: the documented
+# semantics INCLUDING the loud missing-path rule (a silent skip is the #41 failure
+# this list is most likely to regress into), sdd-init asking instead of scanning
+# `~`, Section A carrying no trace of the old resolution surface, the #100 reap
+# rule surviving VERBATIM at its new home, and the three deleted files staying
+# deleted everywhere but the two history docs.
+#
+# NOTE on controls. Like UNIT-L, UNIT-P and UNIT-Z, nothing here reads git
+# history: .github/workflows/pr-check.yml checks out at depth 1, so `origin/main`
+# is not a ref on CI and a history-based control would either fail there or
+# degrade to a vacuous skip. Every case asserts the new state directly.
+#
+# Mutation-checked by hand against origin/main materialized with
+# `git archive origin/main | tar -x -C <tmp>` — the tree, never the ref. On that
+# tree: `skills/_shared/openspec-convention.md` contains the string "standards"
+# ZERO times and `skills/sdd-init/SKILL.md` contains "standards:" ZERO times, so
+# (a) and (b) fail; `skills/_shared/sdd-phase-common.md` has 12 lines matching
+# registry/auto-resolved/compact rules, so (c) fails; `skills/_shared/delegation.md`
+# does not exist, so (d) fails; 30 files under skills/ scripts/ examples/ docs/
+# README.md name one of the three removed paths outside the allowlist, so (e)
+# fails; pr-check.yml's FORBIDDEN block names none of them, so (f) fails; and
+# `scripts/doctor.sh` prints "settings bundle present" and accepts a `.kurama/`
+# cycle marker as proof init ran, so (g) fails on both of its assertions.
+# ============================================================================
+
+# Every tracked file under the roots the removal covers, one per line. scripts/,
+# skills/, examples/, docs/ and README.md — the whole shipped surface. The two
+# history docs are the ONLY allowlist: changelog and migration exist to say what
+# a past version had, so naming a removed component there is their job.
+ad_removal_scope_files() {
+    local f
+    while IFS= read -r f; do
+        case "$f" in
+            # The two history docs exist to say what a past version shipped.
+            docs/changelog.md|docs/migration.md) continue ;;
+            # And this file, which cannot ban a string it may not contain.
+            scripts/install_test.sh) continue ;;
+        esac
+        printf '%s\n' "$f"
+    done <<EOF
+$(cd "$REPO_DIR" && find skills scripts examples docs -type f; echo README.md)
+EOF
+    return 0
+}
+
+test_ad_convention_documents_the_standards_list() {
+    # (a) The schema line and the semantics live in the canonical config reference,
+    # or every other file is describing a key nothing defines.
+    local conv="$REPO_DIR/skills/_shared/openspec-convention.md"
+    assert_file_exists "$conv" || return 1
+    local flat
+    flat=$(tr '\n' ' ' < "$conv")
+
+    grep -qE '^standards:' "$conv" \
+        || { echo "openspec-convention.md has no standards: key in the config schema block"; return 1; }
+    case "$flat" in
+        *"Project Standards (files to read)"*) ;;
+        *) echo "openspec-convention.md never names the block the list is forwarded as"; return 1 ;;
+    esac
+    # Ordered, and both path flavours — a list whose order is not binding is a set,
+    # and a companion skill lives outside the repo.
+    case "$flat" in
+        *"ordered"*|*"ORDERED"*) ;;
+        *) echo "openspec-convention.md does not say standards: is ordered"; return 1 ;;
+    esac
+    case "$flat" in
+        *"repo-relative"*) ;;
+        *) echo "openspec-convention.md does not document repo-relative paths"; return 1 ;;
+    esac
+
+    # THE missing-path rule (#41 fail-loud). Loud, and not a blocker: a list that
+    # blocks a cycle on a typo is as wrong as one that skips silently.
+    case "$flat" in
+        *"cannot be read"*) ;;
+        *) echo "openspec-convention.md never says what happens when a listed file cannot be read"; return 1 ;;
+    esac
+    case "$flat" in
+        *"risks"*) ;;
+        *) echo "the missing-path rule does not route the note into the envelope's risks"; return 1 ;;
+    esac
+    case "$flat" in
+        *"silent skip is forbidden"*) ;;
+        *) echo "openspec-convention.md does not forbid a silent skip for a missing standard"; return 1 ;;
+    esac
+    case "$flat" in
+        *"never stops a cycle"*|*"never a blocker"*) ;;
+        *) echo "openspec-convention.md does not say a missing standard never blocks the cycle"; return 1 ;;
+    esac
+    return 0
+}
+
+test_ad_sdd_init_prefills_and_asks_without_scanning_home() {
+    # (b) The whole reason the registry produced ~99 irrelevant rows was that it
+    # swept the developer's user-level collection. sdd-init proposes from the
+    # PROJECT's files and ASKS; the ban on scanning ~ is asserted as the sentence
+    # itself, because that sentence is the entire defence.
+    local init="$REPO_DIR/skills/sdd-init/SKILL.md"
+    assert_file_exists "$init" || return 1
+    local flat
+    flat=$(tr '\n' ' ' < "$init")
+
+    grep -qE '^standards:' "$init" \
+        || { echo "sdd-init's config template has no standards: key"; return 1; }
+
+    # The pre-fill sources, both halves.
+    case "$flat" in
+        *"CLAUDE.md"*) ;;
+        *) echo "sdd-init's standards: pre-fill never names CLAUDE.md"; return 1 ;;
+    esac
+    case "$flat" in
+        *"manifest.json"*) ;;
+        *) echo "sdd-init does not exclude Kurama's own skills by manifest name"; return 1 ;;
+    esac
+
+    # It ASKS. A pre-fill written without a question is the registry again, with
+    # fewer rows.
+    case "$flat" in
+        *"Confirm"*) ;;
+        *) echo "sdd-init writes standards: without asking the user to confirm"; return 1 ;;
+    esac
+
+    # And the ban, as the literal sentence.
+    case "$flat" in
+        *"Never scan \`~\` or any user-level skills directory."*) ;;
+        *) echo "sdd-init lost the sentence forbidding a ~ scan — the #137 premise"; return 1 ;;
+    esac
+    # Belt and braces: no scan instruction anywhere in the file names a home dir.
+    if grep -qE 'scan .*~/\.(claude|config|pi|codex)' "$init"; then
+        echo "sdd-init instructs a scan of a user-level skills directory"; return 1
+    fi
+    return 0
+}
+
+test_ad_section_a_reads_standards_and_names_no_registry() {
+    # (c) sdd-phase-common.md is the file EVERY phase agent loads at startup. A
+    # sub-agent obeys the file it is told to read, not the protocol it never sees,
+    # so a leftover registry fallback here outranks every doc that says otherwise.
+    local common="$REPO_DIR/skills/_shared/sdd-phase-common.md"
+    assert_file_exists "$common" || return 1
+    local flat
+    flat=$(tr '\n' ' ' < "$common")
+
+    grep -qF 'standards:' "$common" \
+        || { echo "sdd-phase-common.md Section A never names the standards: list"; return 1; }
+    case "$flat" in
+        *"Project Standards (files to read)"*) ;;
+        *) echo "Section A does not name the block shape the orchestrator sends"; return 1 ;;
+    esac
+    case "$flat" in
+        *"IN FULL"*|*"in full"*) ;;
+        *) echo "Section A does not tell the phase agent to read each listed file in full"; return 1 ;;
+    esac
+    # The missing-path rule again, on the side that actually writes the envelope.
+    case "$flat" in
+        *"standards: {path} not found"*) ;;
+        *) echo "Section A does not define the loud one-line risks note for a missing standard"; return 1 ;;
+    esac
+
+    # And not one trace of the removed resolution surface.
+    local word
+    for word in registry auto-resolved 'compact rules' 'Compact Rules'; do
+        if grep -qiF "$word" "$common"; then
+            echo "sdd-phase-common.md still mentions '$word' — the old resolution surface survived"
+            return 1
+        fi
+    done
+    return 0
+}
+
+test_ad_reap_rule_survives_verbatim_at_its_new_home() {
+    # (d) #100's coverage MOVED, it did not shrink. `skill-resolver.md` was deleted
+    # because everything in it about the registry died with the registry — but the
+    # delegation cycle, the launch-prompt shape and the reap step were never about
+    # the registry at all. They now live in `skills/_shared/delegation.md`, and the
+    # two load-bearing sentences are pinned here word for word: a paraphrase of
+    # either one is how a rule quietly loses its teeth.
+    local contract="$REPO_DIR/skills/_shared/delegation.md"
+    assert_file_exists "$contract" || return 1
+    local flat
+    flat=$(tr '\n' ' ' < "$contract")
+
+    # Sentence 1 — the reap rule. The delegation is not over when the envelope lands.
+    case "$flat" in
+        *"A delegation is not complete when the envelope arrives — it is complete when the envelope has been read, validated (gatekeeper checks included) and synthesized, AND the agent that produced it has been shut down."*) ;;
+        *) echo "delegation.md no longer carries the reap sentence verbatim (#100)"; return 1 ;;
+    esac
+
+    # Sentence 2 — the keep-alive exception. A reap rule without it bans resuming an
+    # agent, which is a regression dressed as a fix.
+    case "$flat" in
+        *"Keep an agent alive ONLY while you still intend to send *that* agent more work, because resuming it preserves the context it already built and re-deriving that context in a fresh agent is the waste this exception exists to prevent."*) ;;
+        *) echo "delegation.md no longer carries the keep-alive exception verbatim (#100)"; return 1 ;;
+    esac
+
+    # The exception stays bounded by a stated intent.
+    case "$flat" in
+        *"name the intent at the moment you take it"*) ;;
+        *) echo "the keep-alive exception is unbounded — no stated intent is required"; return 1 ;;
+    esac
+    return 0
+}
+
+test_ad_removed_components_are_gone_from_the_shipped_tree() {
+    # (e) The removal, asserted where an upstream sync would undo it. The two
+    # history docs are the whole allowlist; scripts/ is IN scope here (unlike the
+    # pr-check gate, which exempts installers so they can delete things) because
+    # nothing in scripts/ has anything left to delete.
+    local f hits=0 bad=""
+    while IFS= read -r f; do
+        [ -f "$REPO_DIR/$f" ] || continue
+        if grep -qE 'skill-registry|skill-resolver|build-skill-registry' "$REPO_DIR/$f"; then
+            bad="$bad
+  $f"
+            hits=$((hits + 1))
+        fi
+    done <<EOF
+$(ad_removal_scope_files)
+EOF
+    if [ "$hits" -ne 0 ]; then
+        echo "$hits file(s) still name a removed component (allowlist: changelog, migration):$bad"
+        return 1
+    fi
+
+    # The files themselves, and the manifest row.
+    local gone
+    for gone in skills/skill-registry/SKILL.md \
+                skills/_shared/build-skill-registry.sh \
+                skills/_shared/skill-resolver.md; do
+        if [ -e "$REPO_DIR/$gone" ]; then
+            echo "$gone is back on disk"; return 1
+        fi
+    done
+    if grep -q '"skill-registry"' "$REPO_DIR/skills/manifest.json"; then
+        echo "manifest.json still declares the skill-registry skill"; return 1
+    fi
+    return 0
+}
+
+test_ad_deliberate_removals_list_carries_the_three() {
+    # (f) The CI gate that keeps a removal removed in the docs. #125 added
+    # go-testing to it for exactly this reason; the three #137 paths join it.
+    local wf="$REPO_DIR/.github/workflows/pr-check.yml"
+    assert_file_exists "$wf" || return 1
+    local entry
+    for entry in 'skills/skill-registry/SKILL.md' \
+                 'skills/_shared/build-skill-registry.sh' \
+                 'skills/_shared/skill-resolver.md'; do
+        grep -qF "$entry" "$wf" \
+            || { echo "the deliberate-removals list does not carry $entry"; return 1; }
+    done
+    return 0
+}
+
+test_ad_doctor_grades_initialization_on_the_config_alone() {
+    # (g) #135 left doctor claiming a "`.kurama/` settings bundle" that does not
+    # exist. #137 settles it: openspec/config.yaml is the one settings home and the
+    # only evidence sdd-init ran.
+    local shim="$TEST_TMPDIR/ad-doctorbin"
+    make_doctor_shims "$shim"
+    local repo="$TEST_TMPDIR/ad-proj"
+    make_git_repo "$repo"
+    bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --non-interactive > /dev/null 2>&1 \
+        || { echo "setup exited non-zero"; return 1; }
+
+    # Without the config: not initialized, and the note names the ONE thing missing
+    # rather than the bundle-plus-registry pair the old wording described.
+    local out
+    out=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
+    assert_matches "$out" 'installed, never initialized' \
+        "the finding on a project with no openspec/config.yaml" || return 1
+    assert_matches "$out" 'no openspec/config.yaml — the install is on disk' \
+        "the note naming the one missing settings home" || return 1
+    assert_not_matches "$out" 'settings bundle' \
+        "the stale '.kurama/ settings bundle' wording #135 left behind" || return 1
+
+    # And .kurama/ is not a second settings home. Cycle markers there are written
+    # mid-cycle by sdd-verify/sdd-archive, which cannot run before the config
+    # exists — so they must NOT clear the finding.
+    mkdir -p "$repo/.kurama/sdd/demo-change"
+    printf 'phase: init\n' > "$repo/.kurama/sdd/demo-change/state.md"
+    out=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
+    assert_matches "$out" 'installed, never initialized' \
+        "the finding, which .kurama/ cycle markers must not silence" || return 1
+
+    # With it: initialized, naming the one settings home.
+    write_sdd_init_config "$repo" neutral
+    out=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
+    assert_matches "$out" 'initialized: openspec/config.yaml is the settings home' \
+        "the pass naming openspec/config.yaml" || return 1
+    assert_not_matches "$out" 'installed, never initialized' \
+        "the finding persisting once the config exists" || return 1
+    return 0
+}
+
+test_ad_install_ships_shared_helpers_executable_and_recorded() {
+    # Carried over from UNIT-U, re-pointed. install_skills copies _shared with a
+    # GLOB over *.md AND *.sh; build-skill-registry.sh was the reason that glob
+    # widened, and lint-spec.sh is now the file that proves it did not narrow back.
+    # A shipped helper the skills invoke has to be executable AND recorded, or
+    # uninstall leaves it behind and doctor cannot check it for drift. Run under
+    # the jq-less farm — the receipt path no developer's Mac executes.
+    local bindir="$TEST_TMPDIR/ad-nojq-bin"
+    make_nojq_farm "$bindir"
+    assert_farm_has_no_jq "$bindir" || return 1
+
+    local repo="$TEST_TMPDIR/ad-shared-proj"
+    make_git_repo "$repo"
+
+    local output status=0
+    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
+        --non-interactive 2>&1) || status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "setup.sh exited $status:"; printf '%s\n' "$output" | tail -5; return 1
+    fi
+
+    local helper="$repo/.claude/skills/_shared/lint-spec.sh"
+    assert_file_exists "$helper" || {
+        echo "  install_skills copied _shared/*.md only — the shipped script did not travel"
+        return 1
+    }
+    if [ ! -x "$helper" ]; then
+        echo "  the installed helper is not executable — a broken install that looks healthy in a listing"
+        return 1
+    fi
+    if ! cmp -s "$helper" "$REPO_DIR/skills/_shared/lint-spec.sh"; then
+        echo "  the installed helper differs from skills/_shared/lint-spec.sh"
+        return 1
+    fi
+
+    local manifest="$repo/.kurama-install-manifest.json"
+    local files
+    files="$(receipt_array_values "$manifest" "files")"
+    if ! receipt_array_has "$files" ".claude/skills/_shared/lint-spec.sh"; then
+        echo "  files[] does not record the shipped script — uninstall would leave it behind"
+        printf '%s\n' "$files" | grep '_shared' | awk '{ print "    " $0 }'
+        return 1
+    fi
+    # The .md conventions must still be recorded: the glob widened, it did not move.
+    if ! receipt_array_has "$files" ".claude/skills/_shared/delegation.md"; then
+        echo "  widening the _shared glob dropped the .md conventions from files[]"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-AD (issue #137): the project declares its standards${NC}"
+run_test "the convention documents standards: + the missing-path rule" test_ad_convention_documents_the_standards_list
+run_test "sdd-init pre-fills and asks, and never scans ~" test_ad_sdd_init_prefills_and_asks_without_scanning_home
+run_test "Section A reads standards:, names no registry" test_ad_section_a_reads_standards_and_names_no_registry
+run_test "the reap rule survives verbatim at its new home (#100)" test_ad_reap_rule_survives_verbatim_at_its_new_home
+run_test "the removed components are gone from the shipped tree" test_ad_removed_components_are_gone_from_the_shipped_tree
+run_test "deliberate removals list carries the three paths" test_ad_deliberate_removals_list_carries_the_three
+run_test "doctor grades initialization on the config alone" test_ad_doctor_grades_initialization_on_the_config_alone
+run_test "install ships _shared/*.sh executable + recorded" test_ad_install_ships_shared_helpers_executable_and_recorded
 
 echo ""
 
@@ -12253,646 +12576,6 @@ run_test "assert_matches survives a haystack larger than the pipe buffer" test_n
 echo ""
 
 # ============================================================================
-# UNIT-U (issue #106): the skill registry is a script, not a sub-agent
-#
-# `.kurama/skill-registry.md` is the ONLY surface a delegation resolves
-# `## Project Standards (skills to load)` from — no registry and every phase runs
-# blind to the repo's conventions (skill-resolver.md, step 4). It was built by a
-# sub-agent: measured at 12-13 minutes and 44,954 bytes in a real repo, 63% of it
-# hand-written per-skill summaries that PR #82 had already demoted to an opt-in
-# fallback. It is now skills/_shared/build-skill-registry.sh — index only, no
-# model in the loop.
-#
-# That moved three things at once, and each is a case below:
-#
-#   1. THE SCAN. One level deep, `find -L` so a symlinked skill dir resolves and
-#      a nested fixture two levels down does NOT get indexed; `_shared`,
-#      `skill-registry` and `sdd-*` excluded; frontmatter `name` + `description`
-#      only, CRLF and `> | |- >-` block scalars handled; dedupe by name with
-#      project scope winning; sorted. Asserted as EXACT table rows, because the
-#      fifteen consumers of this file parse that shape.
-#
-#   2. THE INSTALL PATH. install_skills copied `_shared/*.md` and nothing else,
-#      so a shipped .sh could not travel. The glob is `*.md` AND `*.sh` now
-#      (generic on purpose — #89's lint-spec.sh rides the same path), the
-#      executable bit is set explicitly, and every copied file is recorded in the
-#      receipt like the .md ones so uninstall removes it and doctor checks it.
-#
-#   3. THE PROSE. sdd-init Step 4 and the skill-registry skill re-listed the
-#      eleven scan directories and told the model to glob them. Upstream kept
-#      exactly that as a "fallback" and the two lists have already drifted apart.
-#      Both now run the script and neither carries a directory list — there is no
-#      fallback scan at all.
-#
-# Most of this runs under the jq-less farm: the receipt grew entries a jq-less
-# uninstall drives `rm` from, and the awk fallback parser is the one no
-# developer's Mac ever executes — which is how the single-line-empty-array bug
-# shipped (#13).
-#
-# NOTE on controls. Like UNIT-L and UNIT-P, nothing here reads git history:
-# .github/workflows/pr-check.yml checks out at depth 1, so `origin/main` is not a
-# ref on CI and a history-based control would fail there or degrade to a vacuous
-# skip. Every case asserts the new behaviour directly, which is absent on main by
-# construction — verified by hand against `git show origin/main:`, where
-# skills/sdd-init/SKILL.md has 2 hits and skills/skill-registry/SKILL.md 6 hits
-# of the forbidden directory-list/glob/compact-rules patterns, both name the
-# builder ZERO times, and skills/_shared/build-skill-registry.sh does not exist.
-# ============================================================================
-
-BUILD_REGISTRY_SCRIPT="$REPO_DIR/skills/_shared/build-skill-registry.sh"
-
-# Write a one-skill fixture: $1/SKILL.md with `name: $2` and `description: $3`.
-u_make_skill() {
-    local dir="$1" nm="$2" desc="$3"
-    mkdir -p "$dir"
-    printf -- '---\nname: %s\ndescription: "%s"\n---\n\nbody\n' "$nm" "$desc" > "$dir/SKILL.md"
-}
-
-# The fixture tree every scan case shares. Builds under $1 (a fresh dir):
-#
-#   home/.claude/skills/  alpha        folded `>` scalar + a nested metadata: block
-#                         crlf-skill   every line CRLF-terminated
-#                         linked       a SYMLINK to a skill dir outside the tree
-#                         bundle/inner a SKILL.md TWO levels down — must not index
-#                         _shared      excluded by name
-#                         skill-registry, sdd-init, sdd-new   excluded by name
-#                         dup          also present project-level: project wins
-#   proj/.claude/skills/  bare         no frontmatter at all: name falls back
-#                         dup          the copy that must win
-#   proj/.codex/skills/   pipe         a `|` in the description, which would
-#                                      otherwise break the markdown table
-#   proj/AGENTS.md        an index referencing one existing and one missing .md
-#
-# HOME is already $TEST_TMPDIR/home (see setup()), so "home/" here IS $HOME.
-u_make_fixture() {
-    local w="$1"
-    local h="$w/home" p="$w/proj"
-    mkdir -p "$h/.claude/skills" "$p/.claude/skills" "$p/.codex/skills"
-    make_git_repo "$p"
-
-    mkdir -p "$h/.claude/skills/alpha"
-    cat > "$h/.claude/skills/alpha/SKILL.md" <<'ALPHA'
----
-name: alpha
-description: >
-  Does alpha things across the codebase.
-  Trigger: When user says "alpha" or edits *.al files.
-license: MIT
-metadata:
-  author: someone
-  version: "1.0"
----
-body
-ALPHA
-
-    mkdir -p "$h/.claude/skills/crlf-skill"
-    printf -- '---\r\nname: crlf-skill\r\ndescription: "Handles CRLF. Trigger: on windows files"\r\n---\r\nbody\r\n' \
-        > "$h/.claude/skills/crlf-skill/SKILL.md"
-
-    mkdir -p "$w/elsewhere/linked"
-    cat > "$w/elsewhere/linked/SKILL.md" <<'LINKED'
----
-name: linked
-description: |
-  A skill reached through a symlink.
-  Trigger: whenever symlinks matter
----
-LINKED
-    ln -s "$w/elsewhere/linked" "$h/.claude/skills/linked"
-
-    # Two levels down: a bundle's own source copy. Indexing it turns one skill
-    # into two rows and the delegator then picks between them arbitrarily.
-    u_make_skill "$h/.claude/skills/bundle/inner" nested-should-not-appear "nope"
-
-    local d
-    for d in _shared skill-registry sdd-init sdd-new; do
-        u_make_skill "$h/.claude/skills/$d" "$d" "excluded"
-    done
-
-    u_make_skill "$h/.claude/skills/dup" dup "USER copy. Trigger: user"
-    u_make_skill "$p/.claude/skills/dup" dup "PROJECT copy. Trigger: project"
-
-    # No frontmatter at all: the name falls back to the directory name.
-    mkdir -p "$p/.claude/skills/bare"
-    printf 'just a body\n' > "$p/.claude/skills/bare/SKILL.md"
-
-    u_make_skill "$p/.codex/skills/pipe" pipe "Has a | pipe. Trigger: a|b table breaker"
-
-    cat > "$p/AGENTS.md" <<'CONV'
-# Agents
-See [conventions](docs/conv.md) and `docs/other.md` and [missing](docs/nope.md).
-CONV
-    mkdir -p "$p/docs"
-    : > "$p/docs/conv.md"
-    : > "$p/docs/other.md"
-}
-
-# The data rows of the `## User Skills` table in the registry at $1 — header and
-# separator dropped, so a caller can compare them to an exact expected block.
-u_registry_rows() {
-    awk '
-        /^## User Skills/ { inside = 1; next }
-        /^## / { inside = 0 }
-        inside && /^\| Trigger \|/ { next }
-        inside && /^\|[- |]*\|$/ { next }
-        inside && /^\|/ { print }
-    ' "$1"
-}
-
-# Same, for the `## Project Conventions` table.
-u_convention_rows() {
-    awk '
-        /^## Project Conventions/ { inside = 1; next }
-        /^## / { inside = 0 }
-        inside && /^\| File \|/ { next }
-        inside && /^\|[- |]*\|$/ { next }
-        inside && /^\|/ { print }
-    ' "$1"
-}
-
-test_u_scan_indexes_the_fixture_tree_exactly() {
-    local w="$TEST_TMPDIR"
-    u_make_fixture "$w"
-    local p="$w/proj" h="$w/home"
-
-    local out status=0
-    out=$(bash "$BUILD_REGISTRY_SCRIPT" --root "$p" 2>&1) || status=$?
-    if [ "$status" -ne 0 ]; then
-        echo "builder exited $status: $out"
-        return 1
-    fi
-
-    assert_file_exists "$p/.kurama/skill-registry.md" || return 1
-
-    # Every claim of this section in one block: the folded `>` scalar is read and
-    # its Trigger: extracted, the CRLF file parses, the symlinked dir resolves,
-    # the nested fixture is absent, `_shared`/`skill-registry`/`sdd-*` are absent,
-    # the project `dup` wins over the user one, `bare` falls back to its directory
-    # name with an em dash for the missing trigger, the pipe is escaped, and the
-    # whole thing is sorted by name.
-    local expected actual
-    expected="| When user says \"alpha\" or edits *.al files. | alpha | $h/.claude/skills/alpha/SKILL.md |
-| — | bare | $p/.claude/skills/bare/SKILL.md |
-| on windows files | crlf-skill | $h/.claude/skills/crlf-skill/SKILL.md |
-| project | dup | $p/.claude/skills/dup/SKILL.md |
-| whenever symlinks matter | linked | $h/.claude/skills/linked/SKILL.md |
-| a\\|b table breaker | pipe | $p/.codex/skills/pipe/SKILL.md |"
-    actual="$(u_registry_rows "$p/.kurama/skill-registry.md")"
-    if [ "$expected" != "$actual" ]; then
-        echo "  the index table is not what the scan must produce."
-        echo "  expected:"; printf '%s\n' "$expected" | awk '{ print "    " $0 }'
-        echo "  actual:"; printf '%s\n' "$actual" | awk '{ print "    " $0 }'
-        return 1
-    fi
-
-    # The summary line is what setup/update/sdd-init report to the user.
-    assert_matches "$out" '^skill-registry: 6 skills \(3 user, 3 project\)' \
-        "the one-line summary with the split counts" || return 1
-
-    # The index file AND the .md paths it references THAT EXIST — docs/nope.md is
-    # referenced and absent, so it must not appear.
-    expected="| AGENTS.md | AGENTS.md | Index — references the files below |
-| conv.md | docs/conv.md | Referenced by AGENTS.md |
-| other.md | docs/other.md | Referenced by AGENTS.md |"
-    actual="$(u_convention_rows "$p/.kurama/skill-registry.md")"
-    if [ "$expected" != "$actual" ]; then
-        echo "  the Project Conventions table is wrong."
-        echo "  expected:"; printf '%s\n' "$expected" | awk '{ print "    " $0 }'
-        echo "  actual:"; printf '%s\n' "$actual" | awk '{ print "    " $0 }'
-        return 1
-    fi
-    return 0
-}
-
-test_u_registry_is_an_index_with_no_compact_rules() {
-    local w="$TEST_TMPDIR"
-    u_make_fixture "$w"
-    bash "$BUILD_REGISTRY_SCRIPT" --root "$w/proj" >/dev/null 2>&1 \
-        || { echo "builder exited non-zero"; return 1; }
-
-    local body
-    body="$(cat "$w/proj/.kurama/skill-registry.md")"
-
-    # THE point of #106. 63% of the old 45 KB was per-skill summaries the
-    # resolver only reaches for when the budget is tight; the script writes none,
-    # and nothing may reintroduce them without this failing.
-    assert_not_matches "$body" 'Compact Rules' \
-        "a Compact Rules section — the registry is an index, by construction" || return 1
-
-    # The shape the fifteen consumers parse, unchanged.
-    assert_matches "$body" '^## User Skills$' "the User Skills heading" || return 1
-    assert_matches "$body" '^\| Trigger \| Skill \| Path \|$' "the index table header" || return 1
-    assert_matches "$body" '^## Project Conventions$' "the Project Conventions heading" || return 1
-    return 0
-}
-
-test_u_second_run_is_byte_identical_and_leaves_no_temp() {
-    local w="$TEST_TMPDIR"
-    u_make_fixture "$w"
-    local reg="$w/proj/.kurama/skill-registry.md"
-
-    bash "$BUILD_REGISTRY_SCRIPT" --root "$w/proj" >/dev/null 2>&1 || { echo "first run failed"; return 1; }
-    cp "$reg" "$w/first.md"
-    bash "$BUILD_REGISTRY_SCRIPT" --root "$w/proj" >/dev/null 2>&1 || { echo "second run failed"; return 1; }
-
-    if ! cmp -s "$w/first.md" "$reg"; then
-        echo "  a second run rewrote the registry — it is not idempotent:"
-        diff "$w/first.md" "$reg" | head -10 | awk '{ print "    " $0 }'
-        return 1
-    fi
-
-    # The write is temp + mv precisely so a hook reading the file mid-refresh
-    # never sees half of it. A leftover .tmp is the proof the rename was skipped.
-    local leftovers
-    leftovers="$(count_matching_files "$w/proj/.kurama" '*.tmp*')"
-    if [ "$leftovers" != "0" ]; then
-        echo "  $leftovers temp file(s) left in .kurama/ — the write was not atomic"
-        return 1
-    fi
-    return 0
-}
-
-test_u_root_guard_refuses_home_and_filesystem_root() {
-    local w="$TEST_TMPDIR"
-    u_make_fixture "$w"
-
-    # $HOME: what a cwd-relative default does the one time somebody runs this
-    # from the wrong shell. It must refuse, say why, and exit 0 — the callers run
-    # it opportunistically and must not abort an install over it.
-    local out status=0
-    out=$(bash "$BUILD_REGISTRY_SCRIPT" --root "$HOME" 2>&1) || status=$?
-    assert_eq "0" "$status" "a refused root is exit 0, never a failure" || return 1
-    assert_matches "$out" 'not a project root' "the refusal, in words" || return 1
-    if [ -e "$HOME/.kurama" ]; then
-        echo "  the builder created $HOME/.kurama — the home-directory guard did not hold"
-        return 1
-    fi
-
-    # The filesystem root, same contract. Never written to on any machine that
-    # runs this suite, hence the existence check rather than a content one.
-    status=0
-    out=$(bash "$BUILD_REGISTRY_SCRIPT" --root / 2>&1) || status=$?
-    assert_eq "0" "$status" "/ is refused with exit 0" || return 1
-    assert_matches "$out" 'not a project root' "the refusal for /" || return 1
-    if [ -e "/.kurama" ]; then
-        echo "  the builder created /.kurama — the filesystem-root guard did not hold"
-        return 1
-    fi
-
-    # A directory with no project marker at all: same refusal.
-    mkdir -p "$w/nomarker"
-    status=0
-    out=$(bash "$BUILD_REGISTRY_SCRIPT" --root "$w/nomarker" 2>&1) || status=$?
-    assert_eq "0" "$status" "an unmarked directory is refused with exit 0" || return 1
-    if [ -e "$w/nomarker/.kurama" ]; then
-        echo "  the builder wrote into a directory with no .git, .kurama/ or skills dir"
-        return 1
-    fi
-
-    # --quiet is what a caller passes when a refusal must not print at all.
-    status=0
-    out=$(bash "$BUILD_REGISTRY_SCRIPT" --root "$HOME" --quiet 2>&1) || status=$?
-    assert_eq "0" "$status" "--quiet still exits 0 on a refusal" || return 1
-    if [ -n "$out" ]; then
-        echo "  --quiet printed on a refusal: $out"
-        return 1
-    fi
-    return 0
-}
-
-test_u_build_finishes_in_seconds_not_minutes() {
-    local w="$TEST_TMPDIR"
-    u_make_fixture "$w"
-    # Bulk the tree up past any real machine's per-directory count, so the
-    # measurement is about the scan and not about six fixture files.
-    local i
-    for i in $(seq 1 60); do
-        u_make_skill "$HOME/.claude/skills/bulk-$i" "bulk-$i" "Bulk skill $i. Trigger: bulk $i"
-    done
-
-    local start end elapsed
-    start=$(date +%s)
-    bash "$BUILD_REGISTRY_SCRIPT" --root "$w/proj" >/dev/null 2>&1 || { echo "builder failed"; return 1; }
-    end=$(date +%s)
-    elapsed=$((end - start))
-
-    # Deliberately generous: the point is seconds versus the 12-13 minutes the
-    # sub-agent took, not a benchmark.
-    if [ "$elapsed" -gt 2 ]; then
-        echo "  the scan took ${elapsed}s for 66 skills — it must be under 2s"
-        return 1
-    fi
-    # A timing case that measured a build which never happened would be worse
-    # than no case at all.
-    assert_file_exists "$w/proj/.kurama/skill-registry.md" || return 1
-    local rows
-    rows="$(u_registry_rows "$w/proj/.kurama/skill-registry.md" | awk 'END { print NR + 0 }')"
-    assert_eq "66" "$rows" "the timed run indexed every skill" || return 1
-    return 0
-}
-
-test_u_clone_copy_does_not_index_kuramas_own_sources() {
-    local w="$TEST_TMPDIR"
-    u_make_fixture "$w"
-
-    # setup.sh and update.sh run the builder FROM THE CLONE. skills/ there holds
-    # sources, including groups an install can exclude (`--without review`) —
-    # indexing them advertises skills the project does not have, at paths inside
-    # somebody else's checkout. skills/manifest.json sits beside _shared/ in the
-    # clone and never travels to an install, which is the distinction the script
-    # keys on.
-    bash "$BUILD_REGISTRY_SCRIPT" --root "$w/proj" >/dev/null 2>&1 || { echo "builder failed"; return 1; }
-    local body
-    body="$(cat "$w/proj/.kurama/skill-registry.md")"
-    assert_not_matches "$body" "$REPO_DIR/skills/" \
-        "a path into the Kurama clone's own sources" || return 1
-
-    # The catch-all still fires for a REAL install: the builder placed in a
-    # skills dir with no manifest.json beside it indexes that dir's siblings,
-    # which is how a nonstandard harness target is covered at all.
-    local nonstd="$w/nonstandard-skills"
-    mkdir -p "$nonstd/_shared"
-    cp "$BUILD_REGISTRY_SCRIPT" "$nonstd/_shared/build-skill-registry.sh"
-    chmod +x "$nonstd/_shared/build-skill-registry.sh"
-    u_make_skill "$nonstd/only-here" only-here "Reachable only through the catch-all. Trigger: catch-all"
-
-    bash "$nonstd/_shared/build-skill-registry.sh" --root "$w/proj" >/dev/null 2>&1 \
-        || { echo "installed-copy run failed"; return 1; }
-    body="$(cat "$w/proj/.kurama/skill-registry.md")"
-    assert_matches "$body" '\| only-here \|' \
-        "the skill only the installed-location catch-all can reach" || return 1
-    return 0
-}
-
-# ---- the install path: _shared/*.sh travels, is executable, is recorded ----
-
-test_u_project_install_ships_the_builder_executable_and_recorded() {
-    local bindir="$TEST_TMPDIR/nojq-bin"
-    make_nojq_farm "$bindir"
-    assert_farm_has_no_jq "$bindir" || return 1
-
-    local repo="$TEST_TMPDIR/proj"
-    make_git_repo "$repo"
-
-    local output status=0
-    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive 2>&1) || status=$?
-    if [ "$status" -ne 0 ]; then
-        echo "setup.sh exited $status:"; printf '%s\n' "$output" | tail -5; return 1
-    fi
-
-    local builder="$repo/.claude/skills/_shared/build-skill-registry.sh"
-    assert_file_exists "$builder" || {
-        echo "  install_skills copied _shared/*.md only — the shipped script did not travel"
-        return 1
-    }
-    if [ ! -x "$builder" ]; then
-        echo "  the installed builder is not executable — a broken install that looks healthy in a listing"
-        return 1
-    fi
-    # Byte-identical to the repo source, or doctor's drift check is meaningless.
-    if ! cmp -s "$builder" "$BUILD_REGISTRY_SCRIPT"; then
-        echo "  the installed builder differs from $BUILD_REGISTRY_SCRIPT"
-        return 1
-    fi
-
-    # Recorded like every other installed file, read through the SAME parser
-    # uninstall/doctor/update use — under the jq-less farm, which is the copy no
-    # developer's Mac executes.
-    local manifest="$repo/.kurama-install-manifest.json"
-    local files
-    files="$(receipt_array_values "$manifest" "files")"
-    if ! receipt_array_has "$files" ".claude/skills/_shared/build-skill-registry.sh"; then
-        echo "  files[] does not record the shipped script — uninstall would leave it behind"
-        printf '%s\n' "$files" | grep '_shared' | awk '{ print "    " $0 }'
-        return 1
-    fi
-    # The .md conventions must still be recorded: the glob widened, it did not move.
-    if ! receipt_array_has "$files" ".claude/skills/_shared/skill-resolver.md"; then
-        echo "  widening the _shared glob dropped the .md conventions from files[]"
-        return 1
-    fi
-    return 0
-}
-
-test_u_project_install_builds_the_registry() {
-    local bindir="$TEST_TMPDIR/nojq-bin"
-    make_nojq_farm "$bindir"
-    assert_farm_has_no_jq "$bindir" || return 1
-
-    local repo="$TEST_TMPDIR/proj"
-    make_git_repo "$repo"
-
-    local output status=0
-    output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive 2>&1) || status=$?
-    if [ "$status" -ne 0 ]; then
-        echo "setup.sh exited $status:"; printf '%s\n' "$output" | tail -5; return 1
-    fi
-
-    assert_file_exists "$repo/.kurama/skill-registry.md" || {
-        echo "  a project install left no skill registry — every delegation would resolve without standards"
-        return 1
-    }
-    local body
-    body="$(cat "$repo/.kurama/skill-registry.md")"
-    assert_not_matches "$body" 'Compact Rules' "a Compact Rules section" || return 1
-    # The skills just installed are project-level and must be in the index.
-    assert_matches "$body" '\| judgment-day \|' "an installed skill in the index" || return 1
-    # sdd-*, _shared and skill-registry are excluded by name.
-    assert_not_matches "$body" '\| sdd-apply \|' "an sdd-* phase skill, which is excluded" || return 1
-    assert_not_matches "$body" '\| skill-registry \|' "the registry skill itself, which is excluded" || return 1
-    # setup names it where the user is looking.
-    assert_matches "$output" 'Skill registry.*skills \(' "the summary line naming the registry" || return 1
-    return 0
-}
-
-test_u_uninstall_removes_the_shipped_script() {
-    local bindir="$TEST_TMPDIR/nojq-bin"
-    make_nojq_farm "$bindir"
-    assert_farm_has_no_jq "$bindir" || return 1
-
-    local repo="$TEST_TMPDIR/proj"
-    make_git_repo "$repo"
-    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive > /dev/null 2>&1 \
-        || { echo "setup exited non-zero"; return 1; }
-    assert_file_exists "$repo/.claude/skills/_shared/build-skill-registry.sh" || return 1
-
-    PATH="$bindir" bash "$UNINSTALL_SCRIPT" --scope project --path "$repo" --without-pi-packages \
-        > /dev/null 2>&1 || { echo "uninstall exited non-zero"; return 1; }
-
-    if [ -e "$repo/.claude/skills/_shared/build-skill-registry.sh" ]; then
-        echo "  uninstall left the shipped script behind — a recorded file it drives rm from"
-        return 1
-    fi
-    if [ -d "$repo/.claude/skills/_shared" ]; then
-        echo "  _shared/ survived the uninstall, still holding:"
-        find "$repo/.claude/skills/_shared" -mindepth 1 -maxdepth 1 | awk '{ print "    " $0 }' 
-        return 1
-    fi
-    return 0
-}
-
-test_u_doctor_flags_a_missing_or_unexecutable_builder() {
-    local bindir="$TEST_TMPDIR/nojq-bin"
-    make_nojq_farm "$bindir"
-    assert_farm_has_no_jq "$bindir" || return 1
-
-    local repo="$TEST_TMPDIR/proj"
-    make_git_repo "$repo"
-    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive > /dev/null 2>&1 \
-        || { echo "setup exited non-zero"; return 1; }
-
-    local builder="$repo/.claude/skills/_shared/build-skill-registry.sh"
-    local out
-
-    # Healthy install: doctor names the builder as present.
-    out=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1 || true)
-    assert_matches "$out" 'skill-registry builder installed' \
-        "the green line for a builder that is there" || return 1
-
-    # Deleted: /skill-registry and /sdd-init have NO fallback scan by design, so
-    # this is a hard failure with a name, not a generic "1 of N files missing".
-    mv "$builder" "$TEST_TMPDIR/builder.bak"
-    out=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1 || true)
-    assert_matches "$out" 'skill-registry builder missing' \
-        "a named finding for the missing builder" || return 1
-    assert_matches "$out" 'NO fallback scan' \
-        "why it matters: nothing else can build the registry" || return 1
-    mv "$TEST_TMPDIR/builder.bak" "$builder"
-
-    # Present but not executable: same class of broken install, invisible in a
-    # file listing, so it gets its own finding.
-    chmod -x "$builder"
-    out=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1 || true)
-    assert_matches "$out" 'skill-registry builder is not executable' \
-        "a named finding for a non-executable builder" || return 1
-    chmod +x "$builder"
-    return 0
-}
-
-test_u_registry_alone_is_not_proof_of_initialization() {
-    local bindir="$TEST_TMPDIR/nojq-bin"
-    make_nojq_farm "$bindir"
-    assert_farm_has_no_jq "$bindir" || return 1
-
-    local repo="$TEST_TMPDIR/proj"
-    make_git_repo "$repo"
-    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive > /dev/null 2>&1 \
-        || { echo "setup exited non-zero"; return 1; }
-    assert_file_exists "$repo/.kurama/skill-registry.md" || return 1
-
-    # #101 closed "installed, never initialized" by accepting .kurama/ as proof
-    # the phase ran — and skill-registry.md was the file it named. setup.sh writes
-    # that file itself now, so accepting it would grade every FRESH install
-    # "initialized" and re-open the exact silent partial success #101 fixed.
-    local out
-    out=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1 || true)
-    assert_matches "$out" 'installed, never initialized' \
-        "the #101 warning, which the install-time registry must not silence" || return 1
-
-    # Anything ELSE under .kurama/ is still sdd-init's own output and still counts.
-    printf 'execution_mode: supervised\n' > "$repo/.kurama/settings.yaml"
-    out=$(PATH="$bindir" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1 || true)
-    assert_matches "$out" 'initialized: .kurama/ settings bundle present' \
-        "the pass once a real settings bundle is there" || return 1
-    assert_not_matches "$out" 'installed, never initialized' \
-        "the warning, which must be gone once init really ran" || return 1
-    return 0
-}
-
-test_u_update_rebuilds_the_registry() {
-    local bindir="$TEST_TMPDIR/nojq-bin"
-    make_nojq_farm "$bindir"
-    assert_farm_has_no_jq "$bindir" || return 1
-
-    local repo="$TEST_TMPDIR/proj"
-    make_git_repo "$repo"
-    PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive > /dev/null 2>&1 \
-        || { echo "setup exited non-zero"; return 1; }
-
-    # A registry deleted by hand (or never built, on an install predating #106)
-    # must come back on the next re-sync — that is the whole point of putting a
-    # refresh point there.
-    rm -f "$repo/.kurama/skill-registry.md"
-    local out status=0
-    out=$(PATH="$bindir" bash "$UPDATE_SCRIPT" --scope project --path "$repo" 2>&1) || status=$?
-    if [ "$status" -ne 0 ]; then
-        echo "update.sh exited $status:"; printf '%s\n' "$out" | tail -8; return 1
-    fi
-    assert_file_exists "$repo/.kurama/skill-registry.md" || {
-        echo "  a re-sync left no registry behind"
-        return 1
-    }
-    assert_matches "$out" 'skill-registry: [0-9]+ skills' \
-        "the rebuild line, so an update SAYS it refreshed the registry" || return 1
-    return 0
-}
-
-# ---- the prose: one implementation, and no directory list anywhere ----
-
-test_u_skills_run_the_script_and_carry_no_directory_list() {
-    local f body
-    for f in "$REPO_DIR/skills/sdd-init/SKILL.md" "$REPO_DIR/skills/skill-registry/SKILL.md"; do
-        assert_file_exists "$f" || return 1
-        body="$(cat "$f")"
-
-        # Positive control FIRST: a file that names the script is a file that was
-        # actually rewritten. Without this, every assertion below would pass on
-        # an empty file.
-        assert_matches "$body" 'build-skill-registry\.sh' \
-            "${f##*/}: the script it must run" || return 1
-
-        # The eleven scan directories, re-listed in prose in TWO skills, is
-        # exactly the drift upstream shipped: their two lists have already
-        # diverged. The script owns the list now, and only the script.
-        assert_not_matches "$body" '[~]/\.claude/skills' \
-            "${f##*/}: a hardcoded user-level skills path" || return 1
-        assert_not_matches "$body" '[~]/\.codex/skills|[~]/\.config/opencode/skills' \
-            "${f##*/}: more hardcoded scan paths" || return 1
-        assert_not_matches "$body" '\.pi/agent/skills|\.omp/agent/skills' \
-            "${f##*/}: the remaining hardcoded scan paths" || return 1
-
-        # And no instruction for the model to do the scan itself.
-        assert_not_matches "$body" '\*\*?/SKILL\.md' \
-            "${f##*/}: a glob for the model to run" || return 1
-        assert_not_matches "$body" '## Compact Rules|Generate Compact Rules' \
-            "${f##*/}: the compact-rules section that was 63% of the old build" || return 1
-    done
-
-    # Both must say what happens when the script is not there: stop. A silent
-    # fallback to a hand scan is how two implementations start disagreeing.
-    body="$(cat "$REPO_DIR/skills/skill-registry/SKILL.md")"
-    assert_matches "$body" 'no fallback scan|NO fallback scan|There is no fallback' \
-        "skill-registry: the no-fallback rule" || return 1
-    body="$(cat "$REPO_DIR/skills/sdd-init/SKILL.md")"
-    assert_matches "$body" 'no fallback|do not scan by hand|STOP' \
-        "sdd-init Step 4: the no-fallback rule" || return 1
-    return 0
-}
-
-echo -e "${BOLD}UNIT-U (issue #106): the skill registry is a script, not a sub-agent${NC}"
-run_test "the scan indexes the fixture tree exactly" test_u_scan_indexes_the_fixture_tree_exactly
-run_test "the registry is an index — no Compact Rules" test_u_registry_is_an_index_with_no_compact_rules
-run_test "a second run is byte-identical, no .tmp left" test_u_second_run_is_byte_identical_and_leaves_no_temp
-run_test "root guard: \$HOME, / and unmarked dirs refused" test_u_root_guard_refuses_home_and_filesystem_root
-run_test "the build finishes in seconds, not minutes" test_u_build_finishes_in_seconds_not_minutes
-run_test "the clone copy never indexes Kurama's sources" test_u_clone_copy_does_not_index_kuramas_own_sources
-run_test "install ships _shared/*.sh executable + recorded" test_u_project_install_ships_the_builder_executable_and_recorded
-run_test "a project install builds the registry" test_u_project_install_builds_the_registry
-run_test "uninstall removes the shipped script" test_u_uninstall_removes_the_shipped_script
-run_test "doctor flags a missing/unexecutable builder" test_u_doctor_flags_a_missing_or_unexecutable_builder
-run_test "the registry alone is not proof of sdd-init" test_u_registry_alone_is_not_proof_of_initialization
-run_test "update.sh rebuilds the registry on re-sync" test_u_update_rebuilds_the_registry
-run_test "the skills run the script and list no directories" test_u_skills_run_the_script_and_carry_no_directory_list
-
-echo ""
-
-# ============================================================================
 # UNIT-P (issues #105, #101): machine-local files, and a repo that already has
 # its own workflow
 #
@@ -13335,31 +13018,28 @@ test_p_doctor_flags_installed_but_never_initialized() {
     assert_not_matches "$output" 'All checks passed' \
         "a green grade over an install that cannot run a single SDD phase" || return 1
 
-    # And it clears once init has actually happened, in EITHER settings home:
-    # openspec/config.yaml, or something a cycle wrote under .kurama/.
+    # And it clears once init has actually happened. #137 left exactly ONE settings
+    # home: openspec/config.yaml.
     write_sdd_init_config "$repo" neutral
     output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
     assert_not_matches "$output" 'installed, never initialized' \
         "the finding persisting after openspec/config.yaml exists" || return 1
+    assert_matches "$output" 'initialized: openspec/config.yaml is the settings home' \
+        "the pass naming the one settings home" || return 1
 
-    # #106 moved this line. .kurama/skill-registry.md used to be the proof that
-    # init had run, because only sdd-init Step 4 produced it. setup.sh
-    # builds it at install time now, so accepting it would grade every FRESH
-    # install "initialized" — the exact false green this case exists to catch.
-    # The registry is already on disk from the setup above, and the finding above
-    # fired anyway, which is that half of the contract.
+    # And `.kurama/` is NOT a second one. It used to be — #101 accepted anything
+    # there as proof init had run, and #106 had to carve out skill-registry.md to
+    # stop a fresh install grading itself initialized. #137 deleted the registry,
+    # and what is left under .kurama/ is mid-cycle output from sdd-verify /
+    # sdd-archive, which cannot run before the config exists. So markers without a
+    # config are a broken project, not an initialized one, and doctor must still
+    # say so.
     rm -rf "$repo/openspec"
-    assert_file_exists "$repo/.kurama/skill-registry.md" || return 1
-
-    # Everything ELSE under .kurama/ is still sdd-init's (or a cycle's) own
-    # output and still clears the finding. The three cycle markers always land
-    # under .kurama/sdd/<change>/ — see _shared/persistence-contract.md — so they
-    # are on-disk evidence a cycle has run here.
     mkdir -p "$repo/.kurama/sdd/demo-change"
     printf 'phase: init\n' > "$repo/.kurama/sdd/demo-change/state.md"
     output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
-    assert_not_matches "$output" 'installed, never initialized' \
-        "the finding persisting once .kurama/ carries something a cycle wrote" || return 1
+    assert_matches "$output" 'installed, never initialized' \
+        "the finding, which .kurama/ cycle markers must not silence" || return 1
     return 0
 }
 
@@ -14820,46 +14500,48 @@ test_q_delegation_contract_reaps_finished_subagents() {
     # idle agents, and the bookkeeping lands back on the user.
     #
     # The fix is contract-level and harness-agnostic, which is why it is asserted in
-    # `skill-resolver.md` — the canonical file every generated prompt already points at — and
-    # not in the prompts, whose 24000-byte budget has no room left.
+    # `delegation.md` — the canonical file every generated prompt already points at — and
+    # not in the prompts, whose 24000-byte budget has no room left. #137 moved this rule out
+    # of the deleted `skill-resolver.md` verbatim; this test moved with it rather than
+    # shrinking, and UNIT-AD pins the two load-bearing sentences word for word.
     #
     # BOTH halves are asserted on purpose. A reap rule without its exception is a regression,
     # not a fix: resuming an agent preserves the context it built, and an orchestrator that
     # kills every agent on sight has to re-derive that context in a fresh one. The exception is
     # bounded by an INTENT the orchestrator states out loud when it takes it — "might need it
     # later" is not one — so the two assertions have to travel together.
-    local resolver="$REPO_DIR/skills/_shared/skill-resolver.md"
-    assert_file_exists "$resolver" || return 1
+    local contract="$REPO_DIR/skills/_shared/delegation.md"
+    assert_file_exists "$contract" || return 1
 
     local flat
-    flat=$(tr '\n' ' ' < "$resolver")
+    flat=$(tr '\n' ' ' < "$contract")
 
     # Half 1 — the reap step itself, as a step of the launch/return cycle.
-    grep -qi '^### Step 5.*Reap' "$resolver" \
-        || { echo "skill-resolver.md has no Step 5 that reaps the sub-agent"; return 1; }
+    grep -qi '^## Reap the Sub-Agent' "$contract" \
+        || { echo "delegation.md has no section that reaps the sub-agent"; return 1; }
     case "$flat" in
         *"delegation is not complete"*) ;;
-        *) echo "skill-resolver.md never says the delegation is incomplete until the agent is shut down"; return 1 ;;
+        *) echo "delegation.md never says the delegation is incomplete until the agent is shut down"; return 1 ;;
     esac
     # The Claude Code primitive, named — a contract that says "close it somehow" closes nothing.
     case "$flat" in
         *"shutdown request to"*) ;;
-        *) echo "skill-resolver.md does not name the Claude Code shutdown request to the teammate"; return 1 ;;
+        *) echo "delegation.md does not name the Claude Code shutdown request to the teammate"; return 1 ;;
     esac
     # And the harnesses that have no primitive: the reap is holding no reference, said out loud.
     case "$flat" in
         *"no such primitive"*) ;;
-        *) echo "skill-resolver.md has no branch for harnesses without a termination primitive"; return 1 ;;
+        *) echo "delegation.md has no branch for harnesses without a termination primitive"; return 1 ;;
     esac
     case "$flat" in
         *"hold no reference"*) ;;
-        *) echo "skill-resolver.md never defines the reap on a harness that cannot terminate an agent"; return 1 ;;
+        *) echo "delegation.md never defines the reap on a harness that cannot terminate an agent"; return 1 ;;
     esac
 
     # Half 2 — the keep-alive exception. Without this the resume pattern is banned outright.
     case "$flat" in
         *"The one exception"*) ;;
-        *) echo "skill-resolver.md states a reap rule with no keep-alive exception — this bans resuming an agent"; return 1 ;;
+        *) echo "delegation.md states a reap rule with no keep-alive exception — this bans resuming an agent"; return 1 ;;
     esac
     case "$flat" in
         *"follow-up"*) ;;
@@ -14878,9 +14560,9 @@ test_q_delegation_contract_reaps_finished_subagents() {
         assert_file_exists "$f" || return 1
         grep -qi 'reap' "$f" \
             || { echo "$skill/SKILL.md delegates a phase and never reaps the agent"; return 1; }
-        grep -qF 'skill-resolver.md' "$f" \
-            || { echo "$skill/SKILL.md restates the reap rule instead of pointing at skill-resolver.md"; return 1; }
-        grep -qF 'Step 5' "$f" \
+        grep -qF 'delegation.md' "$f" \
+            || { echo "$skill/SKILL.md restates the reap rule instead of pointing at delegation.md"; return 1; }
+        grep -qF 'Reap the Sub-Agent' "$f" \
             || { echo "$skill/SKILL.md does not point at the reap step by name"; return 1; }
     done
     return 0
