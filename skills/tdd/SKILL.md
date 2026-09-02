@@ -38,11 +38,8 @@ removes that behavior: installation ≠ activation.)
 1. The `tdd: true|false` flag the orchestrator propagates in the phase launch
    prompt. This is the already-resolved value and WINS over any value a phase
    reads on its own — the same rule that governs `compliance_mode`.
-2. The explicit project setting the orchestrator resolves it from:
-   - `openspec` / `hybrid`: the top-level `tdd:` block in `openspec/config.yaml`
-     (`tdd.enabled`).
-   - `engram`: the `tdd` flag in the `sdd-init/{project}` context
-     artifact (there is no `config.yaml` in these modes).
+2. The explicit project setting the orchestrator resolves it from: the top-level
+   `tdd:` block in `openspec/config.yaml` (`tdd.enabled`).
 3. An interactive suggestion during `sdd-init` ONLY — e.g. "codebase looks
    test-first — enable TDD?". A test-first-looking codebase may trigger this
    suggestion and NOTHING more; it never auto-activates.

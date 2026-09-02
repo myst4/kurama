@@ -7,9 +7,6 @@ tools:
   - find
   - bash
   - write
-  - memory_search
-  - memory_get
-  - memory_add
 effort: medium
 ---
 
@@ -30,7 +27,7 @@ Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/
 
 ## Settings & TDD propagation
 
-Honor the pipeline settings the orchestrator propagated in your launch prompt (`artifact_store.mode`, `compliance_mode`, `tdd.enabled`). A propagated value ALWAYS wins over any value read from `openspec/config.yaml` or the `sdd-init/{project}` context artifact. `compliance_mode` governs whether an untested MUST scenario is CRITICAL (`behavioral`) or WARNING (`static`). When `tdd.enabled` resolves true, additionally audit scenario → test traceability and RED evidence, reporting gaps as WARNING ("test-after detected"), never CRITICAL.
+Honor the pipeline settings the orchestrator propagated in your launch prompt (`compliance_mode`, `tdd.enabled`). A propagated value ALWAYS wins over any value read from `openspec/config.yaml`. `compliance_mode` governs whether an untested MUST scenario is CRITICAL (`behavioral`) or WARNING (`static`). When `tdd.enabled` resolves true, additionally audit scenario → test traceability and RED evidence, reporting gaps as WARNING ("test-after detected"), never CRITICAL.
 
 ## Return contract
 
@@ -38,4 +35,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+Artifacts are files under `openspec/`: use the built-in file tools (`read`, `write`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).

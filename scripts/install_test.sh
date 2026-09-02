@@ -603,15 +603,6 @@ test_output_shows_next_step() {
     }
 }
 
-test_output_shows_engram_note() {
-    local output
-    output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "Engram" || {
-        echo "Output missing Engram recommendation"
-        return 1
-    }
-}
-
 # ============================================================================
 # Tests — OS detection (limited — we can only test the current OS)
 # ============================================================================
@@ -861,8 +852,8 @@ test_opencode_template_files_exist() {
 #
 # setup.sh --agent opencode runs the global flow. A fake `npm` shim on PATH keeps
 # any npm invocation off the network; jq/python/git behind it stay reachable.
-# --without-engram keeps the O5 flow (brew/engram) out. The shim is kept as a
-# guard even though the background-agents npm dependency is no longer installed.
+# The shim is kept as a guard even though the background-agents npm dependency is
+# no longer installed.
 # ============================================================================
 
 # Fake npm that logs nothing and exits 0, so setup_opencode's dependency install
@@ -882,7 +873,7 @@ SHIM
 run_setup_opencode() {
     local shim="$TEST_TMPDIR/npmshim"
     make_npm_shim "$shim"
-    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --without-engram \
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode \
         --non-interactive "$@" > /dev/null 2>&1
 }
 
@@ -1011,7 +1002,7 @@ test_opencode_profile_idempotent_preserves_model() {
 test_opencode_profile_rejects_bad_name() {
     # An invalid profile name must abort before any work.
     if bash "$SETUP_SCRIPT" --agent opencode --opencode-profile 'Bad Name' \
-        --without-engram --non-interactive > /dev/null 2>&1; then
+        --non-interactive > /dev/null 2>&1; then
         echo "setup.sh accepted an invalid profile name"; return 1
     fi
     return 0
@@ -1599,9 +1590,7 @@ test_pi_packages_exact_sequence() {
     fi
 
     local expected actual
-    expected="pi install npm:gentle-engram@0.1.10
-pi install npm:pi-mcp-adapter@2.11.0
-npm exec --yes --package gentle-engram@0.1.10 -- pi-engram init
+    expected="pi install npm:pi-mcp-adapter@2.11.0
 pi install npm:pi-subagents-j0k3r@1.4.1
 pi install npm:@juicesharp/rpiv-ask-user-question@2.0.0
 pi install npm:pi-web-access@0.13.0
@@ -1633,7 +1622,7 @@ test_pi_packages_failure_is_non_fatal() {
     # remaining packages in the sequence must still be attempted.
     local bindir="$TEST_TMPDIR/shimbin" log="$TEST_TMPDIR/pi-calls.log"
     mkdir -p "$bindir"
-    # pi fails ONLY for pi-mcp-adapter (2nd step); everything else succeeds.
+    # pi fails ONLY for pi-mcp-adapter (1st step); everything else succeeds.
     cat > "$bindir/pi" <<SHIM
 #!/usr/bin/env bash
 printf 'pi %s\n' "\$*" >> "$log"
@@ -1654,10 +1643,10 @@ SHIM
         return 1
     fi
 
-    # All 8 steps must still have been attempted despite the 2nd one failing.
+    # All 6 steps must still have been attempted despite the 1st one failing.
     local lines
     lines=$(wc -l < "$log" | tr -d ' ')
-    assert_eq "8" "$lines" "all 8 package steps must be attempted even when one fails" || return 1
+    assert_eq "6" "$lines" "all 6 package steps must be attempted even when one fails" || return 1
     grep -q 'pi-btw@' "$log" || { echo "later packages were skipped after a failure"; return 1; }
     return 0
 }
@@ -1818,82 +1807,6 @@ test_sdd_status_json_parses_on_empty() {
     return 0
 }
 
-test_sdd_status_conforming_engram_cycle_is_not_degraded() {
-    # A post-#30 engram cycle writes the mandated cycle marker and NOTHING else
-    # to disk. Labelling it "engram (fallback)" called a fully conforming cycle
-    # degraded, and probing artifact files alone printed "Last phase: none /
-    # Next phase: explore" two lines above "Recorded phase: tasks".
-    local proj="$TEST_TMPDIR/engram-project"
-    mkdir -p "$proj/.kurama/sdd/my-change"
-    cat > "$proj/.kurama/sdd/my-change/state.md" <<'EOF'
-change: my-change
-phase: tasks
-artifact_store.mode: engram
-last_updated: 2026-08-15
-EOF
-    local output
-    output=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" 2>&1) || {
-        echo "sdd-status.sh failed on an engram cycle"; return 1; }
-
-    if printf '%s\n' "$output" | grep -qi 'fallback'; then
-        echo "a conforming engram cycle is still labelled a fallback"; return 1
-    fi
-    printf '%s\n' "$output" | grep -qE '^  Store: +engram$' || {
-        echo "the store label is not the recorded mode:"; printf '%s\n' "$output"; return 1; }
-    printf '%s\n' "$output" | grep -qE '^  Last phase: +tasks$' || {
-        echo "the recorded phase did not win over the artifact probes"; return 1; }
-    printf '%s\n' "$output" | grep -qE '^  Next phase: +apply' || {
-        echo "next phase does not follow the recorded phase"; return 1; }
-
-    local json
-    json=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" --json 2>&1) || {
-        echo "sdd-status.sh --json failed"; return 1; }
-    if command -v jq > /dev/null 2>&1; then
-        assert_eq "engram" "$(printf '%s' "$json" | jq -r '.changes[0].store')" \
-            "JSON store is not a legal artifact-store mode" || return 1
-        assert_eq "tasks" "$(printf '%s' "$json" | jq -r '.changes[0].last_phase')" \
-            "JSON last_phase contradicts recorded_phase" || return 1
-    fi
-    return 0
-}
-
-test_sdd_status_marker_only_openspec_cycle_is_not_hybrid() {
-    # The .kurama/ markers are written in EVERY mode, so their presence is not
-    # evidence of a second store — upgrading on it made "openspec" unreachable.
-    local proj="$TEST_TMPDIR/openspec-project"
-    mkdir -p "$proj/openspec/changes/my-change" "$proj/.kurama/sdd/my-change"
-    printf 'schema: spec-driven\n' > "$proj/openspec/config.yaml"
-    printf '# proposal\n' > "$proj/openspec/changes/my-change/proposal.md"
-    printf 'change: my-change\nphase: propose\n' > "$proj/.kurama/sdd/my-change/state.md"
-
-    local output
-    output=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" 2>&1) || {
-        echo "sdd-status.sh failed on an openspec cycle"; return 1; }
-    printf '%s\n' "$output" | grep -qE '^  Store: +openspec$' || {
-        echo "a marker-only openspec cycle is not labelled openspec:"; printf '%s\n' "$output"; return 1; }
-    return 0
-}
-
-test_sdd_status_unprovable_store_is_labelled_unknown() {
-    # No recorded mode anywhere: say so instead of guessing engram.
-    local proj="$TEST_TMPDIR/unknown-store-project"
-    mkdir -p "$proj/.kurama/sdd/my-change"
-    printf 'change: my-change\nphase: explore\n' > "$proj/.kurama/sdd/my-change/state.md"
-
-    local output
-    output=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" 2>&1) || {
-        echo "sdd-status.sh failed"; return 1; }
-    printf '%s\n' "$output" | grep -qE '^  Store: +unknown +\(cycle markers only\)$' || {
-        echo "an unprovable store is not labelled honestly:"; printf '%s\n' "$output"; return 1; }
-    if command -v jq > /dev/null 2>&1; then
-        local json
-        json=$(bash "$SCRIPT_DIR/sdd-status.sh" "$proj" --json 2>&1)
-        printf '%s' "$json" | jq -e '.changes[0].store == null' > /dev/null 2>&1 || {
-            echo "JSON store must be null, never a prose label"; return 1; }
-    fi
-    return 0
-}
-
 test_pi_example_generated() {
     # G9: Pi is the 8th generated harness; its orchestrator lands at examples/pi/AGENTS.md.
     assert_file_exists "$REPO_DIR/examples/pi/AGENTS.md" || return 1
@@ -2000,35 +1913,6 @@ test_marketplace_json_valid() {
     return 0
 }
 
-test_none_mode_fully_removed() {
-    # S-mode-1. `none` meant "persist no SDD artifacts" in a workflow whose premise is that
-    # specs are the source of truth: sdd-archive had nothing to merge, so the main specs
-    # never advanced. Removing the enum value is not enough — every phase carried a `none`
-    # branch, and a leftover branch is what makes a removed mode quietly still reachable.
-    # Two files are exempt because naming the mode is their job: docs/changelog.md is a
-    # historical record and must keep describing it as it existed, and docs/migration.md
-    # exists precisely to tell a project still on `none` what to do.
-    local hits
-    # shellcheck disable=SC2016  # literal backticks are the point — this matches the mode as written in prose
-    hits=$(grep -rn -- '`none`' "$REPO_DIR/skills" "$REPO_DIR/docs" 2>/dev/null \
-        | grep -v 'docs/changelog.md' \
-        | grep -v 'docs/migration.md' \
-        | grep -v 'Removed mode' \
-        | grep -v 'skill_resolution' || true)
-    if [ -n "$hits" ]; then
-        echo "the none artifact-store mode still appears:"
-        echo "$hits" | head -5
-        return 1
-    fi
-    # The enum itself must be the three surviving modes.
-    grep -q 'engram | openspec | hybrid`' "$REPO_DIR/skills/_shared/persistence-contract.md" \
-        || { echo "persistence-contract.md does not declare the three-mode enum"; return 1; }
-    # And the removal must be explained where someone hitting an old config would look.
-    grep -qi 'report it as unsupported' "$REPO_DIR/skills/_shared/persistence-contract.md" \
-        || { echo "persistence-contract.md must say what to do when a config still says none"; return 1; }
-    return 0
-}
-
 test_dropped_harnesses_rejected_by_name() {
     # The four dropped harnesses (gemini-cli, cursor, vscode, antigravity) were valid
     # --agent values, so stale scripts and CI jobs still pass them. setup.sh never
@@ -2098,14 +1982,21 @@ test_dropped_harness_artifacts_are_gone() {
 }
 
 test_kurama_state_survives_mode_removal() {
-    # S-mode-3. `.kurama/` is harness infrastructure, not an SDD artifact — the persistence
-    # modes never gated it, and removing a mode must not accidentally make it conditional.
+    # S-mode-3, re-pointed by #135. `.kurama/` is harness infrastructure, not an SDD
+    # artifact. The persistence modes never gated it, and REMOVING those modes must not
+    # accidentally take it with them — which is the failure mode #135 could have had, since
+    # every sentence that protected `.kurama/` was phrased "in every mode".
     local f="$REPO_DIR/skills/_shared/persistence-contract.md"
     assert_file_exists "$f" || return 1
     grep -q '.kurama/sdd/' "$f" \
-        || { echo "the .kurama/sdd/ fallback disappeared from the persistence contract"; return 1; }
-    grep -qi 'written in every mode' "$REPO_DIR/skills/sdd-init/SKILL.md" \
-        || { echo "sdd-init must still write the registry in every mode"; return 1; }
+        || { echo "the .kurama/sdd/ marker directory disappeared from the persistence contract"; return 1; }
+    # sdd-init still writes the registry there, and still says it is machine-local rather
+    # than a committed artifact — the property the mode gates used to express.
+    local init="$REPO_DIR/skills/sdd-init/SKILL.md"
+    grep -q '.kurama/skill-registry.md' "$init" \
+        || { echo "sdd-init no longer writes .kurama/skill-registry.md"; return 1; }
+    grep -qi 'harness infrastructure' "$init" \
+        || { echo "sdd-init no longer states the registry is harness infrastructure"; return 1; }
     return 0
 }
 
@@ -2214,7 +2105,8 @@ test_preflight_resolves_no_dangling_delivery_value() {
     # the guard it named measures the real diff with git at PR time instead. A contract the
     # repo declares and nothing consumes is a false promise, so the promise was removed rather
     # than wired. This pins BOTH halves: the value is gone from the whole skills tree, and the
-    # preflight's arity is consistently three everywhere it is counted.
+    # preflight's arity is consistent everywhere it is counted — two since #135 took the
+    # artifact store out of it.
     local osp="$REPO_DIR/skills/_shared/orchestrator-sdd-protocol.md"
     assert_file_exists "$osp" || return 1
 
@@ -2225,14 +2117,16 @@ test_preflight_resolves_no_dangling_delivery_value() {
         echo "a delivery strategy value nothing reads is back in: $leftovers"; return 1
     fi
 
-    # Arity: three, with no counting artifact of the removed fourth left behind.
-    if grep -qi 'four values\|all four\|four groups' "$osp"; then
-        echo "orchestrator-sdd-protocol.md still counts the preflight as four values"; return 1
+    # Arity: two, with no counting artifact of either removed value left behind.
+    # The alternation is deliberately narrow: "all three teammates" appears in the session
+    # identity section and has nothing to do with the preflight's arity.
+    if grep -qi 'four values\|four groups\|three values\|three groups' "$osp"; then
+        echo "orchestrator-sdd-protocol.md still counts the preflight as more than two values"; return 1
     fi
-    grep -qi 'three values' "$osp" \
-        || { echo "orchestrator-sdd-protocol.md never states the preflight's three values"; return 1; }
+    grep -qi 'two values' "$osp" \
+        || { echo "orchestrator-sdd-protocol.md never states the preflight's two values"; return 1; }
 
-    # The reason it is three, recorded where the next reader would otherwise re-add it.
+    # The reason it is two, recorded where the next reader would otherwise re-add it.
     grep -qi 'delivery is not a preflight value' "$osp" \
         || { echo "orchestrator-sdd-protocol.md does not say why delivery is not a preflight value"; return 1; }
 
@@ -2518,7 +2412,7 @@ test_receipt_omits_commit_without_git() {
 # ============================================================================
 # Tests — Phase 10b: scope project (O1), hooks (O2), Pi agents (O4),
 # update.sh (O6), doctor.sh (O7). Fully offline: git init is local, and the
-# doctor tooling probes (gh/pi/engram) are shadowed by fast local shims so no
+# doctor tooling probes (gh/pi) are shadowed by fast local shims so no
 # network is ever touched.
 # ============================================================================
 
@@ -2531,7 +2425,7 @@ make_git_repo() {
     git -C "$dir" config user.name test >/dev/null 2>&1
 }
 
-# Local shims for gh/pi/engram so doctor.sh never hits the network. Prepended to
+# Local shims for gh/pi so doctor.sh never hits the network. Prepended to
 # PATH; real core tools (grep/awk/jq/…) stay reachable behind them.
 make_doctor_shims() {
     local bindir="$1"
@@ -2546,18 +2440,11 @@ SHIM
     cat > "$bindir/pi" <<'SHIM'
 #!/usr/bin/env bash
 case "$1" in
-  list) echo "gentle-engram pi-mcp-adapter pi-btw"; exit 0 ;;
+  list) echo "pi-mcp-adapter pi-btw"; exit 0 ;;
 esac
 exit 0
 SHIM
-    cat > "$bindir/engram" <<'SHIM'
-#!/usr/bin/env bash
-case "$1" in
-  --version) echo "engram 9.9.9"; exit 0 ;;
-esac
-exit 0
-SHIM
-    chmod +x "$bindir/gh" "$bindir/pi" "$bindir/engram"
+    chmod +x "$bindir/gh" "$bindir/pi"
 }
 
 # ---- O1: scope project ----
@@ -2673,10 +2560,10 @@ test_scope_project_receipt_records_every_tool() {
     make_npm_shim "$shim"
 
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "claude-code project setup exited non-zero"; return 1; }
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "opencode project setup exited non-zero"; return 1; }
 
     local manifest="$repo/.kurama-install-manifest.json"
@@ -2780,10 +2667,10 @@ test_tui_probe_detects_project_install() {
     make_npm_shim "$shim"
 
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "claude-code project setup exited non-zero"; return 1; }
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "opencode project setup exited non-zero"; return 1; }
 
     local out status=0
@@ -2814,7 +2701,7 @@ test_tui_probe_v6_receipt_reports_its_tool() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "claude-code project setup exited non-zero"; return 1; }
 
     local manifest="$repo/.kurama-install-manifest.json"
@@ -2856,7 +2743,7 @@ test_tui_probe_no_receipt_is_silent() {
 
 test_tui_probe_detects_global_install() {
     # Global receipts live in the per-harness skills dir, not the repo root.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "global claude-code setup exited non-zero"; return 1; }
     assert_file_exists "$HOME/.claude/skills/.kurama-install-manifest.json" || return 1
 
@@ -2893,10 +2780,10 @@ test_tui_probe_runs_without_gum() {
     make_npm_shim "$shim"
 
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "claude-code project setup exited non-zero"; return 1; }
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "opencode project setup exited non-zero"; return 1; }
 
     # Restricted PATH (symlink farm) that deliberately omits gum, so its absence
@@ -3141,186 +3028,6 @@ test_doctor_project_scope_healthy() {
     return 0
 }
 
-# ---- O5: Engram optional persistence engine (fake engram/brew/claude shims) ----
-
-# Local shims for the O5 flow so no real binary or network is ever touched. With
-# $3="with-engram" (default) an `engram` fake is on PATH; "no-engram" omits it so
-# the brew/guide branch is exercised. `brew` and `claude` fakes always append
-# their argv to $2 so a test can prove they were (not) invoked.
-make_engram_shims() {
-    local bindir="$1" log="$2" mode="${3:-with-engram}"
-    mkdir -p "$bindir"
-    if [ "$mode" = "with-engram" ]; then
-        cat > "$bindir/engram" <<SHIM
-#!/usr/bin/env bash
-echo "engram \$*" >> "$log"
-case "\$1" in --version) echo "engram 9.9.9" ;; esac
-exit 0
-SHIM
-        chmod +x "$bindir/engram"
-    fi
-    cat > "$bindir/brew" <<SHIM
-#!/usr/bin/env bash
-echo "brew \$*" >> "$log"
-exit 0
-SHIM
-    cat > "$bindir/claude" <<SHIM
-#!/usr/bin/env bash
-echo "claude \$*" >> "$log"
-exit 0
-SHIM
-    chmod +x "$bindir/brew" "$bindir/claude"
-}
-
-test_engram_without_flag_no_changes() {
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1
-    # No MCP config written when Engram is declined.
-    if [ -f "$HOME/.claude.json" ]; then echo ".claude.json must not be written without engram"; return 1; fi
-    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
-    assert_file_exists "$manifest" || return 1
-    grep -q '"engram": "no"' "$manifest" || { echo "receipt must record engram=no"; return 1; }
-    # engram_mcp array must be empty.
-    local n
-    n=$(jq '.engram_mcp | length' "$manifest")
-    assert_eq "0" "$n" "engram_mcp must be empty when declined"
-}
-
-test_engram_registers_claude_global() {
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "engram setup exited non-zero"; return 1; }
-    # Generic mcpServers.engram shape with the canonical args.
-    assert_file_exists "$HOME/.claude.json" || return 1
-    jq -e '.mcpServers.engram' "$HOME/.claude.json" > /dev/null || { echo "mcpServers.engram missing"; return 1; }
-    local args
-    args=$(jq -rc '.mcpServers.engram.args' "$HOME/.claude.json")
-    assert_eq '["mcp","--tools=agent"]' "$args" "engram args must be [mcp,--tools=agent]" || return 1
-    # Receipt records the registration and engram=yes.
-    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
-    grep -q '"engram": "yes"' "$manifest" || { echo "receipt must record engram=yes"; return 1; }
-    local n
-    n=$(jq '.engram_mcp | length' "$manifest")
-    [ "$n" -ge 1 ] || { echo "engram_mcp must record the .claude.json path"; return 1; }
-    return 0
-}
-
-test_engram_opencode_project_shape() {
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-    local repo="$TEST_TMPDIR/ocproj"
-    make_git_repo "$repo"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --with-engram --non-interactive > /dev/null 2>&1 || { echo "opencode engram setup non-zero"; return 1; }
-    # OpenCode wants command as an array on a type:local server (inject.go parity).
-    assert_file_exists "$repo/opencode.json" || return 1
-    jq -e '.mcp.engram' "$repo/opencode.json" > /dev/null || { echo "mcp.engram missing"; return 1; }
-    local type first
-    type=$(jq -r '.mcp.engram.type' "$repo/opencode.json")
-    assert_eq "local" "$type" "opencode engram server type must be local" || return 1
-    first=$(jq -r '.mcp.engram.command | type' "$repo/opencode.json")
-    assert_eq "array" "$first" "opencode engram command must be an array" || return 1
-    return 0
-}
-
-test_engram_codex_toml_upsert() {
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-    mkdir -p "$HOME/.codex"
-    printf 'model = "gpt-5"\n\n[features]\nfoo = true\n' > "$HOME/.codex/config.toml"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent codex --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "codex engram setup non-zero"; return 1; }
-    local toml="$HOME/.codex/config.toml"
-    grep -q '^\[mcp_servers.engram\]' "$toml" || { echo "[mcp_servers.engram] block missing"; return 1; }
-    grep -q 'args = \["mcp", "--tools=agent"\]' "$toml" || { echo "engram args line missing"; return 1; }
-    # Existing content survives the TOML upsert.
-    grep -q 'foo = true' "$toml" || { echo "pre-existing codex config lost"; return 1; }
-    # Idempotent: a second run must not duplicate the block.
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent codex --with-engram --non-interactive > /dev/null 2>&1
-    local n
-    n=$(grep -c '^\[mcp_servers.engram\]' "$toml")
-    assert_eq "1" "$n" "engram block must appear exactly once after re-run"
-}
-
-test_engram_project_scope_claude() {
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-    local repo="$TEST_TMPDIR/enproj"
-    make_git_repo "$repo"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --with-engram --non-interactive > /dev/null 2>&1 || { echo "project engram setup non-zero"; return 1; }
-    # Project scope writes the Claude project MCP file (.mcp.json) inside the repo.
-    assert_file_exists "$repo/.mcp.json" || return 1
-    jq -e '.mcpServers.engram' "$repo/.mcp.json" > /dev/null || { echo ".mcp.json engram server missing"; return 1; }
-    # Receipt records it repo-relative (never a global leak).
-    grep -q '"\.mcp\.json"' "$repo/.kurama-install-manifest.json" || {
-        echo "receipt must record .mcp.json repo-relative"; return 1; }
-    if [ -f "$HOME/.claude.json" ]; then echo "project engram must not touch the global ~/.claude.json"; return 1; fi
-    return 0
-}
-
-test_engram_brew_not_invoked_noninteractive() {
-    # No engram binary on PATH + non-interactive: setup must NOT run brew (network
-    # only ever with explicit consent), yet still write the registration.
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log" "no-engram"
-    : > "$log"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "engram setup non-zero"; return 1; }
-    if [ -f "$log" ] && grep -q 'brew ' "$log"; then echo "brew must not be invoked in non-interactive mode"; return 1; fi
-    # Registration is still written even when consent/install is skipped.
-    assert_file_exists "$HOME/.claude.json" || return 1
-    jq -e '.mcpServers.engram' "$HOME/.claude.json" > /dev/null || {
-        echo "engram MCP must still be registered when the binary install is skipped"; return 1; }
-    return 0
-}
-
-test_engram_uninstall_removes_registration() {
-    # setup --with-engram registers mcpServers.engram in ~/.claude.json; uninstall
-    # must strip exactly that entry (receipt-driven) and leave every other server
-    # and top-level key byte-intact. Fully offline (fake engram/brew/claude shims).
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-
-    # Pre-seed a config with an unrelated MCP server + top-level key that must survive.
-    mkdir -p "$HOME/.claude"
-    printf '{"someKey":"keep","mcpServers":{"other":{"command":"x"}}}\n' > "$HOME/.claude.json"
-
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive \
-        > /dev/null 2>&1 || { echo "engram setup exited non-zero"; return 1; }
-    jq -e '.mcpServers.engram' "$HOME/.claude.json" > /dev/null || {
-        echo "engram was not registered before uninstall"; return 1; }
-    # The receipt recorded the touched config in engram_mcp[].
-    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
-    local n
-    n=$(jq '.engram_mcp | length' "$manifest")
-    [ "$n" -ge 1 ] || { echo "engram_mcp must record the .claude.json path"; return 1; }
-
-    # Uninstall strips the engram registration only.
-    bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages > /dev/null 2>&1
-
-    if jq -e '.mcpServers.engram' "$HOME/.claude.json" > /dev/null 2>&1; then
-        echo "engram registration was NOT removed by uninstall"; return 1; fi
-    jq -e '.mcpServers.other' "$HOME/.claude.json" > /dev/null || {
-        echo "unrelated MCP server was lost during engram uninstall"; return 1; }
-    local sk
-    sk=$(jq -r '.someKey' "$HOME/.claude.json")
-    assert_eq "keep" "$sk" "unrelated top-level key preserved through engram uninstall" || return 1
-    return 0
-}
-
-test_doctor_reports_engram_mcp() {
-    local shim="$TEST_TMPDIR/doctorbin"
-    make_doctor_shims "$shim"
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive > /dev/null 2>&1
-    local output
-    output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -qi 'Engram MCP registered' || { echo "doctor must mention the Engram MCP registration"; return 1; }
-    return 0
-}
-
 # ============================================================================
 # Tests — the two shipped PreToolUse hooks (#31)
 #
@@ -3371,9 +3078,9 @@ skill_payload() {
     printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Skill","tool_input":{"skill":"%s"}}' "$1" "$2"
 }
 
-# A git repo carrying an ACTIVE SDD cycle in engram-fallback shape: the
-# .kurama/sdd/<change>/state.md marker batch 1 made every mode write, and no
-# archive report (writing one is what retires the cycle).
+# A git repo carrying an ACTIVE SDD cycle: the .kurama/sdd/<change>/state.md
+# marker batch 1 made mandatory, and no archive report (writing one is what
+# retires the cycle).
 make_active_cycle_repo() {
     local root="$1" change="${2:-add-widget}"
     make_git_repo "$root"
@@ -3522,9 +3229,9 @@ test_archive_gate_blocks_an_archive_with_no_verify_report() {
 }
 
 test_archive_gate_passes_a_pass_verdict_in_the_kurama_store() {
-    # The engram-fallback store (.kurama/sdd/<change>/verify-report.md) is the
-    # every-mode location batch 1 settled on; the gate must read it, and must find
-    # the change on its own when nothing names it.
+    # The cycle marker (.kurama/sdd/<change>/verify-report.md) is the fixed
+    # location batch 1 settled on; the gate must read it, and must find the change
+    # on its own when nothing names it.
     local repo="$TEST_TMPDIR/gate-pass"
     make_active_cycle_repo "$repo"
     write_verify_report "$repo" add-widget "PASS WITH WARNINGS"
@@ -3802,8 +3509,8 @@ MD
 # Tests — jq-less host (the awk fallbacks actually work)
 #
 # Kurama needs no build step and no runtime, and jq is optional — it is needed only
-# for the JSON-merging extras (the settings.json hooks block, the Engram MCP
-# registration, opencode's tui.json). But every restricted-PATH farm in this file
+# for the JSON-merging extras (the settings.json hooks block and opencode's
+# tui.json). But every restricted-PATH farm in this file
 # linked jq in, so the awk fallbacks were never executed here. They are also never
 # executed on a developer's Mac (macOS ships jq in /usr/bin since 15),
 # which is exactly how two defects shipped: manifest_skill_lines resolved 0 skills
@@ -3935,7 +3642,7 @@ test_nojq_setup_claude_code_project_installs() {
     make_git_repo "$control"
     make_git_repo "$target"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$control" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "control (jq present) setup exited non-zero"; return 1; }
     local expected
     expected="$(count_skill_files "$control/.claude/skills")"
@@ -3943,7 +3650,7 @@ test_nojq_setup_claude_code_project_installs() {
 
     local output status=0
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$target" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "setup.sh exited $status without jq (must install cleanly):"
         printf '%s\n' "$output" | tail -5
@@ -3976,7 +3683,7 @@ test_nojq_setup_opencode_project_installs() {
     local shim="$TEST_TMPDIR/npmshim"
     make_npm_shim "$shim"
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$control" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "control (jq present) setup exited non-zero"; return 1; }
     local expected
     expected="$(count_skill_files "$control/.claude/skills")"
@@ -3984,7 +3691,7 @@ test_nojq_setup_opencode_project_installs() {
 
     local output status=0
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$target" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "setup.sh exited $status without jq (must install cleanly):"
         printf '%s\n' "$output" | tail -5
@@ -4029,7 +3736,7 @@ test_nojq_receipt_parser_ignores_single_line_empty_array() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project setup exited non-zero"; return 1; }
     local manifest="$repo/.kurama-install-manifest.json"
     assert_file_exists "$manifest" || return 1
@@ -4091,7 +3798,7 @@ test_nojq_doctor_grades_the_documented_degradation_a_warning() {
 
     local status=0
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 || status=$?
+        --non-interactive > /dev/null 2>&1 || status=$?
     assert_eq "0" "$status" "a jq-less install must still complete" || return 1
 
     # Preconditions — this is the honest-degradation shape, not a broken install:
@@ -4131,7 +3838,7 @@ test_doctor_fails_when_the_receipt_claims_an_unregistered_hooks_write() {
     local shim="$TEST_TMPDIR/doctorbin"
     make_doctor_shims "$shim"
     # jq present: setup registers the hooks block AND records the settings.json.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     local settings="$HOME/.claude/settings.json"
@@ -4201,7 +3908,7 @@ test_nojq_update_sh_resyncs_and_is_graded_healthy() {
     # DOES carry hooks + a registered settings block: any severity change must not
     # be able to hide a real regression behind a blanket warning.
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "control (jq present) setup exited non-zero"; return 1; }
     echo "TAMPERED" > "$repo/.claude/skills/sdd-apply/SKILL.md"
 
@@ -4246,7 +3953,7 @@ write_broken_settings_json() {
 test_setup_survives_hooks_merge_failure() {
     write_broken_settings_json "$HOME/.claude/settings.json"
     local output status=0
-    output=$(bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+    output=$(bash "$SETUP_SCRIPT" --agent claude-code --non-interactive 2>&1) || status=$?
     assert_eq "0" "$status" "a failed hooks merge must not abort an otherwise-good install" || return 1
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
 
@@ -4274,7 +3981,7 @@ test_setup_eof_stdin_leaves_no_ghost_install() {
     # No --non-interactive: the prompts run and hit EOF immediately, which used to
     # kill the script under `set -e` after the skills were already on disk.
     local status=0
-    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --without-engram \
+    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode \
         < /dev/null > /dev/null 2>&1 || status=$?
     assert_eq "0" "$status" "closed stdin must fall back to the prompt defaults, not abort" || return 1
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
@@ -4288,7 +3995,7 @@ test_setup_unparseable_opencode_json_is_controlled() {
     printf '{\n  // a JSONC comment opencode tolerates and jq does not\n  "theme": "kurama"\n}\n' > "$cfg"
     local before output status=0
     before="$(cat "$cfg")"
-    output=$(bash "$SETUP_SCRIPT" --agent opencode --without-engram --non-interactive 2>&1) || status=$?
+    output=$(bash "$SETUP_SCRIPT" --agent opencode --non-interactive 2>&1) || status=$?
 
     # A Kurama-controlled exit with an explanation, not jq's own status (5) leaking
     # out of the installer with jq's raw parse error as the only clue.
@@ -4313,7 +4020,7 @@ test_nojq_receipt_omits_unwritten_settings() {
 
     local status=0
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 || status=$?
+        --non-interactive > /dev/null 2>&1 || status=$?
     assert_eq "0" "$status" "a jq-less install must still complete" || return 1
 
     local manifest="$repo/.kurama-install-manifest.json"
@@ -4338,7 +4045,7 @@ test_setup_empty_settings_json_not_blanked() {
     # A realistic state: fresh machine, or a config the user cleared.
     mkdir -p "$HOME/.claude"
     : > "$HOME/.claude/settings.json"
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     local settings="$HOME/.claude/settings.json"
     jq -e . "$settings" > /dev/null 2>&1 || {
@@ -4362,24 +4069,12 @@ test_setup_empty_opencode_json_not_blanked() {
     return 0
 }
 
-test_setup_empty_claude_json_engram_not_blanked() {
-    local bindir="$TEST_TMPDIR/engrambin" log="$TEST_TMPDIR/engram-calls.log"
-    make_engram_shims "$bindir" "$log"
-    : > "$HOME/.claude.json"
-    PATH="$bindir:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive \
-        > /dev/null 2>&1 || { echo "engram setup exited non-zero"; return 1; }
-    jq -e . "$HOME/.claude.json" > /dev/null 2>&1 || { echo ".claude.json was blanked by the merge"; return 1; }
-    jq -e '.mcpServers.engram' "$HOME/.claude.json" > /dev/null 2>&1 || {
-        echo "the Engram server was reported registered but is not in the file"; return 1; }
-    return 0
-}
-
 test_install_refuses_setup_managed_receipt() {
     # #38/#24: install.sh no longer REFUSES a target setup.sh manages — it IS setup.sh
     # now (delegation), so re-running install.sh over a setup install RE-SYNCS it
     # cleanly through the single writer. The richer receipt (tools[], settings[], hook
     # file entries) must survive — install.sh must never truncate it (the #24 bug).
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     grep -q '"settings"' "$manifest" || { echo "premise: setup receipt lacks settings[]"; return 1; }
@@ -4553,7 +4248,7 @@ test_setup_receipt_omits_opencode_keys_for_other_agents() {
     # The keys are per-target, not global state: a claude-code receipt that
     # carried them would make update.sh re-pass an OpenCode mode to a harness
     # that has none.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     if grep -q 'opencode_mode' "$manifest"; then
@@ -4634,10 +4329,10 @@ test_update_refusal_does_not_abort_the_other_targets() {
     # QUEUED BEHIND the mode-less OpenCode receipt (codex, pi, omp — ALL_AGENTS
     # order puts opencode second) was never touched and the run ended with no
     # summary. install.sh already skips-and-continues; update must match.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     run_setup_opencode --opencode-mode multi || { echo "setup opencode multi failed"; return 1; }
-    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent codex --non-interactive > /dev/null 2>&1 \
         || { echo "setup codex failed"; return 1; }
 
     # Make the OpenCode receipt mode-less: every pre-#22 receipt looks like this.
@@ -4749,7 +4444,7 @@ test_uninstall_claude_code_never_touches_opencode() {
     # The sweep is gated on the receipt recording opencode. Without that gate,
     # removing claude-code would reach into ~/.config/opencode.
     run_setup_opencode --opencode-mode multi || { echo "setup opencode failed"; return 1; }
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     bash "$UNINSTALL_SCRIPT" --agent claude-code --without-pi-packages > /dev/null 2>&1
 
@@ -4812,11 +4507,11 @@ test_setup_remerges_a_pre_marker_claude_prompt_copy() {
     # The same shape on a second harness: the fingerprint is build-examples'
     # GENERATED banner, which only Kurama writes, so the re-merge is generic
     # rather than an OpenCode special case.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     local prompt="$HOME/.claude/CLAUDE.md"
     write_pre_marker_prompt_copy "$REPO_DIR/examples/claude-code/CLAUDE.md" "$prompt"
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code re-run failed"; return 1; }
 
     local b
@@ -4838,7 +4533,7 @@ test_setup_leaves_a_user_written_prompt_warn_only() {
     local shim="$TEST_TMPDIR/npmshim"
     make_npm_shim "$shim"
     local output
-    output=$(PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --without-engram \
+    output=$(PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode \
         --non-interactive --opencode-mode single 2>&1) \
         || { echo "setup opencode re-run failed"; return 1; }
 
@@ -4864,7 +4559,7 @@ test_setup_leaves_a_user_written_prompt_warn_only() {
 test_doctor_orphan_scan_runs_per_agent() {
     local shim="$TEST_TMPDIR/doctorbin"
     make_doctor_shims "$shim"
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     run_setup_opencode --opencode-mode single || { echo "setup opencode failed"; return 1; }
     # claude-code loses its receipt while opencode keeps one — the exact shape
@@ -4911,7 +4606,7 @@ test_doctor_normalizes_display_name_receipt() {
     # checks without a word.
     local shim="$TEST_TMPDIR/doctorbin"
     make_doctor_shims "$shim"
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     local renamed
@@ -4937,7 +4632,7 @@ test_doctor_normalizes_display_name_receipt() {
 test_doctor_unresolvable_tool_is_hard_fail() {
     local shim="$TEST_TMPDIR/doctorbin"
     make_doctor_shims "$shim"
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     # A receipt from one of the dropped harnesses: no path can be resolved from
@@ -5005,7 +4700,7 @@ test_doctor_project_orphans_are_not_double_reported() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project setup failed"; return 1; }
     rm -f "$repo/.kurama-install-manifest.json"
 
@@ -5044,14 +4739,11 @@ test_doctor_partial_receipt_is_not_reported_healthy() {
     "claude-code"
   ],
   "scope": "global",
-  "engram": "no",
   "files": [
   ],
   "settings": [
   ],
   "pi_packages": [
-  ],
-  "engram_mcp": [
   ],
   "prompts": [
   ],
@@ -5159,24 +4851,6 @@ test_no_prose_claims_profile_delegation_is_exclusive() {
     return 0
 }
 
-test_opencode_commands_never_hardcode_engram_mode() {
-    # Every executor command must RESOLVE the artifact store, never assume it.
-    #
-    # The loop counts what it read, the way its sibling below does: a check whose
-    # whole job is "no file says X" reports success just as loudly when there are
-    # no files — this test passed with examples/opencode/commands/ deleted.
-    local f n=0
-    for f in "$REPO_DIR"/examples/opencode/commands/*.md; do
-        [ -f "$f" ] || continue
-        n=$((n + 1))
-        if grep -q 'Artifact store mode: engram' "$f"; then
-            echo "$(basename "$f") hardcodes 'Artifact store mode: engram'"; return 1
-        fi
-    done
-    [ "$n" -ge 9 ] || { echo "expected at least the 9 OpenCode commands, scanned $n"; return 1; }
-    return 0
-}
-
 test_opencode_executor_commands_name_the_envelope_fields() {
     local f n=0
     for f in "$REPO_DIR"/examples/opencode/commands/sdd-*.md; do
@@ -5224,9 +4898,9 @@ test_codex_template_declares_no_task_tool() {
     return 0
 }
 
-test_cycle_markers_written_in_every_mode() {
+test_cycle_markers_are_always_written() {
     # #30. The two hooks read only the filesystem. If a skill stops mandating the
-    # .kurama/sdd/ markers, engram mode silently loses both gates again.
+    # .kurama/sdd/ markers, both gates silently stop guarding.
     local pc="$REPO_DIR/skills/_shared/persistence-contract.md"
     grep -qi 'Hook-visible cycle markers' "$pc" \
         || { echo "the cycle-marker contract disappeared"; return 1; }
@@ -5236,8 +4910,8 @@ test_cycle_markers_written_in_every_mode() {
         || { echo "sdd-archive no longer writes the archive-report marker"; return 1; }
     # The third marker is the orchestrator's, and the contract that ASSIGNS it is not
     # the file the orchestrator is routed to. With the mandate only in
-    # persistence-contract.md, engram mode wrote no state.md at all and the write
-    # guard stayed inert — lock the orchestrator's own rulebook to it.
+    # persistence-contract.md, no state.md was written at all and the write guard
+    # stayed inert — lock the orchestrator's own rulebook to it.
     local osp="$REPO_DIR/skills/_shared/orchestrator-sdd-protocol.md"
     grep -q '.kurama/sdd/' "$osp" \
         || { echo "orchestrator-sdd-protocol.md never names .kurama/sdd/"; return 1; }
@@ -5325,7 +4999,6 @@ run_test "Output reports agent, count and skills path" test_output_shows_skill_n
 run_test "Output shows Done! message" test_output_shows_done_message
 run_test "Output shows install count" test_output_shows_install_count
 run_test "Output shows next-step guidance" test_output_shows_next_step
-run_test "Output recommends Engram" test_output_shows_engram_note
 echo ""
 
 echo -e "${BOLD}OS detection${NC}"
@@ -5434,9 +5107,6 @@ echo -e "${BOLD}Phase 6 surface (G9 Pi + sdd-status.sh)${NC}"
 run_test "sdd-status.sh exists and is executable" test_sdd_status_exists_and_executable
 run_test "sdd-status.sh exits 0 on an empty project" test_sdd_status_empty_dir_exit_zero
 run_test "sdd-status.sh --json parses on an empty project" test_sdd_status_json_parses_on_empty
-run_test "a conforming engram cycle is not called degraded" test_sdd_status_conforming_engram_cycle_is_not_degraded
-run_test "a marker-only openspec cycle is not hybrid" test_sdd_status_marker_only_openspec_cycle_is_not_hybrid
-run_test "an unprovable store is labelled unknown" test_sdd_status_unprovable_store_is_labelled_unknown
 run_test "examples/pi/AGENTS.md is generated" test_pi_example_generated
 echo ""
 
@@ -5454,7 +5124,6 @@ echo -e "${BOLD}Packaging manifests (M5)${NC}"
 run_test "plugin.json is valid JSON" test_plugin_json_valid
 run_test "marketplace.json is valid JSON" test_marketplace_json_valid
 run_test "plugin.json version equals VERSION file" test_plugin_json_version_matches_version_file
-run_test "none artifact-store mode is fully removed" test_none_mode_fully_removed
 run_test "dropped harnesses are rejected by name" test_dropped_harnesses_rejected_by_name
 run_test "dropped harness artifacts are gone" test_dropped_harness_artifacts_are_gone
 run_test ".kurama state survives the mode removal" test_kurama_state_survives_mode_removal
@@ -5517,16 +5186,6 @@ run_test "doctor is red on orphaned agents (no receipt)" test_doctor_orphaned_ag
 run_test "doctor is green when nothing is installed" test_doctor_no_install_is_not_a_failure
 echo ""
 
-echo -e "${BOLD}Phase 10b — Engram persistence engine (O5, fake engram/brew/claude)${NC}"
-run_test "--without-engram writes zero Engram config" test_engram_without_flag_no_changes
-run_test "registers generic mcpServers.engram (claude global)" test_engram_registers_claude_global
-run_test "opencode uses command-array + type:local (project)" test_engram_opencode_project_shape
-run_test "codex TOML block upsert is idempotent, preserves config" test_engram_codex_toml_upsert
-run_test "project scope writes .mcp.json inside the repo" test_engram_project_scope_claude
-run_test "non-interactive never invokes brew (guide only)" test_engram_brew_not_invoked_noninteractive
-run_test "uninstall strips the Engram MCP registration, rest intact" test_engram_uninstall_removes_registration
-run_test "doctor mentions the Engram MCP registration" test_doctor_reports_engram_mcp
-echo ""
 
 echo -e "${BOLD}Shipped PreToolUse hooks (payload-driven)${NC}"
 run_test "no active cycle: every write is allowed" test_write_guard_allows_writes_when_no_cycle_is_active
@@ -5569,7 +5228,6 @@ run_test "unparseable opencode.json: controlled exit + receipt" test_setup_unpar
 run_test "jq-less run records no settings.json it never wrote" test_nojq_receipt_omits_unwritten_settings
 run_test "empty settings.json is merged, never blanked" test_setup_empty_settings_json_not_blanked
 run_test "empty opencode.json is created, never blanked" test_setup_empty_opencode_json_not_blanked
-run_test "empty .claude.json survives the Engram merge" test_setup_empty_claude_json_engram_not_blanked
 run_test "install.sh re-syncs (never truncates) a setup.sh receipt" test_install_refuses_setup_managed_receipt
 run_test "install.sh re-syncs a setup-managed OpenCode target" test_install_refuse_writes_nothing_for_opencode
 run_test "--without removes the excluded skills from disk" test_install_without_group_removes_excluded_skills
@@ -5610,11 +5268,10 @@ echo -e "${BOLD}#25 — profile permissions + OpenCode template invariants${NC}"
 run_test "profile orchestrator may delegate the review layer" test_opencode_profile_permission_allows_review_layer
 run_test "both templates allow general/review-*/jd-*" test_opencode_templates_allow_the_review_layer
 run_test "no prose narrows profile delegation to sdd-*-NAME" test_no_prose_claims_profile_delegation_is_exclusive
-run_test "no command hardcodes the engram artifact store" test_opencode_commands_never_hardcode_engram_mode
 run_test "executor commands name risks + skill_resolution" test_opencode_executor_commands_name_the_envelope_fields
 run_test "no SKILL.md declares a tools: key" test_skills_declare_no_tools_frontmatter
 run_test "the codex overlay claims no task tool" test_codex_template_declares_no_task_tool
-run_test "cycle markers are mandated in every mode" test_cycle_markers_written_in_every_mode
+run_test "the .kurama/sdd/ cycle markers are always mandated" test_cycle_markers_are_always_written
 echo ""
 
 # ============================================================================
@@ -5720,7 +5377,7 @@ echo ""
 # pristine install and for one whose skills had been hand-edited. A user
 # previewing the update saw nothing, ran the real update, and lost the edit.
 test_update_dry_run_reports_drifted_files() {
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     printf 'LOCAL EDIT\n' > "$HOME/.claude/skills/sdd-apply/SKILL.md"
 
@@ -5743,7 +5400,7 @@ test_update_dry_run_reports_drifted_files() {
 # that cries wolf on every recorded file is as useless as one that reports
 # nothing, and it is the case every user sees first.
 test_update_dry_run_clean_install_reports_no_drift() {
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
 
     local output status=0
@@ -5769,7 +5426,7 @@ test_update_dry_run_clean_install_reports_no_drift() {
 # collateral on the next update. Only originals the receipt records may be
 # pruned.
 test_update_prune_spares_user_owned_agent_backups() {
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     local agents="$HOME/.claude/agents"
     assert_dir_exists "$agents" || return 1
@@ -5829,38 +5486,15 @@ test_update_failure_shows_delegated_setup_output() {
     return 0
 }
 
-# Same mechanism as the OpenCode mode/profile loss fixed in #22: update.sh
-# delegates with --non-interactive, where ask_engram defaults to "no", so the
-# FIRST update re-stamped the receipt engram: no and the choice was gone. The
-# receipt already records it — re-pass it like the --with-logo carry-over.
-test_update_carries_engram_across_resync() {
-    bash "$SETUP_SCRIPT" --agent claude-code --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "setup claude-code --with-engram failed"; return 1; }
-    local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
-    assert_file_exists "$manifest" || return 1
-    grep -q '"engram": "yes"' "$manifest" || {
-        echo "setup did not record engram: yes"; return 1; }
-
-    bash "$UPDATE_SCRIPT" --agent claude-code > /dev/null 2>&1 \
-        || { echo "update.sh failed"; return 1; }
-
-    grep -q '"engram": "yes"' "$manifest" || {
-        echo "update.sh re-stamped the receipt — the Engram choice is lost:"
-        grep '"engram"' "$manifest"
-        return 1
-    }
-    return 0
-}
-
 # ec8cdf3 fixed the multi-target abort for the REFUSAL branch (a mode-less
 # OpenCode receipt). An unrecognized tool leaves resync_target by the other
 # door — it is filed as a failure, not a refusal — so pin that branch too: the
 # targets queued behind it must still be updated, and the run must close with a
 # summary naming the one it skipped.
 test_update_unrecognized_tool_does_not_abort_the_other_targets() {
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
-    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent codex --non-interactive > /dev/null 2>&1 \
         || { echo "setup codex failed"; return 1; }
 
     # A receipt from a harness Kurama no longer supports. ALL_AGENTS puts
@@ -5899,7 +5533,7 @@ test_update_unrecognized_tool_does_not_abort_the_other_targets() {
 # they already suspect the install is broken. The headline counts only what was
 # actually compared, and says so when that is nothing.
 test_update_dry_run_says_when_nothing_was_comparable() {
-    bash "$SETUP_SCRIPT" --agent omp --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent omp --non-interactive > /dev/null 2>&1 \
         || { echo "setup omp failed"; return 1; }
     local manifest="$HOME/.omp/agent/skills/.kurama-install-manifest.json"
     assert_file_exists "$manifest" || return 1
@@ -5915,13 +5549,11 @@ test_update_dry_run_says_when_nothing_was_comparable() {
         '    "omp"' \
         '  ],' \
         '  "scope": "global",' \
-        '  "engram": "no",' \
         '  "files": [' \
         '    "../RULES.md"' \
         '  ],' \
         '  "settings": [],' \
         '  "pi_packages": [],' \
-        '  "engram_mcp": [],' \
         '  "prompts": [],' \
         '  "tui_plugins": [],' \
         '  "opencode_configs": []' \
@@ -5949,7 +5581,7 @@ test_update_dry_run_says_when_nothing_was_comparable() {
 # unrecognized tool got a plausible drift report and no hint that `update.sh`
 # without --dry-run would refuse it outright.
 test_update_dry_run_refuses_what_the_real_run_would_refuse() {
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     local rewritten
@@ -5983,7 +5615,6 @@ run_test "--dry-run says when nothing was comparable" test_update_dry_run_says_w
 run_test "--dry-run refuses what the real run would refuse" test_update_dry_run_refuses_what_the_real_run_would_refuse
 run_test "the backup prune spares user-owned agent backups" test_update_prune_spares_user_owned_agent_backups
 run_test "a failed re-sync shows the delegated setup.sh output" test_update_failure_shows_delegated_setup_output
-run_test "--with-engram survives a re-sync" test_update_carries_engram_across_resync
 run_test "an unusable receipt does not abort the queued targets" test_update_unrecognized_tool_does_not_abort_the_other_targets
 # ===== UNIT-C (issue #35) =====
 #
@@ -6123,10 +5754,10 @@ test_uninstall_rejects_agent_in_project_scope() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "claude-code project setup exited non-zero"; return 1; }
     bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "opencode project setup exited non-zero"; return 1; }
 
     # Preconditions: ONE receipt shared by both harnesses, and both prompt files
@@ -6170,10 +5801,10 @@ test_uninstall_project_scope_removes_every_harness_without_agent() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "claude-code project setup exited non-zero"; return 1; }
     bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "opencode project setup exited non-zero"; return 1; }
     mkdir -p "$repo/.claude/skills/my-custom"
     echo "keep me" > "$repo/.claude/skills/my-custom/SKILL.md"
@@ -6204,7 +5835,7 @@ test_uninstall_without_jq_refuses_before_deleting_hook_scripts() {
 
     # Install WITH jq, so settings.json really carries the hooks block that a
     # jq-less removal cannot take back out.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive \
         > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
     local settings="$HOME/.claude/settings.json"
     local guard="$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh"
@@ -6251,7 +5882,7 @@ test_uninstall_without_jq_still_clears_a_target_with_no_hooks_block() {
     make_nojq_farm "$bindir"
     assert_farm_has_no_jq "$bindir" || return 1
 
-    bash "$SETUP_SCRIPT" --agent codex --without-engram --non-interactive \
+    bash "$SETUP_SCRIPT" --agent codex --non-interactive \
         > /dev/null 2>&1 || { echo "codex setup exited non-zero"; return 1; }
     local skills="$HOME/.codex/skills"
     assert_dir_exists "$skills/sdd-apply" || return 1
@@ -6273,7 +5904,7 @@ test_uninstall_refuses_absolute_receipt_files_entry() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project setup exited non-zero"; return 1; }
 
     local outside="$TEST_TMPDIR/outside"
@@ -6309,7 +5940,7 @@ test_uninstall_refuses_parent_traversal_receipt_files_entry() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project setup exited non-zero"; return 1; }
 
     # A sibling of the target repo — reachable from it with a single "..", which
@@ -6375,7 +6006,7 @@ test_uninstall_ignores_a_receipt_that_lies_about_its_scope() {
         local repo="$TEST_TMPDIR/proj-${claim:-absent}"
         make_git_repo "$repo"
         bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-            --without-engram --non-interactive > /dev/null 2>&1 \
+            --non-interactive > /dev/null 2>&1 \
             || { echo "project setup exited non-zero"; return 1; }
 
         local outside="$TEST_TMPDIR/outside-${claim:-absent}"
@@ -6427,7 +6058,7 @@ test_uninstall_refuses_an_entry_behind_a_symlinked_directory() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project setup exited non-zero"; return 1; }
 
     local secrets="$TEST_TMPDIR/secrets"
@@ -6468,7 +6099,7 @@ test_uninstall_still_removes_legitimate_parent_anchored_entries() {
     # The containment rule must not be "reject every ..": a global receipt
     # records agents and hooks as ../-anchored siblings of the skills dir, and
     # rejecting those would leave 20 of 52 recorded files on disk forever.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive \
         > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     assert_file_exists "$manifest" || return 1
@@ -6568,13 +6199,13 @@ test_setup_rerun_writes_no_new_backups() {
     # where the first run left it. Nothing setup writes changes between two
     # identical runs, so a second wave of .bak files is pure noise in the user's
     # config dir — and it is unbounded, one wave per re-run, forever.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "the first setup run exited non-zero"; return 1; }
     local first
     first=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
     assert_eq "0" "$first" "a fresh install has nothing to back up" || return 1
 
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "the second setup run exited non-zero"; return 1; }
     local second
     second=$(find "$HOME" -name '*.bak.*' | wc -l | tr -d ' ')
@@ -6590,13 +6221,13 @@ test_setup_rerun_still_backs_up_a_hand_edited_file() {
     # The other half of the contract: the skip is content-based, NOT "never back
     # up on a re-run". A file the user edited by hand is still copied aside
     # before setup overwrites it — and it is the ONLY file backed up.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "the first setup run exited non-zero"; return 1; }
     local victim="$HOME/.claude/agents/review-risk.md"
     assert_file_exists "$victim" || return 1
     printf 'HAND EDITED BODY\n' > "$victim"
 
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "the second setup run exited non-zero"; return 1; }
 
     local baks bak
@@ -6626,7 +6257,7 @@ test_scope_project_rejects_a_subdirectory_of_the_clone() {
 
     local output status=0
     output=$(bash "$clone/scripts/setup.sh" --agent claude-code --scope project \
-        --path "$clone/docs" --without-engram --non-interactive 2>&1) || status=$?
+        --path "$clone/docs" --non-interactive 2>&1) || status=$?
 
     local clean=0
     project_install_artifacts_cleared "$clone/docs" || clean=1
@@ -6658,7 +6289,7 @@ test_scope_project_rejects_a_symlink_into_the_clone() {
 
     local output status=0
     output=$(bash "$clone/scripts/setup.sh" --agent claude-code --scope project \
-        --path "$link" --without-engram --non-interactive 2>&1) || status=$?
+        --path "$link" --non-interactive 2>&1) || status=$?
 
     local clean=0
     project_install_artifacts_cleared "$clone/docs" || clean=1
@@ -6683,7 +6314,7 @@ test_scope_project_guard_does_not_misfire_on_a_non_repo() {
 
     local output status=0
     output=$(bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$plain" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
 
     [ "$status" -ne 0 ] || { echo "a non-git target must still abort"; return 1; }
     printf '%s\n' "$output" | grep -qF 'not a git repository' || {
@@ -6710,7 +6341,7 @@ test_scope_project_allows_a_repo_that_vendors_a_kurama_copy() {
         || { echo "could not stage the vendored Kurama copy"; return 1; }
 
     bash "$proj/tools/kurama/scripts/setup.sh" --agent claude-code --scope project \
-        --path "$proj" --without-engram --non-interactive > /dev/null 2>&1 \
+        --path "$proj" --non-interactive > /dev/null 2>&1 \
         || { echo "setup refused a project that merely vendors a Kurama copy"; return 1; }
     assert_dir_exists "$proj/.claude/skills/sdd-apply" || return 1
     return 0
@@ -7054,7 +6685,7 @@ unit_d_tui_preview() { # runs setup-tui.sh's preview probe with the env it reads
 test_tui_preview_is_the_argv_it_runs() {
     local line
     line="$(KURAMA_TUI_CHOSEN=opencode KURAMA_TUI_SCOPE=global \
-            KURAMA_TUI_OPENCODE_MODE=multi KURAMA_TUI_ENGRAM=no KURAMA_TUI_LOGO=yes \
+            KURAMA_TUI_OPENCODE_MODE=multi KURAMA_TUI_LOGO=yes \
             unit_d_tui_preview)" || { echo "  the preview probe failed: $line"; return 1; }
 
     case "$line" in
@@ -7081,7 +6712,7 @@ test_tui_preview_is_the_argv_it_runs() {
 test_tui_preview_quotes_a_path_with_spaces() {
     local weird="$TEST_TMPDIR/my repo/with spaces" line found_path=no found_ni=no a
     line="$(KURAMA_TUI_CHOSEN=claude-code KURAMA_TUI_SCOPE=project \
-            KURAMA_TUI_PATH="$weird" KURAMA_TUI_ENGRAM=no KURAMA_TUI_LOGO=no \
+            KURAMA_TUI_PATH="$weird" KURAMA_TUI_LOGO=no \
             unit_d_tui_preview)" || { echo "  the preview probe failed: $line"; return 1; }
 
     eval "set -- $line"
@@ -7486,7 +7117,7 @@ test_g_wrapper_does_not_truncate_setup_receipt() {
     # #24 closed for good: run setup.sh, then install.sh, over the same claude-code
     # target. The wrapper must NOT truncate the richer receipt — the setup-only keys
     # survive because the SAME setup.sh writer produced both.
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1
     local manifest="$HOME/.claude/skills/.kurama-install-manifest.json"
     grep -q '"settings"' "$manifest" || { echo "premise: setup.sh receipt lacks settings[]"; return 1; }
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
@@ -7523,7 +7154,7 @@ test_g_setup_missing_examples_fails_loud_before_write() {
     rm -rf "$clone/examples" || { echo "could not remove examples/ from the staged clone"; return 1; }
 
     local output status=0
-    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --non-interactive 2>&1) || status=$?
 
     if [ "$status" -eq 0 ]; then
         echo "setup.sh installed from a clone missing examples/ instead of aborting"
@@ -7579,7 +7210,7 @@ test_h_setup_interactive_with_gum_delegates_to_tui() {
     make_npm_shim "$shim"
     # An OpenCode project install gives the TUI probe a receipt to report.
     PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "opencode project setup exited non-zero"; return 1; }
     # A fake gum on PATH makes setup.sh's interactive branch take the delegation.
     local bindir="$TEST_TMPDIR/gumbin"
@@ -7742,7 +7373,7 @@ test_i_setup_missing_shared_fails_loud_before_write() {
     rm -rf "$clone/skills/_shared" || { echo "could not remove skills/_shared from the staged clone"; return 1; }
 
     local output status=0
-    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --without-engram --non-interactive 2>&1) || status=$?
+    output=$(bash "$clone/scripts/setup.sh" --agent claude-code --non-interactive 2>&1) || status=$?
 
     if [ "$status" -eq 0 ]; then
         echo "setup.sh installed from a clone missing skills/_shared instead of aborting"
@@ -7772,7 +7403,7 @@ test_i_uninstall_refuses_corrupt_settings_with_jq_present() {
     # does. This test runs with jq present (the default PATH).
     command -v jq >/dev/null 2>&1 || { echo "jq is required for this test"; return 1; }
 
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive \
         > /dev/null 2>&1 || { echo "setup exited non-zero"; return 1; }
     local settings="$HOME/.claude/settings.json"
     local guard="$HOME/.claude/hooks/kurama/orchestrator-write-guard.sh"
@@ -7872,7 +7503,7 @@ test_i_uninstall_directory_entry_aborts_loud() {
     local repo="$TEST_TMPDIR/proj-dir-entry"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "the project install setup exited non-zero"; return 1; }
 
     local receipt="$repo/.kurama-install-manifest.json"
@@ -7921,12 +7552,10 @@ echo ""
 
 # ============================================================================
 # ===== UNIT-J (issue #70) =====
-# The three jq asterisks the audit left standing. Two are the write guard's
-# agent_id extraction — the no-jq path root-anchored itself by assuming a key
-# ORDER that JSON does not guarantee, and the rewrite that drops that assumption
-# must not trade away the anti-spoofing property it was there for. The third is
-# setup.sh's closing summary claiming an Engram MCP registration that a jq-less
-# run never made.
+# The jq asterisks the audit left standing over the write guard's agent_id
+# extraction — the no-jq path root-anchored itself by assuming a key ORDER that
+# JSON does not guarantee, and the rewrite that drops that assumption must not
+# trade away the anti-spoofing property it was there for.
 # ============================================================================
 
 # An Edit payload for file $2 in project $1, with the ROOT-level agent_id $3
@@ -8055,120 +7684,6 @@ test_j_write_guard_still_refuses_a_spoofed_agent_id_inside_tool_input() {
     return 0
 }
 
-test_j_engram_summary_matches_the_registration_it_actually_made() {
-    # #70.2: setup.sh's closing summary printed "MCP registered per client" whenever
-    # ENGRAM=yes. Without jq, engram_merge_json degrades to printed manual steps and
-    # registers NOTHING — yet the summary still said it had. doctor.sh was already
-    # self-aware here; the summary was not, so a jq-less user was told cross-session
-    # memory was wired up when no config had been touched.
-    #
-    # The summary is now a four-way branch over run-scoped COUNTERS rather than
-    # booleans, because one --all run genuinely mixes outcomes: with jq absent codex
-    # still registers (its config is TOML and needs no jq) while claude-code and
-    # opencode degrade. Branch order is NO_JQ → WRITTEN → BUILTIN → DEFERRED.
-    #
-    # Three of the four are pinned below, each against its exact sentence and each
-    # only after the GROUND TRUTH has been checked, so no half can pass vacuously:
-    # drop the claim unconditionally and the jq half fails; keep it unconditionally
-    # and the jq-less half fails; fold pi into a degradation branch and the third
-    # fails. DEFERRED (codex in project scope) and the mixed --all run are left out
-    # on purpose — the counters make them self-consistent and --all is expensive.
-    #
-    # Every grep stops at a COLOUR boundary: setup_colors assigns the escapes
-    # unconditionally, so "Engram:" and the bold "NOT registered" sit inside ANSI
-    # codes and only the runs between them can be matched as literals.
-    command -v jq >/dev/null 2>&1 || { echo "jq is required for the control halves of this case"; return 1; }
-    local log="$TEST_TMPDIR/engram-calls.log"
-    local manifest_name=".kurama-install-manifest.json"
-    local out status summary recorded
-
-    # ---- half 1 (WRITTEN): jq present, claude-code. It really is registered. ----
-    local jqbin="$TEST_TMPDIR/engram-jqbin" jqhome="$TEST_TMPDIR/home-engram-jq"
-    make_engram_shims "$jqbin" "$log"
-    mkdir -p "$jqhome"
-    status=0
-    out=$(HOME="$jqhome" PATH="$jqbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code \
-        --with-engram --non-interactive 2>&1) || status=$?
-    assert_eq "0" "$status" "the jq-present --with-engram install must complete" || {
-        printf '%s\n' "$out" | tail -8; return 1; }
-    jq -e '.mcpServers.engram' "$jqhome/.claude.json" > /dev/null 2>&1 || {
-        echo "ground truth: jq present, yet no engram MCP was registered in .claude.json"; return 1; }
-    recorded="$(receipt_array_values "$jqhome/.claude/skills/$manifest_name" "engram_mcp")"
-    [ -n "$recorded" ] || { echo "ground truth: the receipt recorded no engram_mcp entry"; return 1; }
-
-    # The summary block is everything from the "Done!" line down — the part a user
-    # reads last and believes.
-    summary="$(printf '%s\n' "$out" | sed -n '/Done!/,$p')"
-    printf '%s\n' "$summary" | grep -qF 'enabled as the persistence engine (MCP registered per client).' || {
-        echo "a registration WAS made, but the summary does not report it:"
-        printf '%s\n' "$summary"; return 1; }
-
-    # ---- half 2 (NO_JQ): jq absent, claude-code. Nothing was registered. ----
-    local nobin="$TEST_TMPDIR/engram-nojqbin" nohome="$TEST_TMPDIR/home-engram-nojq"
-    make_nojq_farm "$nobin"
-    make_engram_shims "$nobin" "$log"
-    assert_farm_has_no_jq "$nobin" || return 1
-    mkdir -p "$nohome"
-    status=0
-    out=$(HOME="$nohome" PATH="$nobin" bash "$SETUP_SCRIPT" --agent claude-code \
-        --with-engram --non-interactive 2>&1) || status=$?
-    assert_eq "0" "$status" "a jq-less --with-engram install must still complete" || {
-        printf '%s\n' "$out" | tail -8; return 1; }
-    if [ -e "$nohome/.claude.json" ]; then
-        echo "ground truth: the jq-less run wrote a .claude.json it has no JSON merger for"
-        return 1
-    fi
-    recorded="$(receipt_array_values "$nohome/.claude/skills/$manifest_name" "engram_mcp")"
-    if [ -n "$recorded" ]; then
-        echo "ground truth: the jq-less run recorded an engram_mcp entry it never wrote: $recorded"
-        return 1
-    fi
-
-    summary="$(printf '%s\n' "$out" | sed -n '/Done!/,$p')"
-    # Exactly one client (claude-code) failed to register, so the count is 1.
-    printf '%s\n' "$summary" | grep -qF 'enabled, but the MCP server was' || {
-        echo "the jq-less summary does not report the registration as skipped:"
-        printf '%s\n' "$summary"; return 1; }
-    printf '%s\n' "$summary" | grep -qF 'for 1 client(s) — jq is missing.' || {
-        echo "the jq-less summary does not count the client or name jq as the reason:"
-        printf '%s\n' "$summary"; return 1; }
-    # …and the WRITTEN sentence must be nowhere near it: that is the false claim.
-    if printf '%s\n' "$summary" | grep -qF 'MCP registered per client'; then
-        echo "no MCP was registered, yet the summary still claims one per client:"
-        printf '%s\n' "$summary"; return 1
-    fi
-
-    # ---- half 3 (BUILTIN): pi. No MCP entry is NEEDED — not a degradation. ----
-    # Engram on Pi comes from the Pi package stack (gentle-engram), so this run
-    # legitimately registers nothing. It is the branch a careless edit is likeliest
-    # to break, because "no MCP entry" reads like a failure to anyone skimming.
-    local pibin="$TEST_TMPDIR/engram-pibin" pihome="$TEST_TMPDIR/home-engram-pi"
-    make_engram_shims "$pibin" "$log"
-    mkdir -p "$pihome"
-    status=0
-    out=$(HOME="$pihome" PATH="$pibin:$PATH" bash "$SETUP_SCRIPT" --agent pi \
-        --with-engram --without-pi-packages --non-interactive 2>&1) || status=$?
-    assert_eq "0" "$status" "the pi --with-engram install must complete" || {
-        printf '%s\n' "$out" | tail -8; return 1; }
-    if [ -e "$pihome/.claude.json" ]; then
-        echo "ground truth: the pi run registered an MCP server in a client config"; return 1
-    fi
-    recorded="$(receipt_array_values "$pihome/.pi/agent/skills/$manifest_name" "engram_mcp")"
-    if [ -n "$recorded" ]; then
-        echo "ground truth: the pi run recorded an engram_mcp entry: $recorded"; return 1
-    fi
-
-    summary="$(printf '%s\n' "$out" | sed -n '/Done!/,$p')"
-    printf '%s\n' "$summary" | grep -qF "provided by the agent's own package stack — no MCP entry needed" || {
-        echo "the pi summary never explains that no MCP entry is needed:"
-        printf '%s\n' "$summary"; return 1; }
-    if printf '%s\n' "$summary" | grep -qE 'NOT registered|jq is missing|no MCP registration was recorded'; then
-        echo "pi's legitimate no-MCP-entry outcome is reported as a failure:"
-        printf '%s\n' "$summary"; return 1
-    fi
-    return 0
-}
-
 
 # An Edit payload for file $3 in project $1 whose tool_input carries its OWN "cwd"
 # ($2, a decoy root) serialized BEFORE the root cwd. Several tools legitimately take
@@ -8294,7 +7809,6 @@ echo -e "${BOLD}UNIT-J (issue #70): the jq asterisks${NC}"
 run_test "write guard decides the same way whatever the JSON key order (jq and awk)" test_j_write_guard_decides_the_same_way_whatever_the_key_order
 run_test "write guard still refuses an agent_id spoofed inside tool_input (jq and awk)" test_j_write_guard_still_refuses_a_spoofed_agent_id_inside_tool_input
 run_test "both hooks resolve the ROOT cwd, not a tool_input one (jq and awk)" test_j_hooks_resolve_the_root_cwd_not_a_tool_input_one
-run_test "engram summary reports the registration that actually happened (jq / no jq / pi)" test_j_engram_summary_matches_the_registration_it_actually_made
 
 echo ""
 
@@ -8306,28 +7820,26 @@ echo ""
 # ============================================================================
 
 test_k_uninstall_refuses_a_corrupt_opencode_config() {
-    # #71.1: remove_engram_from_config and remove_kurama_agents_from_opencode_config
-    # both end in `print_warn …; return 0` with no UNINSTALL_FAILED and no pre-flight
+    # #71.1: remove_kurama_agents_from_opencode_config ends in
+    # `print_warn …; return 0` with no UNINSTALL_FAILED and no pre-flight
     # `jq -e .` probe. So an unparseable opencode.json meant the recorded files were
     # deleted, the config was left carrying Kurama's entries, and the run still
     # printed "Done." and exited 0 — the user was told the uninstall succeeded. Same
     # defect class #63 fixed for settings.json, one config over.
     #
-    # A GLOBAL opencode install --with-engram records that one file in BOTH
-    # engram_mcp[] and opencode_configs[], so corrupting it drives both functions in
-    # a single run. The exit code is the assertion: the warning text is already
-    # printed today, and printing it while exiting 0 is exactly the bug.
+    # A GLOBAL opencode install records that one file in opencode_configs[] and
+    # merges Kurama's sdd-* agents into it, so corrupting it drives the strip and
+    # remove_target's pre-flight in a single run. The exit code is the assertion: the
+    # warning text is already printed today, and printing it while exiting 0 is
+    # exactly the bug.
     command -v jq >/dev/null 2>&1 || { echo "jq is required for this test"; return 1; }
-    local shim="$TEST_TMPDIR/ocbin" log="$TEST_TMPDIR/engram-calls.log"
-    make_npm_shim "$shim"
-    make_engram_shims "$shim" "$log"
-    PATH="$shim:$PATH" bash "$SETUP_SCRIPT" --agent opencode --with-engram --non-interactive \
-        > /dev/null 2>&1 || { echo "the opencode --with-engram install exited non-zero"; return 1; }
+    run_setup_opencode || { echo "the global opencode install exited non-zero"; return 1; }
 
     local config="$HOME/.config/opencode/opencode.json"
     assert_file_exists "$config" || return 1
-    jq -e '.mcp.engram' "$config" > /dev/null 2>&1 || {
-        echo "precondition: engram was not registered in opencode.json"; return 1; }
+    jq -e '[((.agent // {}) | keys[]) | select(startswith("sdd-"))] | length > 0' \
+        "$config" > /dev/null 2>&1 || {
+        echo "precondition: no sdd-* agents were registered in opencode.json"; return 1; }
 
     # Corrupted the same way the settings.json twin is: trailing garbage after a
     # valid object, so Kurama's entries stay textually present (a pre-flight still
@@ -8336,7 +7848,7 @@ test_k_uninstall_refuses_a_corrupt_opencode_config() {
     if jq -e . "$config" > /dev/null 2>&1; then
         echo "opencode.json is still valid JSON — the corruption did not take"; return 1
     fi
-    grep -q '"engram"' "$config" || { echo "corruption dropped the engram entry text"; return 1; }
+    grep -q '"sdd-' "$config" || { echo "corruption dropped the sdd-* agent entries"; return 1; }
 
     local output status=0
     output=$(bash "$UNINSTALL_SCRIPT" --agent opencode --without-pi-packages 2>&1) || status=$?
@@ -8421,7 +7933,7 @@ test_k_uninstall_refuses_a_dir_slash_entry_and_finishes_the_rest() {
     local repo="$TEST_TMPDIR/proj-dir-slash"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "the project install setup exited non-zero"; return 1; }
 
     local receipt="$repo/.kurama-install-manifest.json"
@@ -8535,8 +8047,6 @@ write_sdd_init_config() {
     {
         printf '# openspec/config.yaml\n'
         printf 'schema: spec-driven\n'
-        printf 'artifact_store:\n'
-        printf '  mode: openspec\n'
         printf 'execution_mode: supervised\n'
         printf 'compliance_mode: behavioral\n'
         printf 'persona: %s\n' "$persona"
@@ -8592,12 +8102,14 @@ pre_sdd_region() {
 # Fail unless $1 carries the session-identity RESOLUTION instructions themselves —
 # the literal settings home the persona key is read from, the literal name ladder,
 # and the two rules that must travel with them. $2 names the prompt under test.
+#
+# #135 removed the second settings home (the `sdd-init/{project}` bundle that only
+# existed in the engram mode), so `openspec/config.yaml` is now the whole answer and
+# the pin below is the whole assertion — there is no alternative home to also name.
 assert_region_carries_session_identity() {
     local region="$1" what="$2"
     assert_matches "$region" 'persona.*openspec/config\.yaml' \
         "$what: where the persona key is read from (the settings home, named in the prompt itself)" || return 1
-    assert_matches "$region" 'sdd-init/.project.' \
-        "$what: the engram-mode settings home for that same key" || return 1
     assert_matches "$region" 'do not open.{0,40}personas\.md' \
         "$what: the neutral/absent no-op — the preset registry is never opened" || return 1
     assert_matches "$region" 'git config user\.name' \
@@ -8724,7 +8236,7 @@ test_l_persona_absent_installs_a_byte_identical_tree() {
     local d
     for d in "$none" "$neutral" "$preset"; do
         bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$d" \
-            --non-interactive --without-engram > /dev/null 2>&1 \
+            --non-interactive > /dev/null 2>&1 \
             || { echo "project-scope setup exited non-zero for ${d##*/}"; return 1; }
         assert_all_skills_installed "$d/.claude/skills" || return 1
         assert_eq "${#EXPECTED_SKILLS[@]}" "$(count_skill_files "$d/.claude/skills")" \
@@ -8784,7 +8296,7 @@ test_l_neutral_and_absent_are_the_same_declared_no_op() {
     local repo="$TEST_TMPDIR/persona-absent-prompt"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive --without-engram > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project-scope setup exited non-zero"; return 1; }
 
     local block
@@ -8838,7 +8350,7 @@ test_l_persona_reaches_the_orchestrator_conversation_only() {
     make_git_repo "$repo"
     write_sdd_init_config "$repo" argentino
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive --without-engram > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project-scope setup exited non-zero"; return 1; }
 
     local block
@@ -8912,7 +8424,7 @@ test_l_user_name_never_lands_in_a_committed_file() {
 
     write_sdd_init_config "$repo" argentino
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive --without-engram > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project-scope setup exited non-zero"; return 1; }
     git -C "$repo" add -A >/dev/null 2>&1
 
@@ -9056,7 +8568,7 @@ test_l_session_identity_resolves_without_an_sdd_cycle() {
     local repo="$TEST_TMPDIR/identity-no-cycle"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --non-interactive --without-engram > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "project-scope setup exited non-zero"; return 1; }
 
     local block region
@@ -9522,11 +9034,293 @@ run_test "sdd-learn is a well-formed, registered skill" test_l_sdd_learn_is_a_we
 echo ""
 
 # ============================================================================
+# UNIT-AC (issue #135): openspec files are the only artifact store
+#
+# Kurama used to carry three artifact-store modes behind `artifact_store.mode`
+# (`engram` / `openspec` / `hybrid`), so every phase shipped two persistence
+# paths, a settings home that was not a file, and a `.kurama/sdd/` artifact
+# fallback. #133 proved the engram path never worked from a Claude Code
+# sub-agent at all — the file fallback masked it for three releases. 6.3.0
+# deletes the whole axis: artifacts are files under `openspec/`, and that is the
+# only store.
+#
+# What did NOT go, and is asserted here as a positive control: the machine-local
+# cycle markers under `.kurama/sdd/<change>/`. `state.md` and the two reports are
+# harness state, not artifacts — the two deterministic hooks run outside the model
+# and read only the filesystem, at those fixed paths. A removal that swept them up
+# with the rest would disarm both hooks and still pass every prose case here.
+#
+# The first case is a whole-tree vocabulary scan. It exists because this removal
+# is spread across ~95 files and ~1200 lines: a per-file assertion set would need
+# one case per file to be worth anything, and the files that quietly reintroduce
+# the vocabulary are exactly the ones nobody is looking at. Every pattern is
+# spelled with a leading character class (`[e]ngram`), the `ps | grep [p]attern`
+# trick, so this file's own vocabulary does not permanently trip the scan — the
+# same device UNIT-Y uses for the same reason.
+#
+# Mutation-checked at authoring time against a `git archive origin/main` tree
+# materialized in a temp dir: this scanner reports 1723 occurrences across 95
+# files there, and 0 here. Nothing below consults `origin/main` at RUNTIME — a
+# test that did would fail in a shallow clone, in a fork whose main has moved, and
+# in the tarball install. The shipped equivalent is the planted-tree case, which
+# runs this exact scanner over a tree it builds itself.
+# ============================================================================
+
+# Files where the removed vocabulary is legitimately still written. One
+# repo-relative path per line; a hit anywhere else is a violation.
+#
+#   docs/changelog.md       — history, never rewritten
+#   docs/migration.md       — the 6.3.0 note IS the removal announcement
+#   docs/superpowers/…      — two dated design records from 2026-08-10 describing
+#                             a flag that existed when they were written; an audit
+#                             trail like the changelog, not live documentation
+#   scripts/install_test.sh — this section's own prose and its planted fixtures.
+#                             Narrowed by the naming check in
+#                             test_ac_the_allowlist_stays_narrow, which still
+#                             catches a resurrected CASE.
+ac_store_allowlist() {
+    cat <<'ALLOWLIST'
+docs/changelog.md
+docs/migration.md
+docs/superpowers/specs/2026-08-10-jq-optional-fallbacks-design.md
+docs/superpowers/specs/2026-08-10-project-receipt-multi-tool-design.md
+scripts/install_test.sh
+ALLOWLIST
+}
+
+# Print every off-allowlist hit under the tree rooted at $1, one
+# "path:lineno:text" per line. Empty output means that tree is clean. Taking the
+# root as an argument is what lets the planted-tree case run this exact scanner
+# instead of a second, weaker copy of it.
+ac_store_violations() {
+    local root="$1"
+    local allow r hits line rest file ok entry
+    allow="$(ac_store_allowlist)"
+    for r in skills scripts examples docs README.md; do
+        [ -e "$root/$r" ] || continue
+        # -H forces the path prefix even when the operand is a single file;
+        # -I skips binaries; the herestrings below keep this SIGPIPE-free.
+        hits="$(grep -rHIn -iE -e '[e]ngram|[m]em_|[h]ybrid' "$root/$r" 2>/dev/null || true)"
+        [ -n "$hits" ] || continue
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            rest="${line#"$root/"}"
+            file="${rest%%:*}"
+            ok=0
+            while IFS= read -r entry; do
+                [ -n "$entry" ] || continue
+                if [ "$entry" = "$file" ]; then ok=1; break; fi
+            done <<< "$allow"
+            [ "$ok" -eq 1 ] || printf '%s\n' "$rest"
+        done <<< "$hits"
+    done
+}
+
+test_ac_no_store_vocabulary_survives_outside_the_allowlist() {
+    local out
+    out="$(ac_store_violations "$REPO_DIR")"
+    if [ -n "$out" ]; then
+        echo "the removed store vocabulary is back (first 15):"
+        printf '%s\n' "$out" | head -15 | cut -c1-120
+        return 1
+    fi
+    return 0
+}
+
+test_ac_the_scan_actually_reads_the_tree() {
+    # Wrong-reason pass this guards against: the expected hit count is ZERO, so a
+    # scanner pointed at nothing — a renamed root, an empty checkout, a bad flag —
+    # is indistinguishable from a clean tree. Count what it walked instead.
+    local n
+    n="$(find "$REPO_DIR/skills" "$REPO_DIR/scripts" "$REPO_DIR/examples" \
+              "$REPO_DIR/docs" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$n" -lt 100 ]; then
+        echo "the scan roots hold $n files (floor 100) — a zero-hit scan over a"
+        echo "tree that small proves nothing"
+        return 1
+    fi
+    return 0
+}
+
+test_ac_the_allowlist_stays_narrow() {
+    # Every entry is one more place the vocabulary can come back unseen. The cap
+    # is the pressure to justify a sixth one in the issue rather than in a diff.
+    local n
+    n="$(ac_store_allowlist | awk 'NF' | wc -l | tr -d ' ')"
+    if [ "$n" -gt 5 ]; then
+        echo "the allowlist grew to $n entries (cap 5)"
+        return 1
+    fi
+    # No entry may exempt a directory or a glob: the scan is file-scoped so that a
+    # NEW doc under docs/superpowers/ is a violation, not an inherited pass.
+    local bad
+    bad="$(ac_store_allowlist | awk 'NF && ($0 ~ /[*]/ || $0 ~ /\/$/) { print }')"
+    if [ -n "$bad" ]; then
+        echo "the allowlist must list exact files, never a glob or a directory:"
+        printf '%s\n' "$bad"
+        return 1
+    fi
+    # This file is exempt so that the section can name what it removed. That
+    # exemption is not a licence to keep a CASE for the removed behaviour: no test
+    # function and no run_test label may carry the vocabulary.
+    local cases
+    cases="$(grep -nE '^(test_[A-Za-z0-9_]*\(\)|run_test )' "$REPO_DIR/scripts/install_test.sh" \
+             | grep -iE '[e]ngram|[m]em_|[h]ybrid' || true)"
+    if [ -n "$cases" ]; then
+        echo "a test case for the removed store survives in this file:"
+        printf '%s\n' "$cases" | head -10 | cut -c1-120
+        return 1
+    fi
+    return 0
+}
+
+test_ac_a_planted_mode_reference_is_caught() {
+    # The shipped stand-in for the origin/main mutation check: build a tree that
+    # carries the vocabulary in one legal file and one illegal one, and run the
+    # real scanner over it.
+    local fake="$TEST_TMPDIR/planted-store-tree"
+    mkdir -p "$fake/skills/sdd-demo" "$fake/docs"
+    printf 'artifact_store.mode: engram | openspec | hybrid — resolve it per cycle.\n' \
+        > "$fake/skills/sdd-demo/SKILL.md"
+    printf -- '- removed the engram artifact store (6.3.0)\n' > "$fake/docs/changelog.md"
+    local out
+    out="$(ac_store_violations "$fake")"
+    printf '%s\n' "$out" | grep -q 'skills/sdd-demo/SKILL.md' || {
+        echo "a planted mode reference in a skill body was not reported"
+        return 1
+    }
+    if printf '%s\n' "$out" | grep -q 'docs/changelog.md'; then
+        echo "the allowlist is not honored: the changelog was flagged"
+        return 1
+    fi
+    return 0
+}
+
+test_ac_an_old_config_gets_one_line_and_the_cycle_proceeds() {
+    # The stale key is inert — no phase reads it — but a project that carried
+    # `mode: engram` has real artifacts sitting under `.kurama/sdd/`, and nothing
+    # ships to move them. This one line IS the entire migration surface, so it has
+    # to say all four things: that the key is dead, since when, where artifacts
+    # live now, and where the old files go. And it must NOT block: a cycle that
+    # refuses to start over a stale key is worse than the stale key.
+    local f flat who
+    for f in "$REPO_DIR/skills/sdd-new/SKILL.md" "$REPO_DIR/skills/sdd-continue/SKILL.md"; do
+        assert_file_exists "$f" || return 1
+        who="$(basename "$(dirname "$f")")"
+        flat="$(flatten_file "$f")"
+        assert_matches "$flat" 'artifact_store\.mode' \
+            "$who detects the stale key at all" || return 1
+        assert_matches "$flat" 'unsupported since 6\.3\.0' \
+            "$who names the release the key died in" || return 1
+        assert_matches "$flat" 'artifacts are files under .openspec/.' \
+            "$who says where artifacts live now" || return 1
+        assert_matches "$flat" '\.kurama/sdd/<change>/\*\.md.*openspec/changes/<change>/' \
+            "$who gives the move for the old files" || return 1
+        assert_matches "$flat" 'print exactly one line and continue' \
+            "$who states the line is informational, not a gate" || return 1
+        assert_matches "$flat" 'never block, never rewrite the user' \
+            "$who forbids blocking AND forbids editing their config" || return 1
+    done
+    return 0
+}
+
+test_ac_the_removed_installer_flag_is_an_unknown_option() {
+    # The flag was real through 6.2.x. Silently ignoring it would leave a user
+    # believing they had wired a persistence engine that no longer exists, so it
+    # has to fail the way any other unknown flag does.
+    #
+    local flag out status
+    flag="--with-engram"
+    out="$(bash "$SETUP_SCRIPT" "$flag" 2>&1)" && status=0 || status=$?
+    if [ "$status" -eq 0 ]; then
+        echo "setup.sh $flag exited 0; a removed flag must be rejected"
+        return 1
+    fi
+    printf '%s\n' "$out" | grep -q 'Unknown option' || {
+        echo "setup.sh $flag did not report an unknown option:"
+        printf '%s\n' "$out" | head -5
+        return 1
+    }
+    # The help text must not advertise it either — a flag that is documented and
+    # then rejected is worse than one that was never mentioned.
+    local help
+    help="$(bash "$SETUP_SCRIPT" --help 2>&1)" || true
+    if printf '%s\n' "$help" | grep -qiE '[e]ngram'; then
+        echo "setup.sh --help still advertises the removed flag"
+        return 1
+    fi
+    help="$(bash "$INSTALL_SCRIPT" --help 2>&1)" || true
+    if printf '%s\n' "$help" | grep -qiE '[e]ngram'; then
+        echo "install.sh --help still advertises the removed flag"
+        return 1
+    fi
+    return 0
+}
+
+test_ac_the_cycle_marker_still_lives_under_kurama() {
+    # Positive control. `.kurama/sdd/<change>/` is the one thing that survived a
+    # removal which deleted everything around it, and the reason is mechanical:
+    # both hooks run outside the model, read only the filesystem, and look at
+    # these exact paths. If this ever fails, both hooks have gone quiet while
+    # every prose case above still passes.
+    test_write_guard_blocks_repo_code_during_an_active_cycle || return 1
+    test_write_guard_exempts_the_sdd_artifact_paths || return 1
+    test_archive_gate_passes_a_pass_verdict_in_the_kurama_store || return 1
+
+    # …and the contract that tells the orchestrator to write the marker is intact.
+    local flat
+    flat="$(flatten_file "$REPO_DIR/skills/_shared/persistence-contract.md")"
+    assert_matches "$flat" '\.kurama/sdd/\{change-name\}/state\.md' \
+        "the contract still names the state marker path" || return 1
+    assert_matches "$flat" 'orchestrator-write-guard\.sh' \
+        "the contract still names the hook that reads it" || return 1
+    assert_matches "$flat" 'archive-gate\.sh' \
+        "the contract still names the gate that reads the verify report" || return 1
+    assert_matches "$flat" 'only artifact store' \
+        "the contract states there is exactly one artifact store" || return 1
+    assert_matches "$flat" 'never write an artifact into .\.kurama/.' \
+        "the contract states the state directory is not an artifact store" || return 1
+    return 0
+}
+
+test_ac_both_removed_files_are_on_the_removals_list() {
+    # docs/ and examples/ go on advertising a removed component long after it is
+    # gone unless a job reads them. The forbidden-claims gate is that job, and it
+    # only knows what FORBIDDEN lists.
+    local wf="$REPO_DIR/.github/workflows/pr-check.yml"
+    assert_file_exists "$wf" || return 1
+    local body
+    body="$(cat "$wf")"
+    assert_matches "$body" '(^|[[:space:]])[e]ngram-convention\.md +docs/changelog\.md +docs/migration\.md' \
+        "the deleted convention file is registered as a deliberate removal" || return 1
+    assert_matches "$body" '(^|[[:space:]])docs/[e]ngram\.md +docs/changelog\.md +docs/migration\.md' \
+        "the deleted persistence doc is registered as a deliberate removal" || return 1
+    # And neither file may be back in the tree.
+    if [ -e "$REPO_DIR/skills/_shared/engram-convention.md" ] || [ -e "$REPO_DIR/docs/engram.md" ]; then
+        echo "a file registered as a deliberate removal is back in the tree"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-AC (issue #135): openspec files are the only artifact store${NC}"
+run_test "the removed store vocabulary is gone tree-wide" test_ac_no_store_vocabulary_survives_outside_the_allowlist
+run_test "the scan actually walked the tree" test_ac_the_scan_actually_reads_the_tree
+run_test "the allowlist stays narrow, file-scoped, and case-free" test_ac_the_allowlist_stays_narrow
+run_test "a planted mode reference is caught; the changelog is not" test_ac_a_planted_mode_reference_is_caught
+run_test "an old config gets one line and the cycle proceeds" test_ac_an_old_config_gets_one_line_and_the_cycle_proceeds
+run_test "the removed installer flag is an Unknown option" test_ac_the_removed_installer_flag_is_an_unknown_option
+run_test "the cycle marker still lives under .kurama/ and both hooks see it" test_ac_the_cycle_marker_still_lives_under_kurama
+run_test "both removed files are on the deliberate-removals list" test_ac_both_removed_files_are_on_the_removals_list
+
+echo ""
+
+# ============================================================================
 # UNIT-AA (issue #129): the change name carries the linked issue number
 #
 # #109 put the issue number into BRANCH names and stopped there. The change name
-# — the string that keys `sdd/{change-name}/…` topic keys, `.kurama/sdd/{change-name}/`,
-# `openspec/changes/{change-name}/`, the phase envelopes and `state.md` — had no
+# — the string that keys `openspec/changes/{change-name}/`,
+# `.kurama/sdd/{change-name}/`, the phase envelopes and `state.md` — had no
 # rule at all, so a cycle run with the kanban module active and a card attached
 # still produced `nodemaven-gateway-provider`: the linkage recorded in `state.md`,
 # in the proposal frontmatter and on the board, and absent from the one string a
@@ -9616,8 +9410,8 @@ test_aa_sdd_new_names_the_change_from_the_issue() {
         "the naming rule itself, at the step that already has the issue body in hand" || return 1
     assert_matches "$gate" '22-nodemaven-gateway-provider' \
         "a concrete numbered example, not the pattern alone" || return 1
-    assert_matches "$gate" 'sdd/\{change-name\}/.*\.kurama/sdd/\{change-name\}/.*openspec/changes/\{change-name\}/' \
-        "where the name flows: topic keys, the .kurama fallback dir, the openspec dir" || return 1
+    assert_matches "$gate" 'openspec/changes/\{change-name\}/.*\.kurama/sdd/\{change-name\}/' \
+        "where the name flows: the openspec change dir, then the .kurama marker dir" || return 1
     assert_matches "$gate" 'envelope.*state\.md|state\.md.*envelope' \
         "the two remaining carriers of the name: the phase envelopes and state.md" || return 1
     assert_matches "$gate" 'announce.{0,80}one line' \
@@ -9676,8 +9470,8 @@ test_aa_kanban_hands_the_numbered_name_to_the_cycle() {
     # content regression on macOS while Linux passes.
     assert_matches "$intake" 'change name.{0,120}\{issue\}-\{slug\}' \
         "the card's number reaches the CHANGE name, not only the branch" || return 1
-    assert_matches "$intake" 'sdd/\{change-name\}' \
-        "the artifact keys that name goes on to key" || return 1
+    assert_matches "$intake" 'openspec/changes/\{change-name\}/.*\.kurama/sdd/\{change-name\}/' \
+        "the artifact paths that name goes on to key" || return 1
     assert_matches "$intake" 'sdd-new' \
         "the handoff itself: the numbered name is what sdd-new is given" || return 1
     assert_matches "$intake" '\{issue\}-\{issue\}-\{slug\}' \
@@ -9704,10 +9498,10 @@ test_aa_openspec_convention_defines_the_numbered_form() {
         "the issue-linked form" || return 1
     assert_matches "$def" '22-nodemaven-gateway-provider' \
         "a worked example of that form" || return 1
-    assert_matches "$def" 'topic key' \
-        "the engram topic keys the name keys" || return 1
+    assert_matches "$def" 'phase envelopes' \
+        "the phase envelopes, another carrier of the same string" || return 1
     assert_matches "$def" '\.kurama/sdd/\{change-name\}' \
-        "the .kurama fallback directory" || return 1
+        "the .kurama cycle-marker directory" || return 1
     assert_matches "$def" 'state\.md' \
         "state.md, which records the name the cycle resumes under" || return 1
     return 0
@@ -9856,7 +9650,7 @@ echo ""
 
 test_w_legacy_opencode_sweep_refuses_instead_of_half_removing() {
     # A pre-#22 OpenCode receipt records NONE of what setup_opencode wrote, so
-    # #71's pre-flight — which walks opencode_configs[] and engram_mcp[] — cannot
+    # #71's pre-flight — which walks opencode_configs[] — cannot
     # see ~/.config/opencode/opencode.json at all. That receipt is also the ONLY
     # kind that reaches this sweep with anything to remove. So the sweep deleted
     # the nine legacy /sdd-* command files and then handed the config to a strip
@@ -9877,7 +9671,6 @@ test_w_legacy_opencode_sweep_refuses_instead_of_half_removing() {
   "files": [],
   "settings": [],
   "prompts": [],
-  "engram_mcp": [],
   "opencode_configs": [],
   "tui_plugins": []
 }
@@ -10003,7 +9796,7 @@ test_w_install_wrapper_rejects_a_path_it_would_drop() {
 
 test_w_project_receipt_cannot_reach_a_merged_config_outside_the_repo() {
     # #33 bounded files[] — the array uninstall drives `rm` from. The MERGED-config
-    # arrays were never bounded at all: prompts[], settings[], engram_mcp[],
+    # arrays were never bounded at all: prompts[], settings[],
     # opencode_configs[], tui_plugins[] and gitignore[] each honoured an absolute
     # entry exactly as written. In project scope the receipt lives inside the
     # target repo, so its contents come from whoever wrote that repo — and a
@@ -10036,7 +9829,6 @@ EOT
   "files": [],
   "settings": ["../private/settings.json"],
   "prompts": ["$outside/CLAUDE.md"],
-  "engram_mcp": [],
   "opencode_configs": [],
   "tui_plugins": []
 }
@@ -10093,7 +9885,6 @@ test_w_backup_prune_never_reaches_another_file_through_a_glob() {
   ],
   "settings": [],
   "prompts": [],
-  "engram_mcp": [],
   "opencode_configs": [],
   "tui_plugins": []
 }
@@ -10250,7 +10041,7 @@ test_w_doctor_reads_a_receipt_bigger_than_the_pipe_buffer() {
     local bindir="$TEST_TMPDIR/nojqbin"
     make_nojq_farm "$bindir"
     assert_farm_has_no_jq "$bindir" || return 1
-    bash "$SETUP_SCRIPT" --agent claude-code --without-engram --non-interactive > /dev/null 2>&1 \
+    bash "$SETUP_SCRIPT" --agent claude-code --non-interactive > /dev/null 2>&1 \
         || { echo "setup claude-code failed"; return 1; }
 
     # Rebuild files[] with the hook entries at the HEAD and ~124 KB of padding
@@ -10410,8 +10201,8 @@ test_m_sdd_new_gates_before_it_explores() {
         "in auto a vague request STOPS at the gate — ambiguity resolves before artifacts are written" || return 1
     assert_matches "$flat" 'sdd-brainstorm/SKILL\.md.{0,40}INLINE' \
         "the gate runs sdd-brainstorm INLINE, not as a sub-agent" || return 1
-    assert_matches "$flat" 'sdd/\{change-name\}/brainstorm' \
-        "the gate names the ledger's topic key so it can be passed downstream by reference" || return 1
+    assert_matches "$flat" 'openspec/changes/\{change-name\}/brainstorm\.md' \
+        "the gate names the ledger's file path so it can be passed downstream by reference" || return 1
     assert_matches "$flat" '(does not resolve|not resolve).{0,80}(continue|Explore)' \
         "an absent optional module degrades to a note, never a blocked cycle" || return 1
     # The brainstorm round may delegate a real sdd-explore to answer what the code can
@@ -10518,13 +10309,11 @@ test_m_brainstorm_carries_its_distinguishing_mechanics() {
     # 7. The Language Domain Contract split: questions in the user's language, ledger in English.
     assert_matches "$flat" "user's language.{0,120}neutral English" \
         "questions in the user's language, the ledger in neutral English" || return 1
-    # 8. Persisted as its own artifact, in all three modes.
-    assert_matches "$flat" 'sdd/\{change-name\}/brainstorm' \
-        "the engram topic key" || return 1
+    # 8. Persisted as its own artifact, at the one path the store defines.
     assert_matches "$flat" 'openspec/changes/\{change-name\}/brainstorm\.md' \
-        "the openspec path" || return 1
-    assert_matches "$flat" 'hybrid.{0,80}both' \
-        "the hybrid rule (both stores)" || return 1
+        "the artifact path the ledger is written to" || return 1
+    assert_matches "$flat" 'overwrites that file in place' \
+        "re-writing the ledger replaces it rather than stacking copies" || return 1
     # 9. It runs inline. This is the property that made the old pairing impossible.
     assert_matches "$flat" '(run it inline|Run INLINE)' \
         "the inline-execution rule" || return 1
@@ -10695,21 +10484,20 @@ test_m_brainstorm_is_a_well_formed_registered_skill() {
     return 0
 }
 
-test_m_the_ledger_is_a_declared_artifact_in_both_conventions() {
+test_m_the_ledger_is_a_declared_artifact_in_the_convention() {
     # The ledger is written by the ORCHESTRATOR, inline, which is exactly the kind of
-    # writer that drifts away from the convention files nobody made it read. Both
-    # convention files are the canonical homes for "where does this artifact live",
-    # and `sdd-propose` is the phase that has to find it — so all three are pinned
-    # together, against the SAME literal key.
+    # writer that drifts away from the convention file nobody made it read.
+    # `openspec-convention.md` is the canonical home for "where does this artifact
+    # live", and `sdd-propose` is the phase that has to find it — so both are pinned
+    # together, against the SAME literal path.
     #
     # What would make this pass for the wrong reason: matching the word "brainstorm"
-    # anywhere in a long file. The literal artifact key and the literal path are what
-    # is asserted, since only those are what a reader would actually act on.
+    # anywhere in a long file. The literal artifact path is what is asserted, since
+    # only that is what a reader would actually act on.
     local osc="$REPO_DIR/skills/_shared/openspec-convention.md"
-    local egc="$REPO_DIR/skills/_shared/engram-convention.md"
     local propose="$REPO_DIR/skills/sdd-propose/SKILL.md"
     local f
-    for f in "$osc" "$egc" "$propose"; do
+    for f in "$osc" "$propose"; do
         assert_file_exists "$f" || return 1
         assert_file_not_empty "$f" 1000 || return 1
     done
@@ -10718,13 +10506,11 @@ test_m_the_ledger_is_a_declared_artifact_in_both_conventions() {
         || { echo "openspec-convention.md never names the brainstorm.md path"; return 1; }
     grep -qF 'brainstorm.md' "$osc" \
         || { echo "openspec-convention.md's change-folder tree is missing brainstorm.md"; return 1; }
-    grep -qE '^\|[[:space:]]*.brainstorm.[[:space:]]*\|[[:space:]]*sdd-brainstorm' "$egc" \
-        || { echo "engram-convention.md's artifact-type table is missing the brainstorm type"; return 1; }
 
     local flat
     flat="$(flatten_file "$propose")"
-    assert_matches "$flat" 'sdd/\{change-name\}/brainstorm' \
-        "sdd-propose reading the ledger by its topic key" || return 1
+    assert_matches "$flat" 'openspec/changes/\{change-name\}/brainstorm\.md' \
+        "sdd-propose reading the ledger by its artifact path" || return 1
     assert_matches "$flat" 'deferred.{0,200}(Risks|Open Questions)' \
         "the rule that a deferred decision becomes a risk / open question" || return 1
     assert_matches "$flat" 'assumed:' \
@@ -10800,7 +10586,7 @@ run_test "the misplaced brainstorming pairing scores zero" test_m_the_misplaced_
 run_test "no /sdd-brainstorm command line; all five prompts under budget" test_m_no_command_line_and_every_prompt_under_budget
 run_test "sdd-brainstorm installs by default (optional group)" test_m_brainstorm_installs_by_default
 run_test "sdd-brainstorm is a well-formed, registered skill" test_m_brainstorm_is_a_well_formed_registered_skill
-run_test "the ledger is a declared artifact in both conventions" test_m_the_ledger_is_a_declared_artifact_in_both_conventions
+run_test "the ledger is a declared artifact in the convention" test_m_the_ledger_is_a_declared_artifact_in_the_convention
 run_test "the issue Decisions comment is offered, never automatic" test_m_the_issue_decisions_comment_is_offered_never_automatic
 run_test "sdd-ff announces the gate it bypasses" test_m_sdd_ff_announces_the_bypass
 
@@ -11125,12 +10911,12 @@ run_test "the scanners catch a planted violation" test_z_the_scanners_catch_a_pl
 # the upstream installer, and every line of prose that introduced Kurama by
 # pointing at where it came from.
 #
-# What legitimately survives is functional, never attributional: third-party
-# npm package identifiers (one Kurama installs, one it must refuse to install
-# BY NAME), the foreign marker setup.sh DETECTS so a re-sync replaces another
-# installer's orchestrator block instead of appending a second one, the GitHub
-# URLs of the memory tool Kurama integrates with, and docs/changelog.md, which
-# is history.
+# What legitimately survives is functional or historical, never attributional:
+# the third-party npm package identifier Kurama must refuse to install BY NAME,
+# the foreign marker setup.sh DETECTS so a re-sync replaces another installer's
+# orchestrator block instead of appending a second one, docs/changelog.md, and
+# docs/migration.md, whose job is naming what a past version shipped and 6.3.0
+# removed.
 #
 # The allowlist below is the whole contract, and it is FILE-SCOPED on purpose:
 # a string being legal in setup.sh does not make it legal in a skill body —
@@ -11152,12 +10938,12 @@ run_test "the scanners catch a planted violation" test_z_the_scanners_catch_a_pl
 y_origin_allowlist() {
     cat <<'ALLOWLIST'
 docs/changelog.md|.
-docs/installation.md|[g]entle[-_]engram|[g]entle[-_]pi|[g]entleman-programming/(engram|homebrew-tap)
-README.md|[g]entle[-_]pi|[g]entleman-programming/engram
-scripts/setup.sh|[g]entle[-_]engram|[g]entle[-_]pi|[g]entleman-programming/(engram|homebrew-tap)|[g]entle-ai:sdd-orchestrator
-scripts/doctor.sh|[g]entle[-_]engram
+docs/migration.md|[g]entle[-_][e]ngram
+docs/installation.md|[g]entle[-_]pi
+README.md|[g]entle[-_]pi
+scripts/setup.sh|[g]entle[-_]pi|[g]entle-ai:sdd-orchestrator
 scripts/uninstall.sh|[g]entle[-_]pi
-scripts/install_test.sh|[g]entle[-_]engram|[g]entle[-_]pi|[g]entle-ai:sdd-orchestrator
+scripts/install_test.sh|[g]entle[-_]pi|[g]entle-ai:sdd-orchestrator
 examples/_templates/pi.md|[g]entle[-_]pi
 examples/pi/AGENTS.md|[g]entle[-_]pi
 ALLOWLIST
@@ -11321,8 +11107,10 @@ run_test "the model-assignments marker is namespaced to kurama" test_y_the_model
 test_s_apply_carries_the_evidence_block_in_every_mode() {
     # Wrong-reason pass this guards against: the block present but described as a
     # TDD-mode artifact, which would leave the default path exactly as broken as
-    # before. Hence the explicit "EVERY mode / true OR false" and "does not depend
-    # on tdd.enabled" clauses, not just the presence of the heading. A second
+    # before. Hence the explicit "true OR false" and "does not depend on
+    # tdd.enabled" clauses, not just the presence of the heading. (#135 dropped the
+    # "EVERY mode" half of that phrasing along with the modes themselves; the TDD
+    # half is the one that ever carried the contract.) A second
     # wrong-reason pass — asserting over a missing or truncated file, where every
     # pattern fails and nothing is really checked — is closed by the size check and
     # the positive control first.
@@ -11338,8 +11126,8 @@ test_s_apply_carries_the_evidence_block_in_every_mode() {
 
     assert_matches "$flat" 'Work Unit Evidence' \
         "the evidence block exists at all" || return 1
-    assert_matches "$flat" 'EVERY mode.{0,60}tdd\.enabled.{0,40}true OR false' \
-        "the gate runs in every mode with the TDD flag either way" || return 1
+    assert_matches "$flat" 'This gate runs with .tdd\.enabled. true OR false' \
+        "the gate runs with the TDD flag either way" || return 1
     assert_matches "$flat" 'Nothing.{1,8}about this gate depends on .tdd.enabled' \
         "evidence must never be made conditional on the opt-in TDD flag" || return 1
 
@@ -11379,10 +11167,11 @@ test_s_apply_carries_the_evidence_block_in_every_mode() {
     assert_matches "$flat" 'recorded IN ADDITION' \
         "with TDD on, both the cycle evidence and this block are recorded" || return 1
 
-    # It must land where THIS mode records completion, engram included, and reach the
-    # orchestrator through the phase-specific report fields Section D already allows.
-    assert_matches "$flat" 'tasks artifact content for .engram' \
-        "the engram path for the block, not just tasks.md" || return 1
+    # It must land where completion is recorded — in the SAME edit as the `[x]`, so a
+    # mark can never be written without it — and reach the orchestrator through the
+    # phase-specific report fields Section D already allows.
+    assert_matches "$flat" 'mark and its evidence travel' \
+        "the block lands with the [x] it backs, never separately" || return 1
     assert_matches "$flat" 'Work Unit Evidence\*\* \(ALL modes' \
         "the return envelope's detailed_report carries the evidence field" || return 1
     assert_matches "$flat" 'carried forward VERBATIM' \
@@ -12231,7 +12020,7 @@ test_t_sdd_verify_gates_on_the_linter_at_critical() {
 test_t_sdd_archive_refuses_to_merge_a_spec_with_errors() {
     # sdd-archive is the ONLY writer of openspec/specs/. A refusal here is the
     # last mechanical stop before a malformed requirement becomes the source of
-    # truth — and in engram mode there is no git history to recover it from.
+    # truth.
     local f="$REPO_DIR/skills/sdd-archive/SKILL.md"
     assert_file_exists "$f" || return 1
     local flat
@@ -12846,7 +12635,7 @@ test_u_project_install_ships_the_builder_executable_and_recorded() {
 
     local output status=0
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "setup.sh exited $status:"; printf '%s\n' "$output" | tail -5; return 1
     fi
@@ -12895,7 +12684,7 @@ test_u_project_install_builds_the_registry() {
 
     local output status=0
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "setup.sh exited $status:"; printf '%s\n' "$output" | tail -5; return 1
     fi
@@ -12925,7 +12714,7 @@ test_u_uninstall_removes_the_shipped_script() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     assert_file_exists "$repo/.claude/skills/_shared/build-skill-registry.sh" || return 1
 
@@ -12952,7 +12741,7 @@ test_u_doctor_flags_a_missing_or_unexecutable_builder() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
 
     local builder="$repo/.claude/skills/_shared/build-skill-registry.sh"
@@ -12991,7 +12780,7 @@ test_u_registry_alone_is_not_proof_of_initialization() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     assert_file_exists "$repo/.kurama/skill-registry.md" || return 1
 
@@ -13022,7 +12811,7 @@ test_u_update_rebuilds_the_registry() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
 
     # A registry deleted by hand (or never built, on an install predating #106)
@@ -13113,10 +12902,7 @@ echo ""
 #         (absolute paths), .kurama/, timestamped merge backups,
 #         .claude/settings.local.json — and never touched .gitignore. Six docs
 #         asserted ".kurama/ is gitignored" as fact with no producer. In the
-#         field a receipt full of absolute paths was COMMITTED, and .mcp.json /
-#         opencode.json were committed carrying /opt/homebrew/bin/engram,
-#         because engram_command matched */Cellar/engram/* against a path
-#         `command -v` never returns: Homebrew puts a SYMLINK on PATH.
+#         field a receipt full of absolute paths was COMMITTED.
 #
 #   #101  setup.sh appended Kurama's "SDD owns the work lifecycle" block 117
 #         lines BELOW a pre-existing workflow in the same CLAUDE.md and printed
@@ -13126,9 +12912,7 @@ echo ""
 # Most of this section runs under the jq-less farm on purpose. The receipt grew
 # a new array key (gitignore[]) that uninstall drives an rm-adjacent rewrite
 # from, and the awk fallback parser is the one no developer's Mac ever executes
-# — which is exactly how the single-line-empty-array bug shipped (#13). The one
-# case that needs jq is the Engram registration: engram_merge_json is jq-only by
-# the documented never-sed-on-JSON contract.
+# — which is exactly how the single-line-empty-array bug shipped (#13).
 #
 # NOTE on controls. Like UNIT-L, nothing here reads git history:
 # .github/workflows/pr-check.yml checks out at depth 1, so `origin/main` is not
@@ -13136,8 +12920,7 @@ echo ""
 # vacuous skip. Every case below asserts the new behaviour directly, which is
 # absent on main by construction — verified by hand against a clone whose
 # scripts/setup.sh and scripts/lib/receipt.sh came from `git show origin/main:`:
-# no .gitignore written, no gitignore[] key, no workflow notice, and
-# "command": "/opt/homebrew/bin/engram" in .mcp.json.
+# no .gitignore written, no gitignore[] key, and no workflow notice.
 # ============================================================================
 
 # Print the managed machine-local block of the .gitignore at $1 — everything
@@ -13169,22 +12952,6 @@ gitignore_block_patterns() {
     gitignore_block "$1" | awk '!/^[[:space:]]*#/ && NF'
 }
 
-# Build a Homebrew-shaped engram at $1: a bin/engram SYMLINK into a versioned
-# Cellar path, which is what `command -v engram` really returns on a Mac and the
-# exact shape the */Cellar/engram/* case could never match. Echoes the bin dir.
-make_brew_engram() {
-    local root="$1" version="${2:-1.2.3}"
-    mkdir -p "$root/bin" "$root/Cellar/engram/$version/bin"
-    cat > "$root/Cellar/engram/$version/bin/engram" <<'SHIM'
-#!/usr/bin/env bash
-echo "engram 1.2.3"
-exit 0
-SHIM
-    chmod +x "$root/Cellar/engram/$version/bin/engram"
-    ln -sf "$root/Cellar/engram/$version/bin/engram" "$root/bin/engram"
-    printf '%s' "$root/bin"
-}
-
 test_p_project_install_writes_the_managed_gitignore_block() {
     local bindir="$TEST_TMPDIR/nojq-bin"
     make_nojq_farm "$bindir"
@@ -13195,7 +12962,7 @@ test_p_project_install_writes_the_managed_gitignore_block() {
 
     local output status=0
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "setup.sh exited $status:"; printf '%s\n' "$output" | tail -5; return 1
     fi
@@ -13263,13 +13030,13 @@ test_p_second_run_leaves_the_gitignore_byte_identical() {
     local before; before="$(cat "$repo/.gitignore")"
 
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "first setup exited non-zero"; return 1; }
     local first; first="$(cat "$repo/.gitignore")"
     local first_hash; first_hash="$(hash_file "$repo/.gitignore")"
 
     local output; output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project \
-        --path "$repo" --without-engram --non-interactive 2>&1) \
+        --path "$repo" --non-interactive 2>&1) \
         || { echo "second setup exited non-zero"; return 1; }
 
     if [ "$first_hash" != "$(hash_file "$repo/.gitignore")" ]; then
@@ -13301,7 +13068,7 @@ test_p_uninstall_removes_the_block_and_keeps_unrelated_lines() {
     local before; before="$(cat "$repo/.gitignore")"
 
     PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     grep -qxF '# BEGIN:kurama' "$repo/.gitignore" || { echo "no block to remove"; return 1; }
 
@@ -13327,7 +13094,7 @@ test_p_uninstall_removes_a_gitignore_kurama_created() {
     [ -f "$repo/.gitignore" ] && { echo "fixture already has a .gitignore"; return 1; }
 
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     assert_file_exists "$repo/.gitignore" || return 1
 
@@ -13357,7 +13124,7 @@ test_p_non_git_target_skips_the_block_and_exits_zero() {
 
     local output status=0
     output=$(printf 'y\n' | PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project \
-        --path "$plain" --without-engram 2>&1) || status=$?
+        --path "$plain" 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "a non-git project target must still install cleanly (exit 0), got $status:"
         printf '%s\n' "$output" | tail -5
@@ -13387,7 +13154,7 @@ test_p_receipt_records_the_block_for_both_parsers() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
 
     local manifest="$repo/.kurama-install-manifest.json"
@@ -13430,7 +13197,7 @@ test_p_atl_is_recorded_only_when_pi_is_installed() {
     make_git_repo "$repo"
 
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "claude-code setup exited non-zero"; return 1; }
     if gitignore_block_patterns "$repo/.gitignore" | grep -qxF -- '.atl/'; then
         echo "  .atl/ appeared before Pi was installed"
@@ -13438,7 +13205,7 @@ test_p_atl_is_recorded_only_when_pi_is_installed() {
     fi
 
     bash "$SETUP_SCRIPT" --agent pi --scope project --path "$repo" \
-        --without-engram --without-pi-packages --non-interactive > /dev/null 2>&1 \
+        --without-pi-packages --non-interactive > /dev/null 2>&1 \
         || { echo "pi setup exited non-zero"; return 1; }
     if ! gitignore_block_patterns "$repo/.gitignore" | grep -qxF -- '.atl/'; then
         echo "  .atl/ is still missing after a Pi install — Pi runtime state can be committed"
@@ -13457,7 +13224,7 @@ test_p_update_ensures_the_block_on_an_install_that_predates_it() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
 
     # Age the install: drop the block and the receipt key, exactly as a 6.1.2
@@ -13496,7 +13263,7 @@ test_p_doctor_flags_a_tracked_machine_local_file() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
 
     # Commit the receipt the way a human does: -f, because the block that would
@@ -13525,7 +13292,7 @@ test_p_doctor_flags_a_missing_gitignore_block() {
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     # Someone deleted it, or the install predates #105.
     rm -f "$repo/.gitignore"
@@ -13547,14 +13314,14 @@ test_p_doctor_flags_installed_but_never_initialized() {
     # #101's second half. The field repo had a valid receipt, the right commit,
     # balanced markers, working hooks — and no openspec/ at all, because
     # sdd-init never ran. doctor called that healthy. An install with no
-    # settings bundle has no artifact_store.mode, no execution_mode and no
-    # tdd.enabled: structurally complete, functionally inert.
+    # settings bundle has no execution_mode and no tdd.enabled: structurally
+    # complete, functionally inert.
     local shim="$TEST_TMPDIR/doctorbin"
     make_doctor_shims "$shim"
     local repo="$TEST_TMPDIR/proj"
     make_git_repo "$repo"
     bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive > /dev/null 2>&1 \
+        --non-interactive > /dev/null 2>&1 \
         || { echo "setup exited non-zero"; return 1; }
     [ -e "$repo/openspec" ] && { echo "setup created openspec/ — sdd-init is what does that"; return 1; }
 
@@ -13568,14 +13335,14 @@ test_p_doctor_flags_installed_but_never_initialized() {
         "a green grade over an install that cannot run a single SDD phase" || return 1
 
     # And it clears once init has actually happened, in EITHER settings home:
-    # openspec/config.yaml for openspec/hybrid, .kurama/ for engram mode.
+    # openspec/config.yaml, or something a cycle wrote under .kurama/.
     write_sdd_init_config "$repo" neutral
     output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
     assert_not_matches "$output" 'installed, never initialized' \
         "the finding persisting after openspec/config.yaml exists" || return 1
 
-    # #106 moved this line. .kurama/skill-registry.md used to be the engram-mode
-    # proof that init had run, because only sdd-init Step 4 produced it. setup.sh
+    # #106 moved this line. .kurama/skill-registry.md used to be the proof that
+    # init had run, because only sdd-init Step 4 produced it. setup.sh
     # builds it at install time now, so accepting it would grade every FRESH
     # install "initialized" — the exact false green this case exists to catch.
     # The registry is already on disk from the setup above, and the finding above
@@ -13584,77 +13351,14 @@ test_p_doctor_flags_installed_but_never_initialized() {
     assert_file_exists "$repo/.kurama/skill-registry.md" || return 1
 
     # Everything ELSE under .kurama/ is still sdd-init's (or a cycle's) own
-    # output and still clears the finding. The three cycle markers land under
-    # .kurama/sdd/<change>/ in EVERY mode, engram included — see
-    # _shared/persistence-contract.md — so they are the on-disk evidence a
-    # markdown-less engram project actually has.
+    # output and still clears the finding. The three cycle markers always land
+    # under .kurama/sdd/<change>/ — see _shared/persistence-contract.md — so they
+    # are on-disk evidence a cycle has run here.
     mkdir -p "$repo/.kurama/sdd/demo-change"
     printf 'phase: init\n' > "$repo/.kurama/sdd/demo-change/state.md"
     output=$(PATH="$shim:$PATH" bash "$DOCTOR_SCRIPT" --scope project --path "$repo" 2>&1) || true
     assert_not_matches "$output" 'installed, never initialized' \
         "the finding persisting once .kurama/ carries something a cycle wrote" || return 1
-    return 0
-}
-
-test_p_homebrew_engram_is_written_as_the_bare_command() {
-    # #105's root cause, measured. `command -v engram` returns the Homebrew
-    # SYMLINK (/opt/homebrew/bin/engram), never the Cellar path it points at, so
-    # the */Cellar/engram/* case never fired and a machine-specific absolute
-    # path was written into a project .mcp.json the whole team shares.
-    # jq-present on purpose: engram_merge_json is jq-only by contract.
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "  jq is absent — the MCP merge is jq-only by contract, so this case cannot run"
-        return 1
-    fi
-    local brewbin
-    brewbin="$(make_brew_engram "$TEST_TMPDIR/opt/homebrew")"
-    # The link must really be a link, or this case proves nothing.
-    [ -L "$brewbin/engram" ] || { echo "the fixture engram is not a symlink"; return 1; }
-
-    local repo="$TEST_TMPDIR/proj"
-    make_git_repo "$repo"
-    PATH="$brewbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "setup exited non-zero"; return 1; }
-
-    assert_file_exists "$repo/.mcp.json" || return 1
-    local cmd
-    cmd="$(jq -r '.mcpServers.engram.command // ""' "$repo/.mcp.json")"
-    assert_eq "engram" "$cmd" \
-        "a Homebrew engram must be written as the bare command, never an absolute path" || return 1
-    if grep -qF '/homebrew/' "$repo/.mcp.json"; then
-        echo "  .mcp.json still carries a machine-specific Homebrew path:"
-        grep -nF '/homebrew/' "$repo/.mcp.json" | head -3 | awk '{ print "    " $0 }'
-        return 1
-    fi
-
-    # The other half of the fix: a brew prefix that is NOT literally
-    # ".../homebrew/bin" is caught by RESOLVING the symlink to its Cellar
-    # target — the readlink loop, since macOS has no readlink -f.
-    local otherbin
-    otherbin="$(make_brew_engram "$TEST_TMPDIR/custombrew" 9.9.9)"
-    local repo2="$TEST_TMPDIR/proj2"
-    make_git_repo "$repo2"
-    PATH="$otherbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo2" \
-        --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "second setup exited non-zero"; return 1; }
-    assert_eq "engram" "$(jq -r '.mcpServers.engram.command // ""' "$repo2/.mcp.json")" \
-        "a Cellar target reached through a non-'homebrew' prefix must still collapse to 'engram'" || return 1
-
-    # And a NON-brew engram keeps its absolute path on purpose: a GUI-launched
-    # client does not always inherit the shell PATH, and there is no stable bare
-    # name to fall back on outside brew.
-    local plainbin="$TEST_TMPDIR/plainbin"
-    mkdir -p "$plainbin"
-    printf '#!/usr/bin/env bash\necho engram\n' > "$plainbin/engram"
-    chmod +x "$plainbin/engram"
-    local repo3="$TEST_TMPDIR/proj3"
-    make_git_repo "$repo3"
-    PATH="$plainbin:$PATH" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo3" \
-        --with-engram --non-interactive > /dev/null 2>&1 \
-        || { echo "third setup exited non-zero"; return 1; }
-    assert_eq "$plainbin/engram" "$(jq -r '.mcpServers.engram.command // ""' "$repo3/.mcp.json")" \
-        "a non-Homebrew engram must keep its absolute path" || return 1
     return 0
 }
 
@@ -13686,7 +13390,7 @@ PROMPT
 
     local output status=0
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "setup must NEVER refuse over a pre-existing workflow, got exit $status:"
         printf '%s\n' "$output" | tail -5
@@ -13737,7 +13441,7 @@ test_p_no_workflow_notice_when_kurama_owns_the_whole_prompt() {
 
     local output
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive 2>&1) \
+        --non-interactive 2>&1) \
         || { echo "setup exited non-zero"; return 1; }
 
     assert_not_matches "$output" 'Two workflows now live' \
@@ -13755,7 +13459,7 @@ test_p_a_fresh_prompt_file_raises_no_notice() {
 
     local output
     output=$(bash "$SETUP_SCRIPT" --agent claude-code --scope project --path "$repo" \
-        --without-engram --non-interactive 2>&1) \
+        --non-interactive 2>&1) \
         || { echo "setup exited non-zero"; return 1; }
     assert_not_matches "$output" 'Two workflows now live|already had content of its own' \
         "a notice raised over a prompt file Kurama created from nothing" || return 1
@@ -13800,7 +13504,6 @@ run_test "update ensures the block on a pre-#105 install" test_p_update_ensures_
 run_test "doctor fails on a TRACKED machine-local file" test_p_doctor_flags_a_tracked_machine_local_file
 run_test "doctor flags a missing .gitignore block" test_p_doctor_flags_a_missing_gitignore_block
 run_test "doctor flags installed-but-never-initialized" test_p_doctor_flags_installed_but_never_initialized
-run_test "a Homebrew engram is written as the bare command" test_p_homebrew_engram_is_written_as_the_bare_command
 run_test "setup names a pre-existing workflow in the prompt" test_p_setup_names_a_pre_existing_workflow_in_the_prompt
 run_test "no notice when Kurama owns the whole prompt" test_p_no_workflow_notice_when_kurama_owns_the_whole_prompt
 run_test "a fresh prompt file raises no notice" test_p_a_fresh_prompt_file_raises_no_notice
@@ -14835,7 +14538,7 @@ OPENCODE_GATE_FILES=".opencode/plugins/kurama-sdd-gates.ts
 install_opencode_project() {
     local bindir="$1" repo="$2" output status=0
     output=$(PATH="$bindir" bash "$SETUP_SCRIPT" --agent opencode --scope project --path "$repo" \
-        --without-engram --non-interactive 2>&1) || status=$?
+        --non-interactive 2>&1) || status=$?
     if [ "$status" -ne 0 ]; then
         echo "setup.sh --agent opencode --scope project exited $status:"
         printf '%s\n' "$output" | tail -5
@@ -14997,15 +14700,15 @@ test_q_envelope_closes_with_key_learnings() {
     # `skill_resolution` — so every gotcha a phase discovered died with that phase's context.
     # The closing `## Key Learnings` section is what a memory engine extracts VERBATIM, with no
     # model re-reading it, which is why the shape is pinned here instead of left to taste: the
-    # >= 20-character / >= 4-word floors are Engram's extraction thresholds, and an item under
+    # >= 20-character / >= 4-word floors are the usual extraction thresholds, and an item under
     # either one is dropped in silence. The three rules that keep the section honest are pinned
     # for the same reason — each is a distinct failure mode. Omit-when-empty is what stops the
     # section from becoming padding that dilutes the real learnings; no-secrets/no-absolute-paths
     # is what stops passive capture from becoming a leak, since these lines are persisted and
-    # re-read on other machines. And the two-store sentence is what stops the next reader from
-    # "deduplicating" this against `sdd-learn`: Engram captures it passively for one developer,
-    # `sdd-learn` curates the team's committed MEMORY.md from it — the section feeds both and
-    # replaces neither.
+    # re-read on other machines. And the two-consumer sentence is what stops the next reader from
+    # "deduplicating" this against `sdd-learn`: whatever memory engine the developer runs reads
+    # the section passively for one developer, `sdd-learn` curates the team's committed MEMORY.md
+    # from it — the section feeds both and replaces neither.
     local common="$REPO_DIR/skills/_shared/sdd-phase-common.md"
     local docs="$REPO_DIR/docs/sub-agents.md"
     assert_file_exists "$common" || return 1
@@ -15044,7 +14747,7 @@ test_q_envelope_closes_with_key_learnings() {
     # The extraction thresholds, stated AS thresholds so nobody "simplifies" them later.
     case "$kl" in
         *"20 characters and 4 words"*) ;;
-        *) echo "the Key Learnings contract dropped Engram's 20-character / 4-word extraction thresholds"; return 1 ;;
+        *) echo "the Key Learnings contract dropped the 20-character / 4-word extraction thresholds"; return 1 ;;
     esac
     case "$kl" in
         *"extraction threshold"*) ;;
@@ -15071,10 +14774,10 @@ test_q_envelope_closes_with_key_learnings() {
         *) echo "the Key Learnings contract no longer forbids absolute machine paths"; return 1 ;;
     esac
 
-    # Both memory stores, and the boundary between them, named where the phase reads it.
+    # Both consumers, and the boundary between them, named where the phase reads it.
     case "$kl" in
-        *"Engram"*) ;;
-        *) echo "the Key Learnings contract never says Engram captures the section passively"; return 1 ;;
+        *"passively"*) ;;
+        *) echo "the Key Learnings contract never says a memory engine reads the section passively"; return 1 ;;
     esac
     case "$kl" in
         *"sdd-learn"*) ;;
@@ -15086,7 +14789,7 @@ test_q_envelope_closes_with_key_learnings() {
     esac
     case "$kl" in
         *"docs/persistence.md"*) ;;
-        *) echo "the Key Learnings contract does not point at the four-store boundary table"; return 1 ;;
+        *) echo "the Key Learnings contract does not point at the store-boundary table"; return 1 ;;
     esac
 
     # The docs describe the envelope too, and a contract documented in only one of the two

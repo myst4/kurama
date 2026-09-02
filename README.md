@@ -52,7 +52,7 @@ re-reads, which grows the context again. Kurama breaks that flywheel with two id
 The result is an orchestration model that sits deliberately between basic
 fire-and-forget sub-agents and heavyweight agent-team runtimes: a delegate-only
 lead, DAG-based phases, parallel `spec ∥ design`, a structured result envelope,
-a pluggable artifact store, and automatic skill discovery — without a shared task
+a file-backed artifact store, and automatic skill discovery — without a shared task
 queue or peer-to-peer messaging you have to operate.
 
 ## Quick start
@@ -92,12 +92,9 @@ its root that `uninstall.sh` can remove cleanly:
 ./scripts/setup.sh --agent claude-code --scope project --path /path/to/your/repo
 ```
 
-**Persistence.** By default artifacts persist to a built-in markdown fallback
-(`openspec/` / `.kurama/`). Setup asks once whether to use
-[Engram](https://github.com/Gentleman-Programming/engram) as a cross-session
-memory engine instead (`--with-engram` / `--without-engram`); when enabled it
-wires the Engram MCP server into the client being configured. See
-[docs/installation.md](docs/installation.md#engram-optional-persistence-engine).
+**Persistence.** Artifacts persist as markdown files under `openspec/`, with
+machine-local cycle state under `.kurama/`. See
+[docs/persistence.md](docs/persistence.md).
 
 **Skills only.** If you want to install just the skills and wire the orchestrator
 yourself, use the installer scripts and then append the orchestrator prompt from
@@ -126,7 +123,7 @@ multi mode) live in [docs/installation.md](docs/installation.md).
 **Keeping an install current.** After pulling a new Kurama version, re-sync every
 recorded install with `./scripts/update.sh` (add `--scope project --path <repo>`
 for a per-repo install). `./scripts/doctor.sh` health-checks an install
-(receipts vs disk, `gh` scopes, Pi stack, Engram, markers, hooks), and
+(receipts vs disk, `gh` scopes, Pi stack, markers, hooks), and
 `./scripts/uninstall.sh` removes exactly what the install receipt recorded —
 skills, agents, hooks, and MCP registrations included.
 
@@ -223,28 +220,16 @@ by the diff can block, and only `BLOCKER`/`CRITICAL` gate. See
 | `kanban-github` | Optional GitHub Projects (v2) board sync: each issue the harness works on is a card the orchestrator moves through Backlog → Ready → In Progress → In Review → Done as the SDD cycle crosses phase boundaries. Installed by default (manifest group `optional`; remove with `setup.sh --without optional`). Installing it never activates the board — activation is opt-in per project via `kanban.enabled`, and **requires a configured GitHub CLI (`gh`)** to turn on. Failed board updates are WARNINGs that never block the cycle. See [docs/kanban-github.md](docs/kanban-github.md). |
 
 Shared behavior the SDD skills rely on lives in
-[`skills/_shared/`](skills/_shared/) — the persistence contract, the Engram and
-OpenSpec conventions, the phase-common return envelope, and the skill resolver.
+[`skills/_shared/`](skills/_shared/) — the persistence contract, the OpenSpec
+convention, the phase-common return envelope, and the skill resolver.
 
-## Artifact store modes
+## Artifact store
 
-The orchestrator passes an `artifact_store.mode` to every phase. It decides where
-**SDD artifacts** (exploration, proposal, spec, design, tasks, reports, state) are
-kept — never the implementation code, which `sdd-apply` always writes to the
-project in every mode.
-
-| Mode | Where artifacts live |
-|------|----------------------|
-| `engram` | Persistent memory via [Engram](https://github.com/Gentleman-Programming/engram); survives compaction and cross-session recovery. Default when Engram is available. |
-| `openspec` | Human-readable files under `openspec/`, version-controllable with the repo. |
-| `hybrid` | Both Engram and the filesystem, written simultaneously (higher token cost). |
-
-Those three are the whole enum. `openspec` and `hybrid` are never selected
-automatically — the orchestrator must pass them explicitly. When Engram is
-unreachable the default degrades to the `.kurama/sdd/` markdown fallback;
-**persistence is never skipped**. The removed `none` mode (persist nothing, return
-artifacts inline) is no longer valid: a resolved `none` is reported as unsupported
-and `openspec` named as its replacement. See
+**SDD artifacts** (exploration, proposal, spec, design, tasks, reports) are
+human-readable files under `openspec/`, version-controlled with the repo. Cycle
+state lives machine-locally under `.kurama/`. Neither restricts the
+implementation code, which `sdd-apply` always writes to the project.
+**Persistence is never skipped.** See
 [docs/persistence.md](docs/persistence.md).
 
 ## Supported harnesses
@@ -307,7 +292,7 @@ inline. All are detailed in [docs/installation.md](docs/installation.md).
 - [docs/concepts.md](docs/concepts.md) — delta specs, RFC 2119 keywords, the archive cycle.
 - [docs/architecture.md](docs/architecture.md) — orchestration model, the phase DAG, and the result contract.
 - [docs/sub-agents.md](docs/sub-agents.md) — how phases run as sub-agents and share conventions.
-- [docs/persistence.md](docs/persistence.md) — the three artifact store modes in depth.
+- [docs/persistence.md](docs/persistence.md) — the three stores in depth.
 - [docs/kanban-github.md](docs/kanban-github.md) — the optional GitHub Projects board sync module.
 - [docs/opencode-profiles.md](docs/opencode-profiles.md) — named model profiles for the OpenCode integration.
 - [docs/companion-skills.md](docs/companion-skills.md) — optional pairings with external process skills like superpowers.

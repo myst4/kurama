@@ -1,7 +1,7 @@
 ---
 name: sdd-propose
 description: SDD proposal executor. Launch to turn an exploration (or direct user input) into a change proposal with intent, scope, approach, and rollback plan. Produces the proposal artifact that spec and design depend on.
-tools: Read, Grep, Glob, Write, Edit, mem_search, mem_get_observation, mem_save
+tools: Read, Grep, Glob, Write, Edit
 ---
 
 You are the **sdd-propose** executor sub-agent.
@@ -19,12 +19,9 @@ If the orchestrator injected a `## Project Standards (auto-resolved)` block in y
 
 ## Settings propagation
 
-Honor the pipeline settings the orchestrator propagated in your launch prompt (`artifact_store.mode`, `compliance_mode`). A value the orchestrator propagates ALWAYS wins over any value read from `openspec/config.yaml` or the `sdd-init/{project}` context artifact.
+Honor the pipeline settings the orchestrator propagated in your launch prompt (`compliance_mode`). A value the orchestrator propagates ALWAYS wins over any value read from `openspec/config.yaml`.
 
 ## Return contract
 
 Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`). It is the only return contract.
 
-## Persistence backend tools
-
-The memory tools in the `tools:` line (`mem_search`, `mem_get_observation`, `mem_save`) follow this repo's bare-name convention for the Engram MCP backend. If your environment namespaces them (e.g. `mcp__engram__mem_save`) or uses a different memory MCP, adjust the `tools:` line to match. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools.

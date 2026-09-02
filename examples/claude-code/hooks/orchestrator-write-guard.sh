@@ -273,10 +273,10 @@ esac
 abs_path="$(canonical_path "$abs_path")"
 
 # --- is an SDD cycle active? ------------------------------------------------
-# openspec mode        : an active change dir (NOT under changes/archive/) that
-#                        still holds a state.yaml.
-# engram-fallback mode : a .kurama/sdd/<change>/ dir with state.md and no
-#                        archive-report.md (archiving writes the report).
+# openspec artifacts : an active change dir (NOT under changes/archive/) that
+#                      still holds a state.yaml.
+# cycle marker       : a .kurama/sdd/<change>/ dir with state.md and no
+#                      archive-report.md (archiving writes the report).
 active_cycle_exists() {
   base="$1"
   d=""

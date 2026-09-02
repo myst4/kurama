@@ -7,7 +7,7 @@ set -euo pipefail
 # install.sh and setup.sh used to be two installers with asymmetric capabilities
 # and duplicated logic: install_skills, OS detection, colors and receipt writing
 # lived in both, group selection (--with/--without) lived ONLY here, and prompts,
-# hooks, engram, the startup logo and the OpenCode modes lived ONLY in setup.sh.
+# hooks, the startup logo and the OpenCode modes lived ONLY in setup.sh.
 # Their receipts actively conflicted (#24: this script used to OVERWRITE and thus
 # truncate setup.sh's richer receipt).
 #

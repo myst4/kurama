@@ -27,23 +27,31 @@ the single active change; supply it to disambiguate when several are in flight.
 
 ### 1. Recover state (per the persistence contract)
 
-Recover the DAG state for the change using the **Recovery Rule** and **State Persistence** table in
+Recover the DAG state for the change using the **State Persistence** section in
 `skills/_shared/persistence-contract.md`:
 
-- `engram` → `mem_search("sdd/{change-name}/state")` → `mem_get_observation(id)`
-- `engram` (degraded, Engram unavailable) → read `.kurama/sdd/{change-name}/state.md`
-- `openspec` → read `openspec/changes/{change-name}/state.yaml`
-- `hybrid` → filesystem `state.yaml` first (authoritative), Engram mirror as fallback
+- Read `openspec/changes/{change-name}/state.yaml` — the authoritative, committed cycle state.
+- Fall back to `.kurama/sdd/{change-name}/state.md`, the machine-local cycle marker the write
+  guard reads. Check it with `test -f` or Read — never a finder; `.kurama/` is hidden AND
+  gitignored.
 
-`.kurama/sdd/{change-name}/state.md` exists in EVERY mode (it is the cycle marker the write guard
-reads), so it is always available as a recovery fallback when the mode's primary store cannot be
-reached. Check it with `test -f` or Read — never a finder; `.kurama/` is hidden AND gitignored.
-When you advance the DAG, re-write it alongside the mode's own state write.
+When you advance the DAG, write both.
 
-Also read the pipeline settings (`artifact_store.mode`, `execution_mode`, `compliance_mode`,
-`tdd.enabled`, `tdd.single_test_command`) once and propagate them into every sub-agent prompt
-(propagated value wins). `execution_mode` (`supervised` | `auto`, default `supervised`) decides
-whether the gate in step 4 stops for the user or auto-advances.
+Also read the pipeline settings (`execution_mode`, `compliance_mode`, `tdd.enabled`,
+`tdd.single_test_command`) once and propagate them into every sub-agent prompt
+(propagated value wins).
+
+`execution_mode` (`supervised` | `auto`, default `supervised`) decides whether the gate in step 4
+stops for the user or auto-advances.
+
+**Stale `artifact_store.mode`.** If `openspec/config.yaml` still carries an `artifact_store.mode`
+key with ANY value, print exactly one line and continue — never block, never rewrite the user's
+config:
+
+> `artifact_store.mode` is unsupported since 6.3.0; artifacts are files under `openspec/`. Move
+> `.kurama/sdd/<change>/*.md` to `openspec/changes/<change>/` if you want the old ones.
+
+Then proceed with the cycle as normal.
 
 ### 2. Determine the next dependency-ready phase
 
@@ -65,8 +73,8 @@ have; never fail on the missing section.
 
 ### 3. Delegate the next phase
 
-Delegate the phase sub-agent(s). Pass required upstream artifacts by reference (topic key / path); the
-sub-agent reads them from the backend. Inject the resolved mode, settings, and any auto-resolved
+Delegate the phase sub-agent(s). Pass required upstream artifacts by reference (path); the
+sub-agent reads the files itself. Inject the pipeline settings and any auto-resolved
 Project Standards.
 
 ### 4. Present and gate

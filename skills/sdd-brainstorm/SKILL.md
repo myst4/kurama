@@ -293,14 +293,8 @@ you end the round anyway, it is `deferred` with *not explored* as its reason.
 The ledger is one file, mechanical, and fully specified by the time it is written — the
 delegation table's atomic-write allowance, so it is written **inline**.
 
-**Where**, by artifact store mode:
-
-- **engram** — `mem_save` with title and `topic_key` both `sdd/{change-name}/brainstorm`,
-  `type: architecture`, `scope: project`. The stable key upserts, so re-writing the ledger
-  updates it in place instead of stacking copies.
-- **openspec** — `openspec/changes/{change-name}/brainstorm.md`. Create the change directory
-  first if it does not exist.
-- **hybrid** — both. The file is authoritative; Engram mirrors it.
+**Where**: `openspec/changes/{change-name}/brainstorm.md`. Create the change directory first if
+it does not exist. Re-writing the ledger overwrites that file in place instead of stacking copies.
 
 **When**: once at the terminal state, and once at each round cap the user chooses to continue
 past — a checkpoint, so a compaction mid-interview does not cost the round. Not per answer:
@@ -321,7 +315,7 @@ The terminal state is: the ledger persisted, and the recommended approach stated
 returns to the orchestrator, which continues `sdd-new` at Explore. **This skill does not invoke
 the next phase itself.**
 
-The ledger travels **by reference** — the topic key or the path, never its body pasted into a
+The ledger travels **by reference** — the file path, never its body pasted into a
 sub-agent prompt.
 
 - `sdd-explore` receives it as OPTIONAL upstream context: the resolved decisions are the frame
@@ -350,7 +344,7 @@ decision as one line, each deferred one named **as deferred** with its reason, a
 No ledger dump, no approach write-up, no spec content.
 
 **The direction of truth is fixed and it only goes one way.** The issue is the ticket; the
-`openspec/` artifacts (or their Engram equivalents) are the truth. The comment is a POINTER from
+`openspec/` artifacts are the truth. The comment is a POINTER from
 the ticket to the artifact, so a teammate reading the board knows a decision round happened and
 where it lives. The spec is never updated to match a comment, and a comment is never an input to
 a later phase.

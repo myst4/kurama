@@ -129,7 +129,7 @@ Commit messages MUST match this regex:
 
 ```
 feat(scripts): add multi-model setup for OpenCode
-fix(skills): correct engram topic key format in sdd-apply
+fix(skills): correct progress merge order in sdd-apply
 docs(readme): update installation instructions
 refactor(skills): extract shared persistence logic
 chore(ci): add shellcheck to PR validation workflow

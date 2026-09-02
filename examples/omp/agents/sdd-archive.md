@@ -31,19 +31,12 @@ This markdown body is your complete system prompt. omp exposes skills as name+de
 
 Fallback roots for the `_shared` files: `.omp/skills/_shared/...` (project) or `~/.omp/agent/skills/_shared/...` (global); `$PI_CODING_AGENT_DIR/skills/_shared/...` when that variable is set.
 
-## Settings propagation
-
-Honor the pipeline settings the orchestrator propagated in your launch prompt (`artifact_store.mode`). A value the orchestrator propagates ALWAYS wins over any value read from `openspec/config.yaml` or the `sdd-init/{project}` context artifact.
-
 ## Return contract
 
 Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`). It is the only return contract.
 
 ## Persistence backend tools
 
-omp has no built-in `mem_*` tools: its own memory is an autonomous pipeline you read through `memory://` with the `read` tool, and Engram — when the project uses it — arrives as MCP tools whose names depend on the registered server. So your allowlist carries the file tools only.
-
-- **`openspec` mode** (and the degraded-`engram` filesystem fallback): use the file tools. This is the fully supported path and needs nothing extra.
-- **`engram` mode**: the orchestrator passes artifact references, and the Engram MCP tools reach you only if that server is registered for omp (`~/.omp/agent/mcp.json`). If a required artifact cannot be retrieved, follow Section B and return `blocked` naming it — never invent artifact content.
+omp has no built-in memory tools: its own memory is an autonomous pipeline you read through `memory://` with the `read` tool. So your allowlist carries the file tools only — artifacts are files under `openspec/`, and the file tools are all that path needs. If a required artifact cannot be retrieved, follow Section B and return `blocked` naming it — never invent artifact content.
 
 `model` and `thinkingLevel` above are defaults. Override per agent with `task.agentModelOverrides` in omp's config, or per invocation from `/agents`.

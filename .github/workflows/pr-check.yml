@@ -242,6 +242,8 @@ jobs:
           FORBIDDEN='
           background-agents docs/changelog.md docs/migration.md
           go-testing docs/changelog.md docs/migration.md
+          engram-convention.md docs/changelog.md docs/migration.md
+          docs/engram.md docs/changelog.md docs/migration.md
           '
 
           # Enumerate the in-scope files ONCE. A pathspec that matches nothing

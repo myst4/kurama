@@ -51,14 +51,12 @@ the guard would fall through to "outside the repo, allow" — fail-open. Where t
 steps disagree (a symlinked directory followed by `..`) the lexical answer is kept,
 which keeps the path inside the repo and therefore guarded.
 
-Both markers are on disk in **every** artifact-store mode. `.kurama/sdd/<name>/state.md`
-used to appear only when Engram was unreachable, so in the flagship configuration
-(Claude Code + Engram) state lived in Engram alone, no filesystem marker existed, and this
-guard silently never fired. The persistence contract now makes
-`.kurama/sdd/<change>/{state,verify-report,archive-report}.md` **mode-independent cycle
-markers** — harness infrastructure written in every mode, like `.kurama/skill-registry.md`
-— so both hooks see the same three files whichever store the project chose. `sdd-archive`
-writing `archive-report.md` is what retires the cycle; nothing else clears the guard.
+Both markers are always on disk. The hooks run outside the model and read only the
+filesystem, at fixed paths, so the persistence contract makes
+`.kurama/sdd/<change>/{state,verify-report,archive-report}.md` **cycle markers** —
+harness infrastructure written on every cycle, like `.kurama/skill-registry.md` — and
+both hooks see the same three files. `sdd-archive` writing `archive-report.md` is what
+retires the cycle; nothing else clears the guard.
 
 ### 2. Archive gate (no PASS, no archive)
 
@@ -86,12 +84,12 @@ a missing report or an unfilled template verdict counts as "not passing".
 
 Failing closed only works if a legitimately verified change can actually open the gate.
 The gate reads two paths and no others: `openspec/changes/<change>/verify-report.md` and
-`.kurama/sdd/<change>/verify-report.md`. It cannot query Engram. So `sdd-verify` writes the
-**complete** report to `.kurama/sdd/<change>/verify-report.md` in **every** mode — including
-`engram`, where the Engram save still happens and the disk copy is an additional mechanical
-mirror. Before that rule existed, the flagship configuration had the report in Engram only,
-the gate found nothing, and it blocked every legitimate archive while pointing at
-`KURAMA_ARCHIVE_OVERRIDE=1` — a fail-closed gate that fails on the happy path teaches the
+`.kurama/sdd/<change>/verify-report.md`. It runs outside the model and reads only the
+filesystem, at those fixed paths. So `sdd-verify` always writes the **complete** report to
+`.kurama/sdd/<change>/verify-report.md`, as a mechanical mirror of the artifact. Before
+that rule existed, the gate could find nothing, and it blocked every legitimate archive
+while pointing at `KURAMA_ARCHIVE_OVERRIDE=1` — a fail-closed gate that fails on the
+happy path teaches the
 model to disable it. A stub or summary is not enough: the gate parses the `### Verdict` line
 and the Content Binding `Tree-Hash:` line out of that exact file.
 
@@ -249,8 +247,8 @@ none of the gate literals.
     delta spec into the source of truth and writes `archive-report.md`, which retires the
     cycle for both hooks.
   - **Drop it**: delete `.kurama/sdd/<change>/` yourself (plus
-    `openspec/changes/<change>/` in `openspec`/`hybrid` mode). `.kurama/` is gitignored
-    harness state, so nothing tracked is lost — but you also lose that change's artifacts,
+    `openspec/changes/<change>/`). `.kurama/` is gitignored harness state, so
+    nothing tracked is lost — but you also lose that change's artifacts,
     so prefer finishing when the work still matters.
 
   Either way the guard steps aside as soon as no `state.md`-without-`archive-report.md`

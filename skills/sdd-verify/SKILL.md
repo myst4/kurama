@@ -19,7 +19,6 @@ Static analysis alone is NOT enough. You must execute the code.
 
 From the orchestrator:
 - Change name
-- Artifact store mode (`engram | openspec | hybrid`)
 - Pipeline settings propagated per phase (E6): `compliance_mode`, `tdd.enabled` (and
   `tdd.single_test_command` when enabled), and the verify commands (`test_command`,
   `build_command`, `coverage_threshold`). A propagated value WINS over any value read from
@@ -29,17 +28,16 @@ From the orchestrator:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-- **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks`. Save as `sdd/{change-name}/verify-report`.
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Save to `openspec/changes/{change-name}/verify-report.md`.
-- **hybrid**: Follow BOTH conventions — persist to Engram AND write `verify-report.md` to filesystem.
-- **EVERY mode, in addition**: write the full report to `.kurama/sdd/{change-name}/verify-report.md`. This is not a fallback and not conditional on the save above failing — it is the cycle marker `archive-gate.sh` reads. See Step 7 and `persistence-contract.md` → *Hook-visible cycle markers*.
+Read `openspec/changes/{change-name}/proposal.md`, `openspec/changes/{change-name}/specs/`, `openspec/changes/{change-name}/design.md` and `openspec/changes/{change-name}/tasks.md`, then save the report to `openspec/changes/{change-name}/verify-report.md`. Read and follow `skills/_shared/openspec-convention.md`.
+
+**In addition**: write the full report to `.kurama/sdd/{change-name}/verify-report.md`. It is a mirror of the artifact for the deterministic hooks — always written, never conditional — and it is the cycle marker `archive-gate.sh` reads. See Step 7 and `persistence-contract.md` → *Hook-visible cycle markers*.
 
 **Required artifacts**: `spec` (the compliance matrix cannot be built without it) and
 `tasks` (completeness cannot be checked without it) are REQUIRED. `proposal` and `design`
 refine the correctness and coherence checks; if absent, note the gap in `risks` and continue.
 
-**Missing required artifact (E2)**: if a REQUIRED artifact cannot be retrieved (search
-returns empty, or the observation/file is missing), STOP — do NOT verify against a partial
+**Missing required artifact (E2)**: if a REQUIRED artifact cannot be retrieved (its file is
+missing or unreadable), STOP — do NOT verify against a partial
 or fabricated baseline. Return the **Section D** envelope with `status: blocked`, name the
 missing artifact in `executive_summary`, and set `next_recommended` to the phase that
 produces it (`sdd-spec` for a missing spec, `sdd-tasks` for missing tasks).
@@ -74,11 +72,11 @@ Read tasks.md
 └── Flag: CRITICAL if core tasks incomplete, WARNING if cleanup tasks incomplete
 ```
 
-### Step 2a: Work Unit Evidence Audit (ALL modes — never conditional)
+### Step 2a: Work Unit Evidence Audit (never conditional)
 
 `sdd-apply` records a **Work Unit Evidence** block for every work unit BEFORE marking its tasks
 complete (its Step 3c: the focused test/check command and its exact result, the harness/runtime
-it ran under, and the rollback boundary). Audit those blocks here. This step runs in EVERY mode
+it ran under, and the rollback boundary). Audit those blocks here. This step ALWAYS runs
 and is **independent of `compliance_mode` and of `tdd.enabled`** — a project with TDD off is
 precisely where this block is the ONLY execution evidence that exists.
 
@@ -112,7 +110,7 @@ Record the findings in the report's **Work Unit Evidence Audit** section (Step 8
 
 **How this composes with the TDD audit (Step 6a).** Both run; neither replaces the other, and
 neither is skipped because the other ran. This step asks *was anything executed at all, and can
-this unit be undone* — mandatory in every mode, and CRITICAL at its worst. Step 6a asks *was the
+this unit be undone* — always mandatory, and CRITICAL at its worst. Step 6a asks *was the
 test written FIRST, and does it trace to a MUST scenario* — only when `tdd.enabled`, and capped
 at WARNING. With TDD on you run BOTH over the same apply report: Step 6a's RED-evidence check
 adds scenario→test traceability ON TOP of this block, so a unit can satisfy this gate (it ran
@@ -172,9 +170,6 @@ How the result is graded — this is a GATE, so the mapping is fixed:
   an ERROR is a defect that merges into the source of truth unchanged.
 - **Every `WARNING:` line is a WARNING** in the same section. It does not block.
 - **Exit 0 with no output** → record "delta spec structure: clean (`lint-spec.sh`)".
-- **In `engram` mode** there is no `openspec/changes/` directory: write the retrieved delta
-  spec artifact to a temp file (`mktemp "${TMPDIR:-/tmp}/sdd-verify-spec.XXXXXX.md"`) and lint
-  that path. The check is not filesystem-mode-only.
 - **NEITHER path exists** → the linter is not installed in this harness. Report it as a
   WARNING naming the path — *"the delta-spec linter (`_shared/lint-spec.sh`) is not present;
   spec structure was checked by reading only"* — and continue with the rest of verification.
@@ -210,9 +205,7 @@ Search for test files related to the change
 
 `compliance_mode` decides how a MUST scenario with no passing test is treated. Resolve it:
 
-- **openspec / hybrid**: read `rules.verify.compliance_mode` from `openspec/config.yaml`.
-- **engram / none**: read `compliance_mode` from the pipeline settings the orchestrator
-  propagated in your launch prompt (its home is the `sdd-init/{project}` context artifact).
+- Read `rules.verify.compliance_mode` from `openspec/config.yaml`.
 - A value propagated in the launch prompt always WINS over a stale file value.
 - If unresolved anywhere, default to `behavioral`.
 
@@ -231,7 +224,7 @@ for project commands, shared with `sdd-apply` and `skills/tdd`) and execute it:
 
 ```
 Resolve test command (priority order):
-├── Propagated rules.verify.test_command (highest priority; the only source in engram mode)
+├── Propagated rules.verify.test_command (highest priority)
 ├── Otherwise openspec/config.yaml → rules.verify.test_command
 └── Neither is set — NEVER guess a command from the project's files:
     · static mode     → skip execution; scenarios rest on static evidence (Step 3). Report as WARNING.
@@ -262,7 +255,7 @@ Resolve the build command the same way — configured, never detected:
 
 ```
 Resolve build command (priority order):
-├── Propagated rules.verify.build_command (highest priority; the only source in engram mode)
+├── Propagated rules.verify.build_command (highest priority)
 ├── Otherwise openspec/config.yaml → rules.verify.build_command
 └── Neither is set → skip and report as WARNING (never CRITICAL), naming `/sdd-init` as the
     fix. Do NOT infer a build command from the project's manifests — a guessed build is
@@ -285,8 +278,7 @@ not as a missing capability.
 ### Step 5d: Coverage Validation (Real Execution — if threshold configured)
 
 Resolve `coverage_threshold` the same way as the other verify settings: a value propagated
-in your launch prompt WINS (it is the only source in `engram` mode, which have no
-`openspec/config.yaml`), else read `rules.verify.coverage_threshold` from `openspec/config.yaml`.
+in your launch prompt WINS, else read `rules.verify.coverage_threshold` from `openspec/config.yaml`.
 Run with coverage only if the resolved threshold is set (non-zero):
 
 ```
@@ -403,10 +395,10 @@ rm -rf -- "$tmp_dir"
 
 Record `tree_hash` and the changed-file list in the report's **Content Binding** section
 (Step 8), and SURFACE `tree_hash` in your return envelope (`Reviewed-Tree: {tree_hash}`) so the
-orchestrator can stamp it into the `sdd/{change-name}/state` artifact. The report itself lands on
-disk in every mode (Step 7), so `sdd-archive` Step 0 and `archive-gate.sh` both read the recorded
+orchestrator can stamp it into `openspec/changes/{change-name}/state.yaml`. The report itself lands on
+disk (Step 7), so `sdd-archive` Step 0 and `archive-gate.sh` both read the recorded
 hash from the `Tree-Hash:` line of `.kurama/sdd/{change-name}/verify-report.md` (or the `openspec/`
-copy); the state artifact carries the same value as a cross-check.
+copy); the state file carries the same value as a cross-check.
 
 **This pathspec and procedure MUST stay byte-identical to sdd-archive Step 0 and
 `examples/claude-code/hooks/archive-gate.sh`** — any drift makes every archive read as stale.
@@ -415,24 +407,20 @@ copy); the state artifact carries the same value as a cross-check.
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `verify-report`
-- topic_key: `sdd/{change-name}/verify-report`
-- type: `architecture`
-- capture_prompt: `false` — the verify report is an automated SDD artifact, not a human note; never capture the user prompt (see `skills/_shared/engram-convention.md`)
+- path: `openspec/changes/{change-name}/verify-report.md`
 
-**Then, in EVERY mode, also write the report to disk at
-`.kurama/sdd/{change-name}/verify-report.md`.** This is MANDATORY and unconditional — not a
-fallback for a failed `mem_save`, and not something `engram` mode skips:
+**Then also write the report to disk at `.kurama/sdd/{change-name}/verify-report.md`.** This is
+a mirror for the deterministic hooks — MANDATORY and unconditional, always written:
 
-- `archive-gate.sh` is a deterministic hook. It cannot query Engram; it looks for
+- `archive-gate.sh` is a deterministic hook. It looks for
   `openspec/changes/{change-name}/verify-report.md` or
-  `.kurama/sdd/{change-name}/verify-report.md` and nothing else. With the report only in
-  Engram the gate finds nothing and blocks EVERY archive, and its printed remedy points at
-  `KURAMA_ARCHIVE_OVERRIDE=1` — bypassing the pipeline's most important gate. Writing this file is
-  what keeps the flagship configuration (Claude Code + Engram) working.
+  `.kurama/sdd/{change-name}/verify-report.md` and nothing else. Without a report at one of
+  those paths the gate finds nothing and blocks EVERY archive, and its printed remedy points at
+  `KURAMA_ARCHIVE_OVERRIDE=1` — bypassing the pipeline's most important gate.
 - Write the **complete** report from Step 8 — same bytes as the persisted artifact, not a summary.
   The gate parses the first non-empty line after the `### Verdict` heading and the
   `Tree-Hash:` line inside **Content Binding**; a stub or a truncated copy reads as "not passing".
-- `.kurama/` is harness state: gitignored, exempt from the persistence-mode gates
+- `.kurama/` is harness state: gitignored, never an artifact
   (`persistence-contract.md` → *Hook-visible cycle markers*), and excluded from the Step 6b
   pathspec, so writing it can never invalidate the receipt you just stamped.
 - If this write fails, do NOT fail the phase — record it in `risks` naming the path, and say the
@@ -579,10 +567,10 @@ Also surface the same hash to the orchestrator in the return envelope so it is s
 - ALWAYS execute tests when a test runner resolves — in `behavioral` mode, static analysis alone is not verification
 - In `behavioral` mode, a spec scenario is only COMPLIANT when a test that covers it has PASSED, and a MUST scenario with no passing test is CRITICAL
 - In `static` mode, a scenario with structural evidence is COMPLIANT (static) and a missing test is a WARNING, not a blocker; a test that exists but FAILS stays CRITICAL in both modes
-- ALWAYS run the **Work Unit Evidence Audit** (Step 2a) in EVERY mode — it is independent of `compliance_mode` and of `tdd.enabled`, and it is never skipped. A unit marked `[x]` with no evidence block, or with a claimed pass and no recorded command, is a WARNING at minimum and CRITICAL when that unit touched code; a rollback boundary that is missing or `N/A` is a WARNING; a recorded command whose recorded result is a FAILURE under an `[x]` is CRITICAL in both compliance modes
+- ALWAYS run the **Work Unit Evidence Audit** (Step 2a) — it is independent of `compliance_mode` and of `tdd.enabled`, and it is never skipped. A unit marked `[x]` with no evidence block, or with a claimed pass and no recorded command, is a WARNING at minimum and CRITICAL when that unit touched code; a rollback boundary that is missing or `N/A` is a WARNING; a recorded command whose recorded result is a FAILURE under an `[x]` is CRITICAL in both compliance modes
 - Step 2a and Step 6a COMPOSE, they do not substitute: with `tdd.enabled` true both run over the same apply report, the TDD audit adding scenario → test traceability and RED evidence on top of the always-on evidence block. Never skip one because the other ran, and never downgrade a Step 2a CRITICAL because TDD-audit findings are capped at WARNING
 - When `tdd.enabled` resolves true (Step 6a — same precedence as `compliance_mode`), run the two TDD-audit checks (scenario → test traceability for MUST scenarios; RED evidence in the apply report). Missing either is a WARNING labeled "test-after detected" — NEVER CRITICAL, and independent of `compliance_mode`. When `tdd.enabled` is false, skip Step 6a entirely
-- **ALWAYS run `skills/_shared/lint-spec.sh` over the change's delta specs (Step 3a), in EVERY mode** — resolve it with `test -f` (never a finder). Each `ERROR:` line is a CRITICAL issue quoted verbatim in the report; each `WARNING:` line is a WARNING; a missing script is a WARNING naming the path, never a silent pass. This is the mechanical half of spec review — structure is checkable, and a defect that reaches `sdd-archive` merges into `openspec/specs/` unchanged
+- **ALWAYS run `skills/_shared/lint-spec.sh` over the change's delta specs (Step 3a)** — resolve it with `test -f` (never a finder). Each `ERROR:` line is a CRITICAL issue quoted verbatim in the report; each `WARNING:` line is a WARNING; a missing script is a WARNING naming the path, never a silent pass. This is the mechanical half of spec review — structure is checkable, and a defect that reaches `sdd-archive` merges into `openspec/specs/` unchanged
 - Detect the test runner via `skills/_shared/test-runners.md` (Step 5b) — the single runner table shared with `sdd-apply` and `skills/tdd`
 - Stamp a **Content Binding** receipt (Step 6b): a `Tree-Hash` computed over a THROWAWAY git index (`GIT_INDEX_FILE` inside a `mktemp -d` directory — never the real index, and never an unlinked `mktemp` path), excluding `openspec/` and `.kurama/`. Record it in the report's Content Binding section AND surface it in the return envelope (`Reviewed-Tree: {tree_hash}`) so the orchestrator stamps it into the state artifact. sdd-archive Step 0 and the archive-gate hook recompute it and block on a mismatch (STALE — re-run sdd-verify). Keep the pathspec byte-identical across all three
 - If a REQUIRED artifact (`spec`, `tasks`) cannot be retrieved, return `status: blocked` naming it (E2) — never verify against a missing baseline
@@ -593,6 +581,6 @@ Also surface the same hash to the orchestrator in the return envelope so it is s
 - SUGGESTIONS = improvements, not blockers
 - DO NOT fix any issues — only report them. The orchestrator decides what to do.
 - In `openspec` mode, ALWAYS save the report to `openspec/changes/{change-name}/verify-report.md` — this persists the verification for sdd-archive and the audit trail
-- In EVERY mode, ALWAYS also write the full report to `.kurama/sdd/{change-name}/verify-report.md` (Step 7). The archive gate reads only the filesystem; skipping this write blocks every legitimate archive and pushes the model toward the override env var
+- ALWAYS also write the full report to `.kurama/sdd/{change-name}/verify-report.md` (Step 7). The archive gate reads only the filesystem; skipping this write blocks every legitimate archive and pushes the model toward the override env var
 - Apply any `rules.verify` from `openspec/config.yaml`
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.

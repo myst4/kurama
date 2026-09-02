@@ -57,6 +57,60 @@ the code you rolled back to.
   `setup.sh --agent opencode --opencode-mode …` command that makes the receipt
   re-syncable.
 
+## 6.3.0 — the artifact store collapses to files
+
+Engram was an **optional** third-party persistence engine. It is gone from Kurama
+entirely. Artifacts are files under `openspec/`, always — that is the only store,
+and there is no setting to choose it. See
+[docs/persistence.md](persistence.md).
+
+**What disappears.**
+
+- The `artifact_store.mode` key and its three modes (`engram`, `openspec`,
+  `hybrid`). There is no enum left to set.
+- The installer flags `--with-engram` / `--without-engram`. `setup.sh` now answers
+  `Unknown option` — a stale flag in a script or CI job stops the install rather
+  than silently doing nothing. Delete the flag.
+- The Engram MCP registration setup used to write into `.mcp.json`,
+  `~/.claude.json`, `opencode.json` and `~/.codex/config.toml`. Nothing is
+  registered any more.
+- The `gentle-engram` package in the Pi package stack, and the one-time
+  `pi-engram init` step. The stack is now 6 `pi install` packages.
+- The `engram` and `engram_mcp` receipt keys. New receipts do not carry them; an
+  old receipt that still does is simply ignored.
+- The `doctor.sh` Engram checks (binary present, MCP registered) and the Engram
+  toggle in the setup TUI.
+- `skills/_shared/engram-convention.md`, deleted from the repo.
+- The `mem_*` entries in the shipped Claude Code sub-agent `tools:` lists.
+
+**The one-line move for existing projects.** An `openspec/config.yaml` that still
+carries `artifact_store.mode` is **inert** — nothing reads it. On the next
+`sdd-new` / `sdd-continue`, the orchestrator prints one line saying the key is
+unsupported since 6.3.0, that artifacts are files under `openspec/`, and that you
+can move `.kurama/sdd/<change>/*.md` to `openspec/changes/<change>/` if you want
+the old ones — then the cycle proceeds normally. **Nothing rewrites your config**,
+and no migration tooling ships. Delete the key by hand whenever you feel like it,
+or leave it.
+
+**What stays, untouched.**
+
+- `.kurama/sdd/{change}/state.md`, `verify-report.md` and `archive-report.md` —
+  the three machine-local, gitignored cycle markers the two Claude Code hooks read.
+  They are not artifacts and were never gated by the mode.
+- `.kurama/skill-registry.md`.
+- `MEMORY.md` and the `sdd-learn` skill that curates it — the committed team
+  knowledge file is unrelated to Engram and behaves exactly as before.
+- The `## Key Learnings` section that closes every phase's return envelope.
+
+**Nothing is uninstalled automatically.** If you had the Engram MCP server
+registered, `scripts/uninstall.sh` no longer removes it — it only removes what the
+receipt records, and new receipts record no Engram registration. To get rid of it,
+**remove the `engram` MCP entry from your client config by hand** (`~/.claude.json`
+or `<repo>/.mcp.json`, `~/.config/opencode/opencode.json` or
+`<repo>/opencode.json`, `[mcp_servers.engram]` in `~/.codex/config.toml`). That is
+the one manual step. Leaving it registered is harmless — Kurama never calls it —
+but nothing will clean it up for you.
+
 ## Breaking change: Windows is no longer supported
 
 Kurama runs on **macOS and Linux**. `scripts/setup.ps1` and `scripts/install.ps1`
@@ -166,6 +220,10 @@ A future upstream sync cannot quietly restore it: `go-testing` is now on the
 fails any PR whose docs advertise it again.
 
 ## Breaking change: the `none` artifact-store mode was removed
+
+> **Superseded in 6.3.0**, which removed the enum entirely — see
+> [the artifact store collapses to files](#630--the-artifact-store-collapses-to-files).
+> This section is kept for anyone upgrading from a 5.x install.
 
 The artifact-store enum is now `engram | openspec | hybrid`. `none` — persist no
 SDD artifacts, return them inline — no longer exists.

@@ -7,9 +7,6 @@ tools:
   - find
   - write
   - edit
-  - memory_search
-  - memory_get
-  - memory_add
 effort: medium
 ---
 
@@ -32,7 +29,7 @@ Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/
 
 ## Settings & TDD propagation
 
-Honor the pipeline settings the orchestrator propagated in your launch prompt (`artifact_store.mode`, `compliance_mode`, `tdd.enabled`, and `tdd.single_test_command` when enabled). A propagated value ALWAYS wins over any value read from `openspec/config.yaml` or the `sdd-init/{project}` context artifact. Resolve `tdd.enabled` with the same precedence as `compliance_mode`, with NO silent heuristics — existing test files never activate TDD. When `tdd.enabled` resolves true, expand each behavior task into `n.x RED` / `n.y GREEN` / `n.z REFACTOR` subtasks carrying spec scenario IDs, following `skills/tdd/SKILL.md`.
+Honor the pipeline settings the orchestrator propagated in your launch prompt (`compliance_mode`, `tdd.enabled`, and `tdd.single_test_command` when enabled). A propagated value ALWAYS wins over any value read from `openspec/config.yaml`. Resolve `tdd.enabled` with the same precedence as `compliance_mode`, with NO silent heuristics — existing test files never activate TDD. When `tdd.enabled` resolves true, expand each behavior task into `n.x RED` / `n.y GREEN` / `n.z REFACTOR` subtasks carrying spec scenario IDs, following `skills/tdd/SKILL.md`.
 
 ## Return contract
 
@@ -40,4 +37,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+Artifacts are files under `openspec/`: use the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).

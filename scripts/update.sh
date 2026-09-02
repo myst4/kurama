@@ -426,9 +426,9 @@ EOF
 
         # #65: files[] is not the whole install. Kurama also MERGES into files it
         # does not own — the orchestrator block in prompts[], the hooks block in
-        # settings[], the sdd-* agents in opencode_configs[], the MCP entry in
-        # engram_mcp[], the logo in tui_plugins[], the machine-local block in
-        # gitignore[] — and the real update re-merges every one of them. None is
+        # settings[], the sdd-* agents in opencode_configs[], the logo in
+        # tui_plugins[], the machine-local block in gitignore[] — and the real
+        # update re-merges every one of them. None is
         # byte-comparable against a repo source (the FILE is the user's; only the
         # block inside it is ours), so this preview genuinely cannot report drift
         # for them. What it must not do is stay silent: a headline counted over
@@ -437,7 +437,7 @@ EOF
         # files[] at all, and is the surface #22 was about — that was a confident
         # wrong answer to the one question --dry-run is asked.
         local merged=0 mkey mcount
-        for mkey in settings prompts opencode_configs engram_mcp tui_plugins; do
+        for mkey in settings prompts opencode_configs tui_plugins; do
             mcount="$(manifest_json_array "$manifest" "$mkey" | awk 'NF' | wc -l | tr -d ' ')"
             merged=$((merged + mcount))
         done
@@ -462,15 +462,6 @@ EOF
     local with_logo=false
     if manifest_has_startup_logo "$manifest"; then with_logo=true; fi
 
-    # Same story for Engram, and the same mechanism as the mode/profile loss
-    # fixed in #22: the delegated run is --non-interactive, where ask_engram
-    # defaults to "no", so the FIRST update re-stamped the receipt engram: no and
-    # the user's opt-in was gone — silently, on a run whose whole job is to
-    # preserve the install. The receipt records the choice; re-pass it. Read once,
-    # up front: each setup.sh run below rewrites the receipt.
-    local with_engram=false
-    if [ "$(manifest_field "$manifest" "engram")" = "yes" ]; then with_engram=true; fi
-
     for slug in "${slugs[@]}"; do
         local -a args=(--agent "$slug" --non-interactive --without-pi-packages)
         if [ "$rscope" = "project" ]; then
@@ -479,12 +470,6 @@ EOF
         # Carry an installed startup logo across the re-sync (opt-in in setup.sh).
         if $with_logo; then
             args+=(--with-logo)
-        fi
-        # Carry the recorded Engram choice. Only the opt-in is re-passed: "no" is
-        # already what --non-interactive resolves to, and --without-engram would
-        # add nothing but noise.
-        if $with_engram; then
-            args+=(--with-engram)
         fi
         # Carry the recorded OpenCode mode + profile (#22). The profile is passed
         # in its BARE form on purpose: "NAME:provider/model" is documented as an

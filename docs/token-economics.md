@@ -39,7 +39,7 @@ All measurements derived from real file sizes (bytes ÷ 3.5 chars/token for mark
 | System prompt (CLAUDE.md) | 7,554 |
 | AGENTS.md workspace rules | 651 |
 | Skill file (range across all skills) | 1,796–2,812 |
-| Engram skill registry lookup | 1,028 |
+| Skill registry lookup | 1,028 |
 | Launch prompt + result envelope | 300–500 |
 | **Total per delegation** | **11,329–12,545** |
 
@@ -68,8 +68,8 @@ crossover(N_deps) = (system_prompt + skill_file + N_deps × avg_dep_size) / avg_
 
 Totals are the per-event cost multiplied by the event-count range, not a
 separate estimate: inline is `2–4 × 15,000–55,000T = 30,000–220,000T`;
-delegation is `0–1 × ~4,500T = 0–4,500T`. Delegation recovery uses engram
-references (~300T) instead of re-reading files (~3,000–15,000T per artifact).
+delegation is `0–1 × ~4,500T = 0–4,500T`. Delegation recovery passes artifact
+references (~300T) instead of the artifact contents (~3,000–15,000T per artifact).
 
 ---
 
@@ -99,7 +99,7 @@ Six changes reduced fixed overhead ~38% per full SDD pipeline:
 | 3 | Skill registry pre-resolution | ~11,400T | Orchestrator resolves once; sub-agents skip search |
 | 4 | Common boilerplate extraction | ~4,200T | Shared file for return envelope + upsert notes |
 | 5 | Orchestrator doc compression | ~4,200 chars | Tables over prose for lookup data |
-| 6 | Parallel engram reads | ~800T | Batch `mem_search`/`mem_get_observation` calls |
+| 6 | Parallel artifact reads | ~800T | Batch the retrieval calls instead of issuing them sequentially |
 
 ---
 
@@ -146,7 +146,7 @@ Three independent AI reviewers evaluated the optimizations across three rounds.
 
 2. **Delegation doesn't make sub-agents smarter — it makes their failure domain smaller.** A sub-agent that fails affects only itself; inline failure corrupts orchestrator state.
 
-3. **Engram passes references, not content.** Each SDD artifact reference costs ~50T to pass; passing the content inline would cost 3,000–15,000T per artifact.
+3. **Phases pass references, not content.** Each SDD artifact reference costs ~50T to pass; passing the content inline would cost 3,000–15,000T per artifact.
 
 4. **System prompt size is the dominant variable — and this lever has now been pulled.** The orchestrator prompt went from 28.5KB (~8,100T) to 19.5KB (~5,570T) by moving four conditionally-relevant procedures into `_shared` reference files loaded on demand: the SDD session protocol (preflight, entry routing, auto gatekeeper), the review lens triage, the phase I/O table, and the Kanban module detail. Nothing was deleted — each block has exactly one canonical home, and an install test enforces both the pointers and a 24KB regression budget. By the crossover formula above, the drop moves delegation break-even from ~8 files toward ~6, widening the class of tasks where delegation wins.
 

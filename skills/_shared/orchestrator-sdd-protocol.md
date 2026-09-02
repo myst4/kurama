@@ -13,32 +13,29 @@ file carries the procedure.
 
 Before ANY SDD phase runs in a session — `/sdd-new`, `/sdd-ff`, `/sdd-continue`, the
 executor skills, or a natural-language equivalent ("use SDD to add X", "do it with
-SDD") — RESOLVE the Preflight block of three values.
+SDD") — RESOLVE the Preflight block of two values.
 
 **Resolving does NOT mean asking:**
 
-- **Silent path (the normal case)**: read the persisted settings (`openspec/config.yaml`
-  or the `sdd-init/{project}` settings bundle). If ALL THREE values resolve from there,
+- **Silent path (the normal case)**: read the persisted settings
+  (`openspec/config.yaml`). If BOTH values resolve from there,
   DO NOT ask anything — print a one-line status in the user's language (e.g.
-  "Preflight: supervisado · openspec · 400 — decime si querés cambiar algo
+  "Preflight: supervisado · 400 — decime si querés cambiar algo
   esta sesión") and start working. `sdd-init` already asked these once; re-asking
   answered questions is friction, not safety.
 - **Ask ONLY the missing pieces**: if some values have no persisted answer (project
   never initialized, or a setting absent), ask ONLY those, in one grouped prompt.
 - **Explicit override**: if the user asks to change the setup ("preflight", "cambiá el
   ritmo", "usá auto"), ask or apply just that change for the session.
-- **Artifact store is PROJECT-level, not session-level**: once `sdd-init` set it, never
-  re-offer it in a preflight. Switching stores mid-project fragments artifacts — only
-  change it on an explicit user request, with that warning.
+- **The artifact store is NOT a preflight value.** Artifacts are files under `openspec/`,
+  always. There is nothing to ask and nothing to switch.
 
-The three values (when something does need asking):
+The two values (when something does need asking):
 
 1. **Pace** — Interactive or Automatic. This IS `execution_mode`: Interactive →
    `supervised`, Automatic → `auto`. Same value as *Execution Mode* in the orchestrator
    prompt, not a parallel concept.
-2. **Artifact store** — OpenSpec, Engram, or Both (`hybrid`). Offer only file-safe
-   choices when Engram is not callable.
-3. **Review budget** — maximum authored changed lines before stopping for
+2. **Review budget** — maximum authored changed lines before stopping for
    reviewer-burden approval (default `400`), feeding the Review Workload Guard.
 
 **Delivery is NOT a preflight value.** How work is partitioned into PRs is decided at PR
@@ -47,10 +44,10 @@ from a `git diff` measurement against the base — a measurement of the real cha
 session setting chosen before the change exists. Do not resolve, ask for, or forward a
 delivery/chaining value here: nothing downstream reads one.
 
-**Rendering.** On Claude Code, use the native `AskUserQuestion` tool with all three
-groups in ONE call so they render as a single interactive prompt — never three separate
+**Rendering.** On Claude Code, use the native `AskUserQuestion` tool with both
+groups in ONE call so they render as a single interactive prompt — never two separate
 calls, never the menu pasted as chat text. On harnesses without that primitive, ask ONE
-grouped text question covering the same three groups. Match the user's conversation
+grouped text question covering the same two groups. Match the user's conversation
 language and the resolved persona (*Session identity* below) for the labels: this UI is
 orchestrator conversation, not a technical artifact. Never show internal codes or canonical values in the UI; map the
 chosen labels to canonical values internally after the prompt returns.
@@ -58,7 +55,7 @@ chosen labels to canonical values internally after the prompt returns.
 **Precedence.** A value the user chose THIS session (grouped prompt or explicit
 override) wins over the persisted one, for this session only. Persisted settings SATISFY
 the preflight on their own — that is the point of `sdd-init`. Cache the resolved block
-for the session and forward the three values in every phase prompt.
+for the session and forward both values in every phase prompt.
 
 ### Session identity (resolved, never asked)
 
@@ -69,11 +66,11 @@ this file. This section is the full rules for values already in hand; it is not 
 
 Neither is a fourth preflight question: they NEVER enter the grouped prompt, never block, and
 never gate a phase. An unresolved one degrades silently — `neutral`, or no name at all. The
-rule above stands unchanged: when the three values resolve from the persisted settings, the
+rule above stands unchanged: when both values resolve from the persisted settings, the
 session starts without asking anything, whatever these two resolve to.
 
-**`persona`** — the key is read from the SAME settings home the three values come from
-(`openspec/config.yaml`, or the `sdd-init/{project}` settings bundle in engram mode).
+**`persona`** — the key is read from the SAME settings home both values come from
+(`openspec/config.yaml`).
 
 - **Absent → `neutral`, and `neutral` means DO NOTHING.** Do not read
   `skills/_shared/personas.md`, do not mention personas, do not add a persona line to the
@@ -117,13 +114,13 @@ commit message.
 every message, not inside an artifact. A name in every turn reads as a tic, not as attention.
 
 **Neither value is forwarded into phase prompts.** They are cached for the session like the
-three values, but phases exist to produce artifacts, and artifacts are outside a persona's
+preflight values, but phases exist to produce artifacts, and artifacts are outside a persona's
 scope (`personas.md` → *Conversation only*).
 
 ### Artifact existence checks (fail-loud)
 
-Preflight resolves by reading artifacts — `openspec/config.yaml`, the `sdd-init/{project}`
-bundle, the `_shared/` contracts. **"Absent" and "unreadable" are different findings and must
+Preflight resolves by reading artifacts — `openspec/config.yaml` and the `_shared/`
+contracts. **"Absent" and "unreadable" are different findings and must
 never collapse into the same conclusion.** A missing artifact means the project was never
 initialized; a failed read means the CHECK is broken. Treating the second as the first
 degrades the whole pipeline silently: it re-asks answered questions, or worse, runs a phase
@@ -149,21 +146,19 @@ with defaults the user never chose.
   results to the user in their language. Never fall through to "not initialized", never
   proceed on defaults, and never let a phase launch on the unverified reading.
 
-## Cycle State Marker (write it in EVERY mode)
+## Cycle State Marker (always)
 
 After EVERY phase transition, write/update `.kurama/sdd/{change-name}/state.md`. This is
-YOUR write — no phase skill does it for you, and no mode exempts you from it: `engram`,
-`openspec`, and `hybrid` all write this file *in addition to* the mode's own state
-persistence (`persistence-contract.md` → *Hook-visible cycle markers* and *State
-Persistence (Orchestrator)*).
+YOUR write — no phase skill does it for you — *in addition to*
+`openspec/changes/{change-name}/state.yaml` (`persistence-contract.md` → *Hook-visible
+cycle markers* and *State Persistence (Orchestrator)*).
 
-It is not bookkeeping. `orchestrator-write-guard.sh` runs outside the model and can read
-only the filesystem — it cannot query Engram — so this file is the ONLY thing that tells
-it a cycle is active. Skip it in `engram` mode and the guard silently never engages.
+It is not bookkeeping. `orchestrator-write-guard.sh` runs outside the model, reads only
+the filesystem, and looks at this one fixed path — so this file is the ONLY thing that
+tells it a cycle is active. Skip it and the guard silently never engages.
 
-- Content mirrors the state artifact: `change`, `phase` (the phase just completed),
-  `artifact_store.mode`, `artifacts`, `tasks_progress`, `last_updated`
-  (`engram-convention.md` → the `sdd/{change-name}/state` artifact).
+- Content mirrors `state.yaml`: `change`, `phase` (the phase just completed),
+  `artifacts`, `tasks_progress`, `last_updated`.
 - It is also the recovery floor after a compaction, and what `scripts/sdd-status.sh`
   reads to report the cycle.
 - It stays until `sdd-archive` writes `.kurama/sdd/{change-name}/archive-report.md`,
@@ -202,10 +197,8 @@ Checks (every phase):
 - **Contract conformance** — the envelope carries `status`, `executive_summary`,
   `artifacts`, `next_recommended`, `risks`, and `skill_resolution`, and `status` is
   `success` (not `partial` or `blocked`, and no verify FAIL).
-- **Artifact existence** — the declared artifact is actually retrievable from the active
-  backend; read it back (engram: `mem_search` + `mem_get_observation` on the topic key;
-  openspec: read the file) using the fail-loud primitives of *Artifact existence checks*
-  above. A read that ERRORS is a broken check, not a missing artifact: re-verify with a
+- **Artifact existence** — the declared artifact file is actually there; read it back
+  using the fail-loud primitives of *Artifact existence checks* above. A read that ERRORS is a broken check, not a missing artifact: re-verify with a
   second method before ruling. A phase that claims success but produced no retrievable
   artifact FAILS the gate.
 - **No hallucination** — spot-check the concrete claims; every cited path, symbol, or
@@ -235,4 +228,4 @@ fix. Never advance dependent phases on a failed gate — a bad artifact compound
 downstream.
 
 This gate runs on top of the Review Workload Guard and lens selection; it never relaxes
-them and never auto-marks anything reviewed in engram.
+them and never auto-marks anything reviewed.

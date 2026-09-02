@@ -36,8 +36,8 @@ openspec/
 ## The `{change-name}`
 
 `{change-name}` is the change's kebab-case slug, and it is the SAME string everywhere the change is
-keyed: the paths below, the Engram topic keys (`sdd/{change-name}/…`), the `.kurama/sdd/{change-name}/`
-fallback directory, the phase envelopes and `state.md`.
+keyed: the paths below, the `.kurama/sdd/{change-name}/` cycle-marker directory, the phase
+envelopes and `state.md`.
 
 - **The cycle is issue-linked** — a kanban card is attached, or the request named an issue (`#N`, a
   GitHub URL) → the name is **`{issue}-{slug}`**: `22-nodemaven-gateway-provider`. The number first,
@@ -124,8 +124,7 @@ way that is safe to automate: the delta's block wins in full.
 
 The consequence is the rule. A five-scenario requirement whose author changes one scenario and
 writes only that scenario archives as a one-scenario requirement: the other four are deleted from
-the source of truth, silently, recoverable only from git history — and in `engram` mode, not
-recoverable at all. That is why the writer MUST copy the full block before editing it
+the source of truth, silently, recoverable only from git history. That is why the writer MUST copy the full block before editing it
 (`sdd-spec` → *MODIFIED Requirements Workflow*) and why the merger MUST NOT write through a
 MODIFIED block that drops scenarios the delta does not account for (`sdd-archive` → Step 2,
 *Merge preservation readback*).
@@ -173,10 +172,9 @@ exists) flags such a scenario CRITICAL — a passing test is the only proof of b
 compliance. `static` downgrades it to WARNING and lets compliance rest on static
 structural evidence, so a cycle can close in projects without test infrastructure; a
 test that exists but FAILS is still CRITICAL in both modes. `sdd-init` picks the default
-by detecting test infra. This key is the settings home for `openspec`/`hybrid` mode; in
-`engram` mode the same setting lives in the `sdd-init/{project}` context artifact, and
-the orchestrator propagates it (with the other pipeline settings) into every phase
-prompt, where a propagated value wins over a stale file value.
+by detecting test infra. This key is the settings home; the orchestrator propagates it
+(with the other pipeline settings) into every phase prompt, where a propagated value wins
+over a stale file value.
 
 `execution_mode` (`supervised` | `auto`) controls whether the orchestrator halts at the human
 decision gates. `supervised` (the default) makes the orchestrator STOP and ask for a decision at
@@ -184,10 +182,9 @@ each human gate — after `propose`, on a `sdd-verify` FAIL, and before `archive
 orchestrator continue through those gates without asking, halting ONLY when a phase returns
 `status: blocked` or `sdd-verify` reports FAIL/CRITICAL (archive is still never auto-run — it
 always needs an explicit go-ahead). `sdd-init` asks for the mode at initialization (default
-`supervised`). This top-level key is the settings home for `openspec`/`hybrid` mode; in `engram`
-mode the same setting lives in the `sdd-init/{project}` context artifact, and the orchestrator
-propagates it (with the other pipeline settings) into every phase prompt, where a propagated value
-wins over a stale file value (same precedence as `compliance_mode` and `tdd`). `sdd-ff` always
+`supervised`). This top-level key is the settings home; the orchestrator propagates it (with the
+other pipeline settings) into every phase prompt, where a propagated value wins over a stale file
+value (same precedence as `compliance_mode` and `tdd`). `sdd-ff` always
 fast-forwards its phases in `auto` regardless of this setting — fast-forwarding IS the auto behavior.
 
 The top-level `tdd` block is the single switch for the OPTIONAL TDD module. It holds
@@ -197,11 +194,9 @@ ONLY activator of the RED → GREEN → REFACTOR workflow — there are NO silen
 suggestion). `single_test_command` is the fast invocation that runs ONE test/scenario to
 keep the RED cycle quick; the full-suite `test_command`, `build_command`, and
 `coverage_threshold` stay in `rules.verify` (they are needed with TDD disabled too — the
-`tdd` block NEVER absorbs them). This block is the settings home for `openspec`/`hybrid`
-mode; in `engram` mode the same `tdd.enabled` / `tdd.single_test_command` settings live in
-the `sdd-init/{project}` context artifact, and the orchestrator propagates them into every
-phase prompt, where a propagated value wins over a stale file value (same precedence as
-`compliance_mode`). `sdd-tasks`, `sdd-apply`, and `sdd-verify` all resolve `tdd.enabled`
+`tdd` block NEVER absorbs them). This block is the settings home; the orchestrator
+propagates these keys into every phase prompt, where a propagated value wins over a stale
+file value (same precedence as `compliance_mode`). `sdd-tasks`, `sdd-apply`, and `sdd-verify` all resolve `tdd.enabled`
 this way, so planning, implementation, and audit always agree on one mode. See
 `skills/tdd/SKILL.md` for the cycle contract and `skills/_shared/test-runners.md` for the
 runner table.
@@ -221,8 +216,7 @@ merge gate), `stages` (each canonical stage — `backlog`, `ready`, `in_progress
 `in_review`, `done` — mapped to the board's REAL Status option id; option names are never
 hardcoded, and only these 5 stages are managed — any other board column is ignored), and
 the OPTIONAL `size_field_id` + `sizes` map (captured only when the board has a Size field).
-This block is the settings home for `openspec`/`hybrid` mode; in `engram` mode the same
-`kanban` keys live in the `sdd-init/{project}` context artifact. The orchestrator reads
+This block is the settings home for the `kanban` keys. The orchestrator reads
 them once per session and moves each issue's card inline at every phase boundary (`gh` is
 "Bash for state"); phase executors never touch the board. Kanban `gh` failures are
 WARNINGs that never block the cycle — the board is bookkeeping — except the final
@@ -270,16 +264,14 @@ rules:
 
 # Optional TDD module — single opt-in switch (see skills/tdd/SKILL.md).
 # Only `enabled` and `single_test_command` live here; test_command/build_command/
-# coverage_threshold stay under rules.verify. In engram mode these two keys live in
-# the sdd-init/{project} context artifact instead of this file.
+# coverage_threshold stay under rules.verify.
 tdd:
   enabled: false               # opt-in switch for the optional TDD module (RED → GREEN → REFACTOR)
   single_test_command: ""      # e.g. "npm test -- {file}"; runs ONE test/scenario for a fast RED cycle
 
 # Optional Kanban module — GitHub Projects board sync (see skills/kanban-github/SKILL.md).
 # Installed by default (manifest group `optional`); activation is opt-in per project
-# and REQUIRES a configured GitHub CLI (gh). In engram mode these keys live in the
-# sdd-init/{project} context artifact instead of this file.
+# and REQUIRES a configured GitHub CLI (gh).
 kanban:
   enabled: false             # opt-in switch; set true only after the gh prerequisite checks pass
   user: ""                   # optional assignee override; empty => @me (the active gh account owns every harness-created issue)
@@ -303,6 +295,21 @@ kanban:
     l: ""
     xl: ""
 ```
+
+### Removed key: `artifact_store.mode`
+
+`artifact_store.mode` and its three store modes were removed in **6.3.0**. There are no
+artifact-store modes any more: artifacts are files under `openspec/`, always.
+
+A config written before 6.3.0 may still carry the key. It is inert — no phase reads it — but
+`sdd-new` and `sdd-continue` surface it once so the project is not left guessing:
+
+> `artifact_store.mode: {value}` is unsupported since 6.3.0; artifacts are files under
+> `openspec/`. Move `.kurama/sdd/<change>/*.md` to `openspec/changes/<change>/` if you want
+> the old ones.
+
+Then the cycle proceeds normally. The line is informational: a stale key never blocks a cycle,
+and nothing rewrites the user's config on their behalf.
 
 ## Archive Structure
 

@@ -18,7 +18,6 @@ You are a sub-agent responsible for IMPLEMENTATION. You receive specific tasks f
 From the orchestrator:
 - Change name
 - The specific task(s) to implement (e.g., "Phase 1, tasks 1.1-1.3")
-- Artifact store mode (`engram | openspec | hybrid`)
 - Pipeline settings propagated per phase, including `tdd.enabled` (and
   `tdd.single_test_command` when enabled). A propagated value WINS over any value read
   from `openspec/config.yaml` (same precedence as `compliance_mode`).
@@ -27,13 +26,11 @@ From the orchestrator:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-> **The mode governs SDD artifacts only — never your implementation code.** In EVERY mode, including `engram`, you MUST write the actual source code, tests, and required configuration for the assigned tasks. The rules below apply to SDD artifacts (progress records and task-completion marks), not to the code you produce — writing that code is the entire purpose of this phase.
+> **This contract governs SDD artifacts only — never your implementation code.** You MUST write the actual source code, tests, and required configuration for the assigned tasks. The rules below apply to SDD artifacts (progress records and task-completion marks), not to the code you produce — writing that code is the entire purpose of this phase.
 
 > If a required artifact cannot be found, follow the missing-artifact handling in **Section B** — return a `blocked` envelope naming the missing artifact rather than proceeding without it.
 
-- **engram**: Read `sdd/{change-name}/proposal`, `sdd/{change-name}/spec`, `sdd/{change-name}/design`, `sdd/{change-name}/tasks` (all required — keep tasks ID for updates), AND read the existing `sdd/{change-name}/apply-progress` FIRST when present (optional — an absent artifact means this is the first batch). Mark tasks complete via `mem_update(id: {tasks-observation-id}, content: "...")`. Save progress as `sdd/{change-name}/apply-progress` using **read-merge-write**, never a blind overwrite (see Step 5).
-- **openspec**: Read and follow `skills/_shared/openspec-convention.md`. Update `tasks.md` with `[x]` marks.
-- **hybrid**: Follow BOTH conventions — persist progress to Engram (`mem_update` for tasks) AND update `tasks.md` with `[x]` marks on filesystem.
+Read `openspec/changes/{change-name}/proposal.md`, `openspec/changes/{change-name}/specs/`, `openspec/changes/{change-name}/design.md` and `openspec/changes/{change-name}/tasks.md` (all required), and read the existing `tasks.md` progress marks FIRST (an absent mark means this is the first batch). Update `tasks.md` with `[x]` marks using **read-merge-write**, never a blind overwrite (see Step 5). Read and follow `skills/_shared/openspec-convention.md`.
 
 ## What to Do
 
@@ -53,10 +50,9 @@ Before writing ANY code:
 Resolve `tdd.enabled` with the SAME precedence as `compliance_mode` — NO silent heuristics
 (existing test files never activate TDD on their own):
 
-1. the value propagated in your launch prompt (its home is `openspec/config.yaml` `tdd.enabled`
-   for `openspec`/`hybrid`, or the `sdd-init/{project}` context artifact for `engram`) —
+1. the value propagated in your launch prompt (its home is `openspec/config.yaml` `tdd.enabled`) —
    a propagated value WINS;
-2. else read `tdd.enabled` from `openspec/config.yaml` (`openspec`/`hybrid`);
+2. else read `tdd.enabled` from `openspec/config.yaml`;
 3. else default OFF.
 
 ```
@@ -105,9 +101,9 @@ FOR EACH TASK:
 └── Note any issues or deviations
 ```
 
-### Step 3c: Hard Gate (All Modes) — Work Unit Evidence
+### Step 3c: Hard Gate (Always) — Work Unit Evidence
 
-**This gate runs in EVERY mode and with `tdd.enabled` true OR false.** It is the floor of
+**This gate runs with `tdd.enabled` true OR false.** It is the floor of
 execution evidence. With TDD off — the default — nothing else in this phase forces you to run
 anything, so a work unit could be marked complete on your word alone. This block is what makes
 "done" auditable, and `sdd-verify` audits it (its Step 2a).
@@ -124,8 +120,7 @@ Before marking ANY task of a work unit complete, run the checks and record all t
 | **Harness** | The harness/runtime the unit actually ran under — the project's real integration path (dev server + request, CLI invocation, migration run, the built binary), with its exact result. |
 | **Rollback** | The rollback boundary: exactly what to revert to undo THIS unit and nothing else — the commit, the file list, or the migration step to reverse. |
 
-Record it under the unit's tasks, in whichever artifact this mode uses to mark completion
-(`tasks.md` for `openspec`/`hybrid`; the tasks artifact content for `engram`):
+Record it under the unit's tasks, in `openspec/changes/{change-name}/tasks.md`:
 
 ```markdown
 - [x] 2.1 Add `ValidateToken()` to `internal/auth/service.go`
@@ -180,18 +175,18 @@ together: never write an `[x]` this batch without the block that backs it.
 
 **This step is MANDATORY — do NOT skip it.**
 
-`apply-progress` shares one `topic_key` across every batch, and a `topic_key` upsert is
-**destructive** — it REPLACES the observation, it does not append. Treat this artifact as
-**read-merge-write**, never a blind overwrite:
+Every batch writes the SAME progress file, and rewriting a file is **destructive** — it
+REPLACES the content, it does not append. Treat this artifact as **read-merge-write**, never a
+blind overwrite:
 
-1. **Read first** — retrieve the existing `sdd/{change-name}/apply-progress` (engram:
-   `mem_search` → `mem_get_observation`; openspec/hybrid: read the progress file). An absent
-   artifact means this is the first batch — an empty baseline, not an error.
+1. **Read first** — read the existing `openspec/changes/{change-name}/tasks.md`. Marks and
+   evidence blocks that are absent mean this is the first batch — an empty baseline, not an
+   error.
 2. **Merge** — union the prior batch's completed/pending task states with this batch's results.
    A task an earlier batch marked complete STAYS complete, and every earlier unit's **Work Unit
    Evidence** block is carried forward VERBATIM. Evidence is append-only: add this batch's
    blocks, never rewrite, summarize, or drop an earlier one.
-3. **Write back** — persist the merged whole under the same `topic_key`.
+3. **Write back** — persist the merged whole to the same file.
 4. **Read back** — re-read the persisted tasks artifact and confirm that every task you are
    about to report complete is actually `[x]` there AND carries its Work Unit Evidence block.
    Your internal todo list is NOT completion evidence; only the persisted artifact is. Report
@@ -199,11 +194,8 @@ together: never write an `[x]` this batch without the block that backs it.
 
 Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `apply-progress`
-- topic_key: `sdd/{change-name}/apply-progress`
-- type: `architecture`
-- Also update the tasks artifact with `[x]` marks via `mem_update` (engram) or file edit (openspec/hybrid) — merge this batch's completions into the current marks; never regress a `[x]` an earlier batch already set.
-
-See `skills/_shared/engram-convention.md` → *Apply-Progress Continuity* for the backing rationale.
+- path: `openspec/changes/{change-name}/tasks.md`
+- Update it with `[x]` marks by editing the file — merge this batch's completions into the current marks; never regress a `[x]` an earlier batch already set.
 
 ### Step 6: Return Summary
 
@@ -234,7 +226,7 @@ Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Pop
 - If a task is blocked by something unexpected, STOP and return a `blocked` envelope per **Section D** naming the blocker, instead of guessing
 - NEVER implement tasks that weren't assigned to you
 - ALWAYS record the Step 3c **Work Unit Evidence** block before marking a work unit's tasks
-  complete — in EVERY mode, with `tdd.enabled` true or false. Test command + exact result,
+  complete — with `tdd.enabled` true or false. Test command + exact result,
   harness/runtime + exact result, and the rollback boundary. `N/A` counts only when it states
   its reason; a bare `N/A` or an omitted line is a gap
 - NEVER mark a unit complete when its focused test command or an applicable harness FAILED, and
@@ -243,7 +235,7 @@ Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`. Pop
 - The Work Unit Evidence block SUPPLEMENTS the TDD module and never substitutes for it: with
   `tdd.enabled` true, RED / GREEN / REFACTOR evidence stays mandatory and this block is written
   in addition
-- NEVER blind-overwrite `apply-progress` — read the existing artifact FIRST, merge this batch's task states into it, and write the merged whole (read-merge-write); a `topic_key` upsert replaces, it does not append, so a blind save erases earlier batches' completions
+- NEVER blind-overwrite `apply-progress` — read the existing artifact FIRST, merge this batch's task states into it, and write the merged whole (read-merge-write); a file write replaces, it does not append, so a blind save erases earlier batches' completions
 - Skill loading is handled in Step 1 — follow any loaded skills strictly when writing code
 - Apply any `rules.apply` from `openspec/config.yaml`
 - Resolve `tdd.enabled` first (Step 3): propagated value wins, else `tdd.enabled` in `openspec/config.yaml`, else default off. NEVER infer TDD from existing test files or from a `tdd/SKILL.md` being installed

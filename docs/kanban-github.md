@@ -27,14 +27,10 @@ skill being installed **never** auto-activate it — there are **zero heuristics
 `sdd-init` asks the enable question explicitly (default `false`), in the same place
 and manner it asks the TDD question.
 
-Where the flag lives is mode-dependent — the same settings-home rule as
+The block lives at the top level of `openspec/config.yaml` as `kanban:`, written by
+`sdd-init` — the same settings home as
 [compliance_mode](persistence.md#where-pipeline-settings-are-configured) and
-[tdd](tdd.md#activation--one-switch-no-silent-heuristics):
-
-| Mode | Where the `kanban` block lives |
-|------|--------------------------------|
-| `openspec` / `hybrid` | The top-level `kanban:` block in `openspec/config.yaml`, written by `sdd-init`. |
-| `engram` | The `kanban` block in the `sdd-init/{project}` context artifact (there is no `config.yaml` in these modes). |
+[tdd](tdd.md#activation--one-switch-no-silent-heuristics).
 
 The orchestrator reads the block once and propagates it into every phase, exactly
 as it does for `compliance_mode`, `tdd`, and `execution_mode` — the propagated
@@ -97,8 +93,7 @@ Step 3 template:
 ```yaml
 # Optional Kanban module — GitHub Projects board sync (see skills/kanban-github/SKILL.md).
 # Installed by default (manifest group `optional`); activation is opt-in per project
-# and REQUIRES a configured GitHub CLI (gh). In engram mode these keys live in the
-# sdd-init/{project} context artifact instead of this file.
+# and REQUIRES a configured GitHub CLI (gh).
 kanban:
   enabled: false             # opt-in switch; set true only after the gh prerequisite checks pass
   user: ""                   # optional assignee override; empty => @me (the active gh account owns every harness-created issue)

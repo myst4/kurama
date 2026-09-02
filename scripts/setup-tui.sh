@@ -34,7 +34,7 @@ set -uo pipefail
 #                                      show AND run, taking the answers from
 #                                      KURAMA_TUI_CHOSEN / _SCOPE / _PATH /
 #                                      _OPENCODE_MODE / _OPENCODE_PROFILE /
-#                                      _PI_PACKAGES / _ENGRAM / _LOGO, or the
+#                                      _PI_PACKAGES / _LOGO, or the
 #                                      maintenance line for KURAMA_TUI_MAINT
 #                         profile      normalize_profile "$1": prints the
 #                                      repaired profile name, or exits 1
@@ -194,8 +194,6 @@ build_setup_argv() { # agent
         else ARGV=("${ARGV[@]}" --without-pi-packages); fi
     fi
 
-    if [ "$engram" = "yes" ]; then ARGV=("${ARGV[@]}" --with-engram)
-    else ARGV=("${ARGV[@]}" --without-engram); fi
     [ "$logo" = "yes" ] && ARGV=("${ARGV[@]}" --with-logo)
 
     # Every question setup.sh would ask has already been answered above; without
@@ -255,7 +253,6 @@ case "${KURAMA_TUI_PROBE:-}" in
         opencode_mode="${KURAMA_TUI_OPENCODE_MODE:-}"
         opencode_profile="${KURAMA_TUI_OPENCODE_PROFILE:-}"
         pi_packages="${KURAMA_TUI_PI_PACKAGES:-}"
-        engram="${KURAMA_TUI_ENGRAM:-no}"
         logo="${KURAMA_TUI_LOGO:-no}"
         ARGV=()
         if [ -n "${KURAMA_TUI_MAINT:-}" ]; then
@@ -537,7 +534,7 @@ esac
 pi_packages=""
 case " $chosen " in
     *" pi "*)
-        if gum confirm "Install the Pi package stack? (7 pinned npm packages)" --default=false; then
+        if gum confirm "Install the Pi package stack? (6 pinned npm packages)" --default=false; then
             pi_packages="yes"
         else
             pi_packages="no"
@@ -546,12 +543,6 @@ case " $chosen " in
 esac
 
 # --- 4. cross-cutting options ------------------------------------------------
-
-if gum confirm "Use Engram as the persistence engine?" --default=false; then
-    engram="yes"
-else
-    engram="no"
-fi
 
 if gum confirm "Draw the Kurama logo at agent startup?" --default=false; then
     logo="yes"

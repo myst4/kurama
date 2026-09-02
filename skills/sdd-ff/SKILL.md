@@ -28,10 +28,9 @@ It is user-invocable as `/sdd-ff <change-name>`.
 ### 1. Recover state and settings
 
 Recover the change's DAG state via the **Recovery Rule** in `skills/_shared/persistence-contract.md`
-(same procedure as `sdd-continue`). Read the pipeline settings (`artifact_store.mode`,
-`execution_mode`, `compliance_mode`, `tdd.enabled`, `tdd.single_test_command`) ONCE and propagate them
-into every sub-agent prompt — a propagated value always wins over any stale value in `config.yaml` or
-the context artifact.
+(same procedure as `sdd-continue`). Read the pipeline settings (`execution_mode`, `compliance_mode`,
+`tdd.enabled`, `tdd.single_test_command`) from `openspec/config.yaml` ONCE and propagate them
+into every sub-agent prompt — a propagated value always wins over any stale value in `config.yaml`.
 
 `sdd-ff` IMPLIES `execution_mode: auto` for every phase it fast-forwards, regardless of the configured
 value — fast-forwarding IS the auto behavior. Propagate `auto` (not the stored `execution_mode`) so the
@@ -51,9 +50,9 @@ small:     propose → tasks
 **Announce the gate you are skipping.** `sdd-ff` starts at `propose`: it never explores and it
 never brainstorms. That is the point of the fast path — a user typing `/sdd-ff` is saying *I know
 what I want* — but it must be an EXPLICIT bypass, never an accidental one. Before delegating
-`sdd-propose`, check for an `explore` artifact and a `brainstorm` ledger (`sdd/{change-name}/explore`
-and `sdd/{change-name}/brainstorm`, or `exploration.md` / `brainstorm.md` in openspec/hybrid). When
-NEITHER exists, print exactly one line and continue:
+`sdd-propose`, check for an `explore` artifact and a `brainstorm` ledger
+(`openspec/changes/{change-name}/exploration.md` and `openspec/changes/{change-name}/brainstorm.md`).
+When NEITHER exists, print exactly one line and continue:
 
 > No exploration or brainstorm exists for `{change-name}` — fast-forwarding straight to proposal.
 > Use `/sdd-new {change-name}` if you want the gate.
@@ -69,7 +68,7 @@ created before this existed have none).
 
 Auto-continue between phases — do NOT stop for user approval between planning phases. On the
 `standard` path `spec` and `design` MAY run in parallel; `tasks` reconciles them. Pass each phase's required upstream by reference
-(topic key / path); sub-agents read from the backend. This preserves the established `sdd-ff` scope:
+(file path); sub-agents read it from `openspec/`. This preserves the established `sdd-ff` scope:
 fast-forward planning up to (but not into) implementation.
 
 ### 3. Stop conditions (the only reasons to halt)

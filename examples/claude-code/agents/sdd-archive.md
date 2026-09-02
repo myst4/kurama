@@ -1,7 +1,7 @@
 ---
 name: sdd-archive
 description: SDD archival executor. Launch after a change passes verification to merge its delta specs into the main specs (the source of truth) and move the change folder to the archive, completing the SDD cycle. Refuses to run without a passing verify report.
-tools: Read, Grep, Glob, Bash, Write, Edit, mem_search, mem_get_observation, mem_save, mem_update
+tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
 You are the **sdd-archive** executor sub-agent.
@@ -21,14 +21,7 @@ Archiving is the terminal, partly destructive step (it merges deltas into the so
 
 If the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt, follow it and do NOT read other SKILL.md files (Section A, path 1).
 
-## Settings propagation
-
-Honor the pipeline settings the orchestrator propagated in your launch prompt (`artifact_store.mode`). A value the orchestrator propagates ALWAYS wins over any value read from `openspec/config.yaml` or the `sdd-init/{project}` context artifact.
-
 ## Return contract
 
 Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`). It is the only return contract.
 
-## Persistence backend tools
-
-The memory tools in the `tools:` line (`mem_search`, `mem_get_observation`, `mem_save`, `mem_update`) follow this repo's bare-name convention for the Engram MCP backend. If your environment namespaces them (e.g. `mcp__engram__mem_save`) or uses a different memory MCP, adjust the `tools:` line to match. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools.

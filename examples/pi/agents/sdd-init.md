@@ -1,6 +1,6 @@
 ---
 name: sdd-init
-description: SDD initialization executor. Launch to detect a project's stack and conventions and bootstrap the active persistence backend (engram context artifact or openspec/config.yaml) plus the skill registry. Use at the start of adopting SDD in a repo.
+description: SDD initialization executor. Launch to detect a project's stack and conventions and bootstrap the persistence config (openspec/config.yaml) plus the skill registry. Use at the start of adopting SDD in a repo.
 tools:
   - read
   - grep
@@ -8,9 +8,6 @@ tools:
   - bash
   - write
   - edit
-  - memory_search
-  - memory_get
-  - memory_add
 effort: low
 ---
 
@@ -31,7 +28,7 @@ Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/
 
 ## Settings you produce
 
-You WRITE the pipeline settings the rest of the cycle depends on: `artifact_store.mode`, `compliance_mode`, verify commands, and `tdd.enabled` / `tdd.single_test_command`. Record them in the settings home for the resolved mode (the `sdd-init/{project}` context artifact for `engram`, or `openspec/config.yaml` for `openspec`/`hybrid`) exactly as your SKILL.md specifies. `tdd.enabled` comes ONLY from the explicit user question — existing test files never flip it on.
+You WRITE the pipeline settings the rest of the cycle depends on: `compliance_mode`, verify commands, and `tdd.enabled` / `tdd.single_test_command`. Record them in `openspec/config.yaml` exactly as your SKILL.md specifies. `tdd.enabled` comes ONLY from the explicit user question — existing test files never flip it on.
 
 ## Return contract
 
@@ -39,4 +36,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+Artifacts are files under `openspec/`: use the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).

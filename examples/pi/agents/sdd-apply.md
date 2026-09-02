@@ -8,10 +8,6 @@ tools:
   - bash
   - write
   - edit
-  - memory_search
-  - memory_get
-  - memory_add
-  - memory_update
 effort: high
 ---
 
@@ -30,13 +26,13 @@ This markdown body is your complete system prompt; in Pi's lean subagent mode no
 
 Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/...`, or `.claude/skills/...`. If the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt, follow it and do NOT read other SKILL.md files (Section A, path 1). Read the skills; do not reconstruct them from memory.
 
-## The mode governs SDD artifacts, never your code
+## The contract governs SDD artifacts, never your code
 
-In EVERY mode — including `engram` — you MUST write the actual source code, tests, and required configuration for the assigned tasks. The artifact-store mode only decides where SDD artifacts (progress records, task marks) live; it never restricts the implementation code you produce.
+You MUST write the actual source code, tests, and required configuration for the assigned tasks. The persistence contract only governs where SDD artifacts (progress records, task marks) live; it never restricts the implementation code you produce.
 
 ## Settings & TDD propagation
 
-Honor the pipeline settings the orchestrator propagated in your launch prompt (`artifact_store.mode`, `compliance_mode`, `tdd.enabled`, and `tdd.single_test_command` when enabled). A propagated value ALWAYS wins over any value read from `openspec/config.yaml` or the `sdd-init/{project}` context artifact. Resolve `tdd.enabled` with the same precedence as `compliance_mode`, with NO silent heuristics — existing test files never activate TDD. When `tdd.enabled` resolves true, **load and follow `skills/tdd/SKILL.md`** for the RED → GREEN → REFACTOR contract (never skip RED), and detect the test runner via `skills/_shared/test-runners.md`, running ONLY the relevant test for a fast RED cycle.
+Honor the pipeline settings the orchestrator propagated in your launch prompt (`compliance_mode`, `tdd.enabled`, and `tdd.single_test_command` when enabled). A propagated value ALWAYS wins over any value read from `openspec/config.yaml`. Resolve `tdd.enabled` with the same precedence as `compliance_mode`, with NO silent heuristics — existing test files never activate TDD. When `tdd.enabled` resolves true, **load and follow `skills/tdd/SKILL.md`** for the RED → GREEN → REFACTOR contract (never skip RED), and detect the test runner via `skills/_shared/test-runners.md`, running ONLY the relevant test for a fast RED cycle.
 
 ## Return contract
 
@@ -44,4 +40,4 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`, `memory_update`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools for SDD artifacts (implementation code is always written regardless). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+Artifacts are files under `openspec/`: use the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).

@@ -65,7 +65,6 @@ RECEIPT_TOOL=""
 RECEIPT_FILES=""
 RECEIPT_SETTINGS=""      # newline list of settings.json paths (relative to RECEIPT_DIR)
 RECEIPT_PI_PACKAGES=""   # newline list of "npm:pkg@ver" specs installed via pi
-RECEIPT_ENGRAM_MCP=""    # O5: newline list of config files an Engram MCP server was written to
 RECEIPT_PROMPTS=""       # newline list of orchestrator prompt files carrying a removable BEGIN:kurama block
 RECEIPT_GITIGNORE=""     # #105: .gitignore files carrying the managed machine-local block
 RECEIPT_TUI_PLUGINS=""   # newline list of opencode tui.json files a Kurama TUI plugin was registered in
@@ -78,21 +77,8 @@ RECEIPT_OPENCODE_MODE=""
 RECEIPT_OPENCODE_PROFILE=""
 RECEIPT_OPENCODE_PROFILE_MODEL=""
 
-# #70: what actually happened to the Engram MCP registration, for show_summary.
-# RECEIPT_ENGRAM_MCP cannot answer this: setup_agent CLEARS it for every harness
-# so each receipt records only its own files, and show_summary runs ONCE at the
-# end of a possibly multi-agent run — it would see the last agent only (and pi,
-# which registers nothing, is last under --all). These four are run-scoped and
-# never reset. They are counts, not flags, because one run can mix outcomes:
-# with jq absent, `--all` still registers codex (TOML needs no jq) while
-# claude-code and opencode degrade to manual steps.
-ENGRAM_MCP_WRITTEN=0    # registrations that actually reached disk
-ENGRAM_MCP_NO_JQ=0      # registrations skipped because jq is missing (manual steps printed)
-ENGRAM_MCP_BUILTIN=0    # agents where Engram needs no MCP entry (pi: the package stack provides it)
-ENGRAM_MCP_DEFERRED=0   # registrations postponed by design (codex in project scope: its config is global-only)
-
 # #105: what happened to the machine-local .gitignore block, for show_summary.
-# Run-scoped like the Engram counters above — setup_agent clears the per-agent
+# Run-scoped and never reset — setup_agent clears the per-agent
 # receipt accumulators, and the summary runs ONCE at the end of a possibly
 # multi-agent run. The status is the LAST outcome of the run, which is the final
 # state of the file: every agent re-ensures the SAME block in the SAME file, so
@@ -105,19 +91,6 @@ GITIGNORE_PATTERNS=0    # how many patterns the block ended up carrying
 # merged its block in. Run-scoped, so the summary can name them after the
 # per-file notice has scrolled away.
 WORKFLOW_NOTICE_FILES=""
-
-# O5: Engram optional persistence engine. setup asks ONCE (or honors the
-# --with-engram/--without-engram flags) whether to wire Engram as the memory
-# backend. With "yes" we ensure the binary (Homebrew on macOS with consent, or a
-# printed guide) and register the Engram MCP server into the client being set up,
-# in that client's own server shape. With "no" the harness keeps its built-in
-# markdown persistence (openspec/.kurama) — mentioned in the summary.
-#
-# The two constants below are Engram's own upstream locations: Engram is a
-# third-party tool Kurama integrates with, not part of this repo.
-ENGRAM_RELEASES_URL="https://github.com/Gentleman-Programming/engram/releases"
-ENGRAM_TAP="Gentleman-Programming/homebrew-tap"
-ENGRAM_BINARY_CHECKED=false   # ensure the binary probe/brew prompt runs at most once
 
 # setup.sh installs the DEFAULT skill set (no --with/--without flags). These are
 # the default-on groups from skills/manifest.json, which now include the `tdd`
@@ -193,8 +166,8 @@ FOREIGN_MARKER_END="<!-- /gentle-ai:sdd-orchestrator -->"
 
 # ----------------------------------------------------------------------------
 # N5: Pi package stack (opt-in). setup.sh --agent pi can install a curated set
-# of Pi packages that light up the same orchestrator workflow on Pi (Engram
-# memory, the MCP adapter, subagents, ask-user/todo/web-access/btw helpers).
+# of Pi packages that light up the same orchestrator workflow on Pi (the MCP
+# adapter, subagents, ask-user/todo/web-access/btw helpers).
 #
 # Versions are PINNED. They were resolved once with `npm view <pkg> version`
 # (the only network call this script makes) and hardcoded here for a
@@ -202,16 +175,14 @@ FOREIGN_MARKER_END="<!-- /gentle-ai:sdd-orchestrator -->"
 #     npm view <pkg> version
 # and update the matching constant below.
 #
-# `gentle-engram` and `gentle-pi` below are THIRD-PARTY npm package names, as
-# published on the registry. They are identifiers, not references: one names a
-# package this stack installs, the other names the package it must refuse to
-# install by name. Renaming either breaks the install.
+# `gentle-pi` below is a THIRD-PARTY npm package name, as published on the
+# registry. It is an identifier, not a reference: it names the package this
+# stack must refuse to install by name. Renaming it breaks the exclusion.
 #
 # EXCLUSION — `gentle-pi` is deliberately NOT in this stack. It is a competing
 # Pi harness that overlaps and directly conflicts with Kurama's own orchestrator
 # rule and skills on Pi; installing it would fight Kurama for the same surface.
 # We never install it. Do not add it here.
-PI_PKG_GENTLE_ENGRAM_VERSION="0.1.10"
 PI_PKG_MCP_ADAPTER_VERSION="2.11.0"
 PI_PKG_SUBAGENTS_VERSION="1.4.1"
 PI_PKG_ASK_USER_VERSION="2.0.0"
@@ -225,20 +196,6 @@ ORCHESTRATOR_HEADINGS=(
     "## Spec-Driven Development (SDD) Orchestrator"
     "## Spec-Driven Development (SDD)"
 )
-
-# ============================================================================
-# OS Detection
-# ============================================================================
-
-# Kurama supports macOS and Linux only. The distinction that remains is real:
-# Homebrew is offered for the Engram binary on macOS and nowhere else.
-detect_os() {
-    case "$(uname -s)" in
-        Darwin)  OS="macos" ;;
-        Linux)   OS="linux" ;;
-        *)       OS="unknown" ;;
-    esac
-}
 
 # home_dir() now lives in scripts/lib/receipt.sh (issue #37).
 
@@ -652,8 +609,7 @@ _receipt_existing() {
 # Flush the receipt accumulators to RECEIPT_DIR/.kurama-install-manifest.json.
 # Extends install.sh's format with additive fields — "scope", "settings"
 # (settings.json files carrying a surgically-removable kurama hooks block),
-# "pi_packages" (packages installed via `pi install`), "engram_mcp" (client
-# config files an Engram MCP server was written into), "prompts" (orchestrator
+# "pi_packages" (packages installed via `pi install`), "prompts" (orchestrator
 # prompt files carrying a removable BEGIN:kurama block), "gitignore" (#105: the
 # .gitignore carrying the managed machine-local block), "tui_plugins"
 # (opencode tui.json files carrying a removable kurama-logo entry),
@@ -684,11 +640,10 @@ finalize_receipt() {
     local prev_tools
     prev_tools="$(manifest_tools "$manifest_path" | awk -v cur="$RECEIPT_TOOL" 'NF && $0 != cur')"
 
-    local tools files settings pi_packages engram_mcp prompts gitignore tui_plugins opencode_configs
+    local tools files settings pi_packages prompts gitignore tui_plugins opencode_configs
     tools="$(_merge_lines "$prev_tools" "$RECEIPT_TOOL")"
     files="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "files")")" "$RECEIPT_FILES")"
     settings="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "settings")")" "$RECEIPT_SETTINGS")"
-    engram_mcp="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "engram_mcp")")" "$RECEIPT_ENGRAM_MCP")"
     prompts="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "prompts")")" "$RECEIPT_PROMPTS")"
     gitignore="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "gitignore")")" "$RECEIPT_GITIGNORE")"
     tui_plugins="$(_merge_lines "$(_receipt_existing "$(receipt_json_array "$manifest_path" "tui_plugins")")" "$RECEIPT_TUI_PLUGINS")"
@@ -726,7 +681,6 @@ finalize_receipt() {
         _json_array "$tools"
         printf '  ],\n'
         printf '  "scope": "%s",\n' "$SCOPE"
-        printf '  "engram": "%s",\n' "${ENGRAM:-no}"
         # #22: emitted only when known, so a receipt that never configured
         # OpenCode stays exactly as it was and update.sh can tell "no OpenCode
         # here" apart from "OpenCode, mode unrecorded" (which it refuses).
@@ -741,9 +695,6 @@ finalize_receipt() {
         printf '  ],\n'
         printf '  "pi_packages": [\n'
         _json_array "$pi_packages"
-        printf '  ],\n'
-        printf '  "engram_mcp": [\n'
-        _json_array "$engram_mcp"
         printf '  ],\n'
         printf '  "prompts": [\n'
         _json_array "$prompts"
@@ -2161,7 +2112,7 @@ ask_pi_packages() {
 
     echo ""
     echo -e "  ${BOLD}Install the Pi package stack?${NC}"
-    echo "  Adds: gentle-engram (memory), pi-mcp-adapter, pi-subagents-j0k3r,"
+    echo "  Adds: pi-mcp-adapter, pi-subagents-j0k3r,"
     echo "  rpiv-ask-user-question, pi-web-access, rpiv-todo, pi-btw."
     echo "  (gentle-pi is intentionally excluded — it conflicts with Kurama.)"
     echo ""
@@ -2211,12 +2162,8 @@ setup_pi_packages() {
     PI_INSTALL_FAIL=""
 
     # Approved order — pins are hardcoded above and refreshed via `npm view`.
-    pi_run_step "gentle-engram@$PI_PKG_GENTLE_ENGRAM_VERSION" \
-        pi install "npm:gentle-engram@$PI_PKG_GENTLE_ENGRAM_VERSION"
     pi_run_step "pi-mcp-adapter@$PI_PKG_MCP_ADAPTER_VERSION" \
         pi install "npm:pi-mcp-adapter@$PI_PKG_MCP_ADAPTER_VERSION"
-    pi_run_step "pi-engram init (gentle-engram@$PI_PKG_GENTLE_ENGRAM_VERSION)" \
-        npm exec --yes --package "gentle-engram@$PI_PKG_GENTLE_ENGRAM_VERSION" -- pi-engram init
     pi_run_step "pi-subagents-j0k3r@$PI_PKG_SUBAGENTS_VERSION" \
         pi install "npm:pi-subagents-j0k3r@$PI_PKG_SUBAGENTS_VERSION"
     pi_run_step "@juicesharp/rpiv-ask-user-question@$PI_PKG_ASK_USER_VERSION" \
@@ -2229,10 +2176,8 @@ setup_pi_packages() {
         pi install "npm:pi-btw@$PI_PKG_BTW_VERSION"
 
     # Record the packages Kurama installs so uninstall.sh can offer to revert
-    # exactly these (O3). The npm-exec init step is NOT a package and is omitted;
-    # gentle-pi is never here by construction.
+    # exactly these (O3). gentle-pi is never here by construction.
     RECEIPT_PI_PACKAGES="$RECEIPT_PI_PACKAGES
-npm:gentle-engram@$PI_PKG_GENTLE_ENGRAM_VERSION
 npm:pi-mcp-adapter@$PI_PKG_MCP_ADAPTER_VERSION
 npm:pi-subagents-j0k3r@$PI_PKG_SUBAGENTS_VERSION
 npm:@juicesharp/rpiv-ask-user-question@$PI_PKG_ASK_USER_VERSION
@@ -2249,248 +2194,6 @@ npm:pi-btw@$PI_PKG_BTW_VERSION"
         warn "Pi packages that failed (setup continued anyway):"
         printf '%b\n' "$PI_INSTALL_FAIL"
     fi
-}
-
-# ============================================================================
-# O5: Engram optional persistence engine (asked once; MCP registered per client)
-#
-# Ask ONCE whether to use Engram. Honors --with-engram/--without-engram and
-# defaults to NO when non-interactive so external installers never surprise the
-# user. When enabled we ensure the binary (Homebrew on macOS with explicit
-# consent, else a printed guide — NEVER a silent network call) and register the
-# Engram MCP server into the client being configured, in that client's own
-# server shape. All JSON edits go through jq (backup + atomic) and degrade to
-# guided manual steps when jq is missing — never sed on JSON. Codex is TOML,
-# upserted with a careful block replace. Every file written
-# is recorded in the receipt (engram_mcp[]).
-# ============================================================================
-
-ask_engram() {
-    case "$ENGRAM" in
-        yes|no) return 0 ;;
-    esac
-
-    if $NON_INTERACTIVE; then
-        ENGRAM="no"
-        return 0
-    fi
-
-    echo ""
-    # Tolerate EOF (piped/non-tty stdin) under `set -e`: default to NO.
-    read -rp "  Use Engram as the persistence engine? [y/N]: " engram_answer || engram_answer="N"
-    if [[ "${engram_answer:-N}" =~ ^[Yy] ]]; then
-        ENGRAM="yes"
-    else
-        ENGRAM="no"
-    fi
-}
-
-# Follow a symlink chain to the file it finally names, portably. macOS's stock
-# readlink has no -f (that is a GNU coreutils extension), and the one place this
-# matters is a Homebrew binary — which is ALWAYS a symlink into the Cellar. Bare
-# `readlink` gives one hop, so the loop walks the chain, resolving each relative
-# target against the directory of the link that carried it, and `pwd -P` collapses
-# the result physically. Bounded at 32 hops so a symlink cycle terminates.
-resolve_symlink_path() {
-    local p="$1" hops=0 d t
-    while [ -L "$p" ] && [ "$hops" -lt 32 ]; do
-        d="$(dirname "$p")"
-        t="$(readlink "$p")" || break
-        case "$t" in
-            /*) p="$t" ;;
-            *)  p="$d/$t" ;;
-        esac
-        hops=$((hops + 1))
-    done
-    d="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || { printf '%s' "$1"; return 0; }
-    printf '%s/%s' "$d" "${p##*/}"
-}
-
-# Resolve the most stable engram command string: prefer an absolute PATH hit,
-# but collapse a Homebrew install back to bare "engram" (its Cellar path changes
-# on every upgrade, and an absolute path in a PROJECT-scope .mcp.json or
-# opencode.json is machine-specific in a file the team shares). Falls back to
-# "engram" when the binary is not yet installed.
-#
-# #105: the Cellar match alone never fired. `command -v engram` returns the
-# SYMLINK Homebrew puts on PATH — /opt/homebrew/bin/engram — never the Cellar
-# path it points at, so every Homebrew install wrote the absolute path, and a
-# field install committed /opt/homebrew/bin/engram into a shared .mcp.json and
-# opencode.json. Both halves are checked now: the brew bin prefixes on the path
-# as found, and the Cellar path it resolves to. Anything else keeps its absolute
-# path on purpose — a GUI-launched client does not always inherit the shell PATH,
-# and outside brew there is no stable bare name to fall back on.
-engram_command() {
-    local p resolved
-    if p="$(command -v engram 2>/dev/null)" && [ -n "$p" ]; then
-        case "$p" in
-            */homebrew/bin/engram|*/linuxbrew/*/bin/engram|*/Cellar/engram/*)
-                echo "engram"; return 0 ;;
-        esac
-        resolved="$(resolve_symlink_path "$p")"
-        case "$resolved" in
-            */Cellar/engram/*) echo "engram"; return 0 ;;
-        esac
-        echo "$p"
-    else
-        echo "engram"
-    fi
-}
-
-# Ensure the engram binary is available. Runs at most once per setup invocation.
-# macOS + Homebrew: offer to install with explicit consent (never in
-# non-interactive mode — just guidance). Everything else: print the releases
-# guide and continue (registration is still written; it activates once engram is
-# on PATH). This is the ONLY place setup may run a network command, and only
-# after the user says yes.
-ensure_engram_binary() {
-    $ENGRAM_BINARY_CHECKED && return 0
-    ENGRAM_BINARY_CHECKED=true
-
-    if command -v engram >/dev/null 2>&1; then
-        ok "engram found: $(command -v engram)"
-        return 0
-    fi
-
-    warn "engram not found in PATH"
-    if [ "$OS" = "macos" ] && command -v brew >/dev/null 2>&1; then
-        if $NON_INTERACTIVE; then
-            info "Install it with: brew tap $ENGRAM_TAP && brew install engram"
-            return 0
-        fi
-        read -rp "  Install engram now via Homebrew? [y/N]: " brew_answer || brew_answer="N"
-        if [[ "${brew_answer:-N}" =~ ^[Yy] ]]; then
-            info "Running: brew tap $ENGRAM_TAP && brew install engram"
-            if brew tap "$ENGRAM_TAP" && brew install engram; then
-                ok "engram installed via Homebrew"
-            else
-                warn "brew install engram failed — continuing without the binary"
-                info "Install manually from: $ENGRAM_RELEASES_URL"
-            fi
-        else
-            info "Skipped. Install later from: $ENGRAM_RELEASES_URL"
-        fi
-    else
-        info "Install engram from: $ENGRAM_RELEASES_URL"
-        info "The MCP registration is still written; it activates once engram is on PATH."
-    fi
-}
-
-# Merge an Engram MCP overlay into a JSON config using a jq program. jq-only
-# (never sed on JSON); degrades to printed guidance when jq is absent. Backs up +
-# writes atomically, and records the file in the receipt (engram_mcp[]).
-engram_merge_json() {
-    local file="$1" jq_prog="$2" cmd="$3"
-    mkdir -p "$(dirname "$file")"
-
-    if ! command -v jq >/dev/null 2>&1; then
-        warn "jq not found — cannot auto-register the Engram MCP server"
-        info "Add the Engram MCP server manually to: $file"
-        info "  command: $cmd   args: [\"mcp\", \"--tools=agent\"]"
-        ENGRAM_MCP_NO_JQ=$((ENGRAM_MCP_NO_JQ + 1))
-        return 0
-    fi
-
-    local input merged
-    input="$(read_json_for_merge "$file")" \
-        || { fail "Cannot read $file — Engram MCP left unregistered"; return 1; }
-
-    merged=$(
-        printf '%s\n' "$input" | \
-        jq --arg cmd "$cmd" "$jq_prog"
-    ) || { fail "Failed to register Engram MCP in $file (left unchanged)"; return 1; }
-
-    jq_merge_ok "$merged" \
-        || { fail "Engram registration produced no usable JSON — $file left unchanged"; return 1; }
-
-    printf '%s\n' "$merged" | atomic_replace --backup "$file"
-    ok "Engram MCP registered → $file"
-    RECEIPT_ENGRAM_MCP="$RECEIPT_ENGRAM_MCP
-$(receipt_rel "$file")"
-    ENGRAM_MCP_WRITTEN=$((ENGRAM_MCP_WRITTEN + 1))
-}
-
-# Codex uses TOML, not JSON. Upsert the [mcp_servers.engram] block: strip any
-# existing block (up to the next section header or EOF) then append a fresh one.
-# Backup + atomic, recorded in the receipt. jq never touches this file.
-register_engram_codex() {
-    local file="$1" cmd="$2"
-    mkdir -p "$(dirname "$file")"
-
-    local existing="" stripped
-    if [ -f "$file" ]; then
-        existing="$(cat "$file")"
-    fi
-    stripped="$(printf '%s\n' "$existing" | awk '
-        /^\[mcp_servers\.engram\]/ { skip=1; next }
-        skip && /^\[/ { skip=0 }
-        !skip { print }
-    ')"
-
-    {
-        # Preserve prior content, drop trailing blank lines, then append the block.
-        printf '%s\n' "$stripped" | awk 'NF{last=NR} {lines[NR]=$0} END{for(i=1;i<=last;i++) print lines[i]}'
-        [ -n "$stripped" ] && printf '\n'
-        printf '[mcp_servers.engram]\n'
-        printf 'command = "%s"\n' "$cmd"
-        printf 'args = ["mcp", "--tools=agent"]\n'
-    } | atomic_replace --backup "$file"
-    ok "Engram MCP registered → $file (codex TOML)"
-    RECEIPT_ENGRAM_MCP="$RECEIPT_ENGRAM_MCP
-$(receipt_rel "$file")"
-    ENGRAM_MCP_WRITTEN=$((ENGRAM_MCP_WRITTEN + 1))
-}
-
-# Register the Engram MCP server for one client, in that client's own config
-# shape. Pi needs nothing extra — the Pi package stack already provides Engram
-# there via `gentle-engram` (a third-party npm package name).
-# shellcheck disable=SC2016  # The jq filters below reference $cmd, a JQ variable bound
-# via --arg by engram_merge_json. Single quotes are required: expanding it in bash would
-# inline the path into the filter and break jq's own quoting.
-register_engram_mcp() {
-    local agent="$1" cmd file home
-    cmd="$(engram_command)"
-    home="$(home_dir)"
-
-    case "$agent" in
-        pi)
-            info "Engram on Pi is provided by the Pi package stack (gentle-engram) — no extra MCP registration needed."
-            ENGRAM_MCP_BUILTIN=$((ENGRAM_MCP_BUILTIN + 1))
-            ;;
-        claude-code)
-            if [ "$SCOPE" = "project" ]; then file="$TARGET_PATH/.mcp.json"; else file="$home/.claude.json"; fi
-            engram_merge_json "$file" \
-                '.mcpServers = (.mcpServers // {}) | .mcpServers.engram = {command: $cmd, args: ["mcp", "--tools=agent"]}' \
-                "$cmd"
-            ;;
-        opencode)
-            if [ "$SCOPE" = "project" ]; then file="$TARGET_PATH/opencode.json"; else file="$home/.config/opencode/opencode.json"; fi
-            # OpenCode 1.3.3+ wants command as an array on a type:local server.
-            engram_merge_json "$file" \
-                '.mcp = (.mcp // {}) | .mcp.engram = {command: [$cmd, "mcp", "--tools=agent"], type: "local"}' \
-                "$cmd"
-            ;;
-        codex)
-            if [ "$SCOPE" = "project" ]; then
-                info "Codex uses a single global MCP config; skipping Engram registration for project scope."
-                info "Run: ./setup.sh --agent codex --with-engram   (global) to register it."
-                ENGRAM_MCP_DEFERRED=$((ENGRAM_MCP_DEFERRED + 1))
-                return 0
-            fi
-            register_engram_codex "$home/.codex/config.toml" "$cmd"
-            ;;
-    esac
-}
-
-# O5 entry point per agent: ask once, ensure the binary once, register the MCP.
-setup_engram() {
-    local agent="$1"
-    ask_engram
-    [ "$ENGRAM" = "yes" ] || return 0
-
-    header "Engram persistence engine"
-    ensure_engram_binary
-    register_engram_mcp "$agent"
 }
 
 # ============================================================================
@@ -2529,7 +2232,6 @@ setup_agent() {
     RECEIPT_FILES=""
     RECEIPT_SETTINGS=""
     RECEIPT_PI_PACKAGES=""
-    RECEIPT_ENGRAM_MCP=""
     RECEIPT_PROMPTS=""
     RECEIPT_GITIGNORE=""
     RECEIPT_TUI_PLUGINS=""
@@ -2578,13 +2280,6 @@ setup_agent() {
         setup_pi_packages
     fi
 
-    # O5: Engram optional persistence engine — asked once, then the MCP server is
-    # registered into this client (unless declined, in which case markdown
-    # persistence stays the default and is noted in the summary). Non-fatal for
-    # the same reason as the hooks merge: the install is already on disk.
-    setup_engram "$agent" \
-        || warn "Engram registration did not complete — the rest of the install stands"
-
     # #105: name the machine-local files in the target repo's .gitignore. Runs
     # LAST among the writers and BEFORE finalize_receipt, so the block reflects
     # every harness this receipt knows about (the `pi`-only `.atl/` line) and the
@@ -2594,7 +2289,7 @@ setup_agent() {
         || warn "The machine-local .gitignore block was not written — the rest of the install stands"
 
     # Flush the single per-agent receipt (skills + agents + hooks + settings +
-    # pi packages + engram MCP) now that every step has recorded its writes.
+    # pi packages) now that every step has recorded its writes.
     # Disarm FIRST: with the trap still armed, a finalize_receipt that fails
     # (unwritable receipt dir, full disk) would re-enter the handler and run the
     # very same failing write a second time, replacing the real exit status with
@@ -2722,37 +2417,6 @@ show_summary() {
     echo ""
     echo -e "${GREEN}${BOLD}Done!${NC} Start using SDD: open any project and type ${CYAN}/sdd-init${NC}"
     echo ""
-    # O5: persistence-engine status. When Engram is enabled we confirm it (and
-    # nudge to install the binary if it is not yet on PATH); when declined we tell
-    # the user the harness runs on its built-in markdown persistence.
-    if [ "${ENGRAM:-no}" = "yes" ]; then
-        # #70: report what the run actually did, not what it intended. Without jq
-        # the MCP merge degrades to printed manual steps and writes nothing, so
-        # claiming "registered per client" here was a lie the receipt contradicted.
-        # jq-missing leads, because it is the only outcome the user must act on;
-        # pi (package stack) and codex-in-project-scope are by design, not faults.
-        if [ "$ENGRAM_MCP_NO_JQ" -gt 0 ]; then
-            echo -e "${YELLOW}Engram:${NC} enabled, but the MCP server was ${BOLD}NOT registered${NC} for $ENGRAM_MCP_NO_JQ client(s) — jq is missing."
-            echo -e "  Kurama never edits JSON without jq. Apply the manual steps printed above,"
-            echo -e "  or install jq and re-run this command to register it automatically."
-        elif [ "$ENGRAM_MCP_WRITTEN" -gt 0 ]; then
-            echo -e "${GREEN}Engram:${NC} enabled as the persistence engine (MCP registered per client)."
-        elif [ "$ENGRAM_MCP_BUILTIN" -gt 0 ]; then
-            echo -e "${GREEN}Engram:${NC} enabled as the persistence engine (provided by the agent's own package stack — no MCP entry needed)."
-        elif [ "$ENGRAM_MCP_DEFERRED" -gt 0 ]; then
-            echo -e "${YELLOW}Engram:${NC} enabled, but no MCP server was registered in this scope — see the note above."
-        else
-            echo -e "${YELLOW}Engram:${NC} enabled, but ${BOLD}no MCP registration was recorded${NC} — see the messages above."
-        fi
-        if ! command -v engram >/dev/null 2>&1; then
-            echo -e "  Install the binary to activate it: ${CYAN}$ENGRAM_RELEASES_URL${NC}"
-        fi
-    else
-        echo -e "${YELLOW}Persistence:${NC} using the built-in ${BOLD}markdown${NC} fallback (openspec/.kurama)."
-        echo -e "  Enable cross-session memory anytime with ${CYAN}--with-engram${NC} (installs Engram)."
-        echo -e "  ${CYAN}$ENGRAM_RELEASES_URL${NC}"
-    fi
-    echo ""
 }
 
 # ============================================================================
@@ -2785,7 +2449,6 @@ print_interactive_unavailable() {
 # Main
 # ============================================================================
 
-detect_os
 setup_colors
 
 # The banner is drawn LATER, once a run is fully specified (after arg parsing).
@@ -2801,7 +2464,6 @@ OPENCODE_PROFILE=""        # "" = unset (ask); "no" = none; otherwise the profil
 OPENCODE_PROFILE_MODEL=""  # optional provider/model applied to every profile agent
 STARTUP_LOGO=""            # "yes" (via --with-logo) installs the Kurama startup logo; anything else skips it. Never prompted for — the default install stays clean.
 PI_PACKAGES=""    # "", "yes", or "no" — controls the N5 Pi package stack
-ENGRAM=""         # "", "yes", or "no" — O5 Engram persistence engine
 # Run-shaping flags seen on this invocation that the interactive TUI hand-off
 # (issue #40) cannot forward — it takes NO arguments and asks its own questions.
 # An underspecified run (no --agent/--all) carrying any of these is REFUSED rather
@@ -2852,8 +2514,6 @@ while [[ $# -gt 0 ]]; do
         --path)           HANDOFF_BLOCKED_FLAGS+=("--path"); require_flag_value --path "${2:-}"; TARGET_PATH="$2"; shift 2 ;;
         --with-pi-packages)    HANDOFF_BLOCKED_FLAGS+=("--with-pi-packages");    PI_PACKAGES="yes"; shift ;;
         --without-pi-packages) HANDOFF_BLOCKED_FLAGS+=("--without-pi-packages"); PI_PACKAGES="no"; shift ;;
-        --with-engram)         HANDOFF_BLOCKED_FLAGS+=("--with-engram");         ENGRAM="yes"; shift ;;
-        --without-engram)      HANDOFF_BLOCKED_FLAGS+=("--without-engram");      ENGRAM="no"; shift ;;
         --with)    HANDOFF_BLOCKED_FLAGS+=("--with");    require_flag_value --with "${2:-}";    setup_validate_group_name "$2"; setup_enable_group "$2"; shift 2 ;;
         --without) HANDOFF_BLOCKED_FLAGS+=("--without"); require_flag_value --without "${2:-}"; setup_validate_group_name "$2"; setup_disable_group "$2"; shift 2 ;;
         --opencode-mode)
@@ -2898,8 +2558,6 @@ while [[ $# -gt 0 ]]; do
             echo "  --without-logo         Keep each agent's own startup logo (this is the default; the logo is never installed unless --with-logo is passed)"
             echo "  --with-pi-packages     Install the Pi package stack (--agent pi, non-interactive)"
             echo "  --without-pi-packages  Skip the Pi package stack (--agent pi, non-interactive)"
-            echo "  --with-engram          Use Engram as the persistence engine (register its MCP)"
-            echo "  --without-engram       Keep the built-in markdown persistence (default)"
             echo "  --with GROUP           Include an optional skill group (quality, review, optional, tdd)"
             echo "  --without GROUP        Exclude an on-by-default skill group (quality, review, optional, tdd)"
             echo "  --non-interactive      No prompts (for external installers)"
