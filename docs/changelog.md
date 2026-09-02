@@ -4,6 +4,22 @@ This file keeps the **current (6.x)** and **previous (5.x)** release series. For
 everything before 5.0.0, read the full history from the tags: `git log` (each
 release is a tagged commit) or the [GitHub Releases page](https://github.com/myst4/kurama/releases).
 
+## 6.2.2 — 2026-09-02
+
+Patch: one fix found by auditing a real cycle on a 6.2.1 install; the prompt is untouched.
+
+- **Change names carry the linked issue number.** #109 numbered branches; the change name —
+  which keys every topic key, `.kurama/sdd/{change}/`, `openspec/changes/{change}/` and the
+  envelopes — had no rule, so a cycle with the kanban active and `issue: 22` in its state still
+  produced `nodemaven-gateway-provider`. Now an issue-linked cycle is named `{issue}-{slug}`
+  (`22-nodemaven-gateway-provider`) and the branch composes as `type/{change-name}` without a
+  double number; unlinked cycles are unchanged; existing changes keep resolving. (#129)
+
+Also filed from the same audit: Engram was unreachable from every shipped Claude Code sub-agent (#133) — which, together with the maintenance cost of three artifact-store modes, led to the decision to remove Engram from the flow in 6.3.0 (#135); scope discovered after the proposal gate has no
+rule (#130); `kanban.stage` can be recorded from intent instead of a confirmed board move
+(#131); `lint-spec.sh` cannot check the MODIFIED whole-block rule in engram mode because there
+is no `openspec/specs/` baseline (#132).
+
 ## 6.2.1 — 2026-09-01
 
 Patch: one opt-in skill removed, three skills rewritten as Kurama's own, and the last licence
