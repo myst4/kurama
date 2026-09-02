@@ -33,6 +33,22 @@ openspec/
         └── verify-report.md <- from sdd-verify
 ```
 
+## The `{change-name}`
+
+`{change-name}` is the change's kebab-case slug, and it is the SAME string everywhere the change is
+keyed: the paths below, the Engram topic keys (`sdd/{change-name}/…`), the `.kurama/sdd/{change-name}/`
+fallback directory, the phase envelopes and `state.md`.
+
+- **The cycle is issue-linked** — a kanban card is attached, or the request named an issue (`#N`, a
+  GitHub URL) → the name is **`{issue}-{slug}`**: `22-nodemaven-gateway-provider`. The number first,
+  so a directory listing traces back to the ticket without a lookup, and the branch composes as
+  `type/{change-name}` with no second number (`skills/branch-pr` → *Branch Naming*).
+- **No issue in play** → unchanged: the plain `{slug}`, e.g. `right-size-planning`.
+
+The rule binds when the change is CREATED. An existing change whose name carries no number keeps
+resolving exactly as it is — reading, continuing and archiving it never require the number, and it is
+never renamed to acquire one.
+
 ## Artifact File Paths
 
 | Skill | Creates / Reads | Path |

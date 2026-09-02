@@ -309,6 +309,11 @@ between those points the working ledger lives in the conversation.
 **Change name.** The ledger's key needs one. Reached from `sdd-new`, it is already given.
 Reached by natural trigger, propose a kebab-case slug from the request and confirm it in the
 same turn as the terminal state, before the write — never burn an early question on naming.
+When the round is issue-linked — a kanban card, or a request that named an issue (`#N`, a
+GitHub URL) — that name is **`{issue}-{slug}`**: `22-nodemaven-gateway-provider`. The ledger's
+key is the first artifact keyed by it, and every artifact after it inherits the same string, so
+the number has to be there before the write. Prefix a slug the user gave rather than replacing
+it. **No issue in play** → the plain `{slug}`, unchanged.
 
 ## Handing Off
 

@@ -200,6 +200,11 @@ Without the number, `git log` and `git branch` give no way back to the ticket.
 
 **No issue in play** → unchanged: `type/{slug}`.
 
+**The change name already starts with that number** — SDD names an issue-linked change
+`{issue}-{slug}` (`skills/_shared/openspec-convention.md` → *The `{change-name}`*) → the branch is
+`type/{change-name}` as it stands: `feat/22-nodemaven-gateway-provider`, never
+`feat/22-22-nodemaven-gateway-provider`.
+
 The regex is the same for both — it already admits digits.
 
 | Type | Issue-linked — `type/{issue}-{slug}` | No issue — `type/{slug}` |

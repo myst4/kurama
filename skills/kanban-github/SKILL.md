@@ -154,6 +154,12 @@ The board reflects work; the human owns prioritization. Intake follows five rule
 - **The branch carries the card's issue number.** Work taken from a card branches as
   `type/{issue}-{slug}` (see `skills/branch-pr` → *Branch Naming*), so `git branch` maps
   back to the board without a lookup.
+- **So does the change name.** A cycle started from a card names its change
+  **`{issue}-{slug}`** — `22-nodemaven-gateway-provider` — and that single string keys every
+  artifact the cycle writes: the `sdd/{change-name}/…` topic keys, `.kurama/sdd/{change-name}/`,
+  `openspec/changes/{change-name}/`, the phase envelopes and `state.md`. Hand it to `sdd-new`
+  that way when you pick the card up. The branch then composes with no double number:
+  `type/{change-name}`, never `type/{issue}-{issue}-{slug}`.
 
 ## Card Lifecycle (who moves what, when)
 
