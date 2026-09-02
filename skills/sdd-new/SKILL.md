@@ -38,9 +38,8 @@ Read the pipeline settings (`execution_mode`, `compliance_mode`, `tdd.enabled`,
 value always wins over any stale value in `config.yaml`. `execution_mode` (`supervised` | `auto`,
 default `supervised`) decides how the proposal gate below behaves.
 
-**Stale `artifact_store.mode`.** If the config still carries an `artifact_store.mode` key with ANY value,
-print exactly one line and continue — never block, never
-rewrite the user's config:
+**Stale `artifact_store.mode`.** If the config still carries an `artifact_store.mode` key with ANY
+value, print exactly one line and continue — never block, never rewrite the user's config:
 
 > `artifact_store.mode` is unsupported since 6.3.0; artifacts are files under `openspec/`. Move
 > `.kurama/sdd/<change>/*.md` to `openspec/changes/<change>/` if you want the old ones.

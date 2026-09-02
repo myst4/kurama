@@ -41,13 +41,17 @@ Also read the pipeline settings (`execution_mode`, `compliance_mode`, `tdd.enabl
 `tdd.single_test_command`) once and propagate them into every sub-agent prompt
 (propagated value wins).
 
+`execution_mode` (`supervised` | `auto`, default `supervised`) decides whether the gate in step 4
+stops for the user or auto-advances.
+
 **Stale `artifact_store.mode`.** If `openspec/config.yaml` still carries an `artifact_store.mode`
-key with ANY value, print exactly one line and continue — never
-block, never rewrite the user's config:
+key with ANY value, print exactly one line and continue — never block, never rewrite the user's
+config:
 
 > `artifact_store.mode` is unsupported since 6.3.0; artifacts are files under `openspec/`. Move
-> `.kurama/sdd/<change>/*.md` to `openspec/changes/<change>/` if you want the old ones. `execution_mode` (`supervised` | `auto`, default `supervised`) decides
-whether the gate in step 4 stops for the user or auto-advances.
+> `.kurama/sdd/<change>/*.md` to `openspec/changes/<change>/` if you want the old ones.
+
+Then proceed with the cycle as normal.
 
 ### 2. Determine the next dependency-ready phase
 
