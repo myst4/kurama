@@ -137,70 +137,6 @@ remove_hooks_from_settings() {
     print_ok "stripped kurama hooks block from settings.json"
 }
 
-# O5 (uninstall): strip the Engram MCP registration Kurama wrote into a client
-# config recorded in the receipt's engram_mcp[]. JSON configs (mcpServers / mcp /
-# servers keyed) are edited with jq — never sed — deleting only the "engram" entry
-# and any parent object it emptied; the Codex config.toml block is removed with the
-# SAME awk method setup used to write it. Backup + atomic; every other server and
-# top-level key is preserved. Without jq a JSON config prints guided manual steps.
-remove_engram_from_config() {
-    local file="$1"
-    [ -f "$file" ] || return 0
-
-    if $DRY_RUN; then
-        print_info "would strip the Engram MCP registration from: $file"
-        return 0
-    fi
-
-    case "$file" in
-        *.toml)
-            # Codex TOML: drop the [mcp_servers.engram] block up to the next section
-            # header or EOF (mirror of setup.sh register_engram_codex's strip).
-            local stripped tmp
-            stripped="$(awk '
-                /^\[mcp_servers\.engram\]/ { skip=1; next }
-                skip && /^\[/ { skip=0 }
-                !skip { print }
-            ' "$file")"
-            tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; UNINSTALL_FAILED=1; return 0; }
-            cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
-            printf '%s\n' "$stripped" > "$tmp"
-            mv "$tmp" "$file"
-            print_ok "stripped Engram MCP block from $file (codex TOML)"
-            ;;
-        *)
-            if ! command -v jq >/dev/null 2>&1; then
-                # Textual probe before the verdict (#65). A recorded config is
-                # normally caught by remove_target's pre-flight, but this function
-                # is also reachable for paths no receipt lists, where a bare
-                # `return 0` reported a clean uninstall over a config still
-                # carrying Kurama's MCP entry. Flag only when the entry is really
-                # in there: a config holding nothing of ours has nothing to strip
-                # and must not fail an unrelated uninstall.
-                grep -qF '"engram"' "$file" 2>/dev/null || return 0
-                print_warn "jq not found — cannot strip the Engram MCP server from $file"
-                print_info "Manually remove the \"engram\" entry under mcpServers / mcp / servers"
-                UNINSTALL_FAILED=1
-                return 0
-            fi
-            local cleaned tmp
-            cleaned=$(jq '
-                (if (.mcpServers | type) == "object" then .mcpServers |= del(.engram) else . end)
-                | (if (.mcp | type) == "object" then .mcp |= del(.engram) else . end)
-                | (if (.servers | type) == "object" then .servers |= del(.engram) else . end)
-                | (if (.mcpServers | type) == "object" and (.mcpServers | length) == 0 then del(.mcpServers) else . end)
-                | (if (.mcp | type) == "object" and (.mcp | length) == 0 then del(.mcp) else . end)
-                | (if (.servers | type) == "object" and (.servers | length) == 0 then del(.servers) else . end)
-            ' "$file") || { print_warn "failed to clean $file"; UNINSTALL_FAILED=1; return 0; }
-            tmp="$(mktemp "${file}.XXXXXX")" || { print_warn "mktemp failed for $file"; UNINSTALL_FAILED=1; return 0; }
-            cp -p "$file" "${file}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
-            printf '%s\n' "$cleaned" > "$tmp"
-            mv "$tmp" "$file"
-            print_ok "stripped Engram MCP registration from $file"
-            ;;
-    esac
-}
-
 # Strip the Kurama TUI logo plugin from an OpenCode tui.json recorded in the
 # receipt's tui_plugins[]. Removal is surgical: drop every
 # plugin[] entry pointing at tui-plugins/kurama-logo.tsx and leave the rest of
@@ -553,7 +489,7 @@ path_within_root() {
 # True when a recorded MERGED-CONFIG entry must be refused (#65).
 #
 # The filter above bounds files[], the array uninstall drives `rm` from. The other
-# recorded arrays — prompts[], engram_mcp[], opencode_configs[], tui_plugins[],
+# recorded arrays — prompts[], opencode_configs[], tui_plugins[],
 # gitignore[] — were never filtered at all: each handler resolves an absolute
 # entry as-is and a relative one against the receipt dir, wherever that lands.
 # Those handlers do not delete a recorded path; they strip a marker block or a jq
@@ -802,16 +738,13 @@ EOF
     fi
 
     # jq-optional + integrity invariant (issue #71): the same honesty guard, one
-    # config over. Kurama MERGES into two more files it does not own — the
-    # opencode.json carrying its sdd-* agent block, and the JSON Engram client
-    # configs carrying the "engram" MCP entry — and neither strip can run without
-    # jq, or over a config that no longer parses. Both used to answer that by
-    # warning and returning 0, so the files[] sweep below still deleted the sdd
+    # config over. Kurama MERGES into one more file it does not own — the
+    # opencode.json carrying its sdd-* agent block — and that strip cannot run
+    # without jq, or over a config that no longer parses. It used to answer that
+    # by warning and returning 0, so the files[] sweep below still deleted the sdd
     # prompt files those agents point at, the config kept every dead Kurama entry,
-    # and the run exited 0 "Done." Probe both here, before a single file is
+    # and the run exited 0 "Done." Probe it here, before a single file is
     # removed, and refuse the whole target exactly as the two guards above do.
-    # The Codex config.toml is not probed: its Engram block is stripped with the
-    # same awk setup wrote it with, which needs neither jq nor valid JSON.
     local ofile opath blocked_agents="" oc_configs_pf
     oc_configs_pf="$(manifest_json_array "$manifest" "opencode_configs")"
     while IFS= read -r ofile; do
@@ -838,29 +771,7 @@ EOF
 $oc_configs_pf
 EOF
 
-    local efile epath blocked_engram="" engram_pf
-    engram_pf="$(manifest_json_array "$manifest" "engram_mcp")"
-    while IFS= read -r efile; do
-        [ -n "$efile" ] || continue
-        case "$efile" in
-            *.toml) continue ;;
-            /*)     epath="$(normalize_abs_path "$efile")" ;;
-            *)      epath="$(normalize_abs_path "$dir_abs/$efile")" ;;
-        esac
-        [ -f "$epath" ] || continue
-        # Textual probe: the registration is written as an "engram" key under
-        # mcpServers / mcp / servers. No match, nothing of ours to strip.
-        grep -qF '"engram"' "$epath" 2>/dev/null || continue
-        if [ "$have_jq" -eq 1 ] && jq -e . "$epath" >/dev/null 2>&1; then
-            continue
-        fi
-        blocked_engram="${blocked_engram}$epath
-"
-    done <<EOF
-$engram_pf
-EOF
-
-    if [ -n "$blocked_agents" ] || [ -n "$blocked_engram" ]; then
+    if [ -n "$blocked_agents" ]; then
         local merged_why
         if [ "$have_jq" -eq 1 ]; then
             merged_why="a merged config is not valid JSON"
@@ -883,14 +794,6 @@ EOF
                 fi
             done <<EOF
 $blocked_agents
-EOF
-            while IFS= read -r epath; do
-                if [ -n "$epath" ]; then
-                    print_info "  the \"engram\" entry under mcpServers / mcp / servers in:"
-                    print_info "    $epath"
-                fi
-            done <<EOF
-$blocked_engram
 EOF
             UNINSTALL_FAILED=1
             return 0
@@ -989,29 +892,9 @@ EOF
 $settings
 EOF
 
-    # Strip the Engram MCP registration from every config the receipt recorded
-    # (engram_mcp[]). Entries are relative to $dir, except the global Claude
-    # ~/.claude.json which is recorded absolute — honor both.
-    local efile engram_files
-    engram_files="$(manifest_json_array "$manifest" "engram_mcp")"
-    while IFS= read -r efile; do
-        [ -n "$efile" ] || continue
-        if config_entry_out_of_tree "$efile" "$dir_abs" "$root_abs" "$effective_scope"; then
-            print_warn "$label: refusing recorded engram config that resolves outside $root_abs: $efile"
-            UNINSTALL_FAILED=1
-            continue
-        fi
-        case "$efile" in
-            /*) remove_engram_from_config "$efile" ;;
-            *)  remove_engram_from_config "$dir/$efile" ;;
-        esac
-    done <<EOF
-$engram_files
-EOF
-
     # Strip the kurama orchestrator marker block from each recorded prompt file
-    # (prompts[]), preserving the user's surrounding content. Same relative/absolute
-    # handling as engram_mcp above.
+    # (prompts[]), preserving the user's surrounding content. Entries are relative
+    # to $dir, except ones recorded absolute — honor both.
     local pfile prompts
     prompts="$(manifest_json_array "$manifest" "prompts")"
     while IFS= read -r pfile; do
@@ -1176,8 +1059,8 @@ show_help() {
     echo "Only files recorded in each target's $INSTALL_MANIFEST_NAME are removed, and only"
     echo "when they resolve inside the tree that install wrote to — a recorded path that"
     echo "points anywhere else is refused, never deleted."
-    echo "The recorded settings.json hooks block, the Engram MCP registration, and the"
-    echo "orchestrator BEGIN:kurama block are stripped surgically; other keys/content stay."
+    echo "The recorded settings.json hooks block and the orchestrator BEGIN:kurama block"
+    echo "are stripped surgically; other keys/content stay."
     echo ""
     echo "--path and --agent are mutually exclusive: --path names the target directory"
     echo "outright, --agent looks one up by harness. Passing both is rejected rather than"

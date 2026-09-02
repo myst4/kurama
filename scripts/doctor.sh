@@ -19,8 +19,6 @@ set -uo pipefail
 #   - Claude Code hooks present in settings.json (claude-code)
 #   - gh present + authenticated + project scopes (kanban prerequisite)
 #   - pi present + the Pi package stack (best-effort via `pi list`)
-#   - engram present + responds (engram --version)
-#   - Engram MCP registrations recorded in the receipt still exist (O5)
 #   - project scope: the machine-local .gitignore block is there (#105), and
 #     nothing machine-local is already TRACKED by git (the actual damage)
 #   - project scope: installed but never initialized — no openspec/config.yaml
@@ -596,44 +594,6 @@ check_hooks() {
     fi
 }
 
-# O5/O7: report the Engram MCP registrations the receipt recorded. Read-only —
-# each recorded config must still exist and reference an engram server. Entries
-# are receipt-relative (project + most global agents) or absolute (e.g. the
-# global claude ~/.claude.json and the codex config.toml sit outside the receipt
-# dir). Recorded-but-missing is a soft warning (mention it; do not fail red).
-check_engram_mcp() {
-    local receipt_dir="$1"
-    local manifest="$receipt_dir/$INSTALL_MANIFEST_NAME"
-    local mode entries rel target found=0
-    mode="$(manifest_field "$manifest" "engram")"
-    entries="$(manifest_json_array "$manifest" "engram_mcp")"
-
-    if [ -z "$entries" ]; then
-        if [ "$mode" = "yes" ]; then
-            note "Engram enabled but no MCP registration recorded (Pi-only, or jq was missing at setup)"
-        else
-            note "Engram not enabled — using the markdown persistence fallback"
-        fi
-        return 0
-    fi
-
-    while IFS= read -r rel; do
-        [ -n "$rel" ] || continue
-        found=$((found + 1))
-        case "$rel" in
-            /*) target="$rel" ;;
-            *)  target="$receipt_dir/$rel" ;;
-        esac
-        if [ -f "$target" ] && grep -q 'engram' "$target" 2>/dev/null; then
-            pass "Engram MCP registered: $rel"
-        else
-            soft "Engram MCP recorded but missing/empty: $rel (re-run setup --with-engram)"
-        fi
-    done <<EOF
-$entries
-EOF
-}
-
 # issue #40: a Kurama logo still registered in an OpenCode tui.json whose plugin
 # .tsx is gone is a DANGLING TUI plugin — OpenCode loads plugin[] on start, and a
 # missing file breaks the splash. check_receipt_files flags the missing FILE; this
@@ -805,10 +765,8 @@ check_initialized() {
     local receipt_dir="$1" scope="$2"
     [ "$scope" = "project" ] || return 0
 
-    # `sdd-init` writes openspec/config.yaml in the openspec and hybrid modes,
-    # and a .kurama/ settings bundle in every mode. Either proves the phase ran;
-    # requiring config.yaml alone would report every engram-mode project as
-    # uninitialized.
+    # `sdd-init` writes openspec/config.yaml — the one settings home. Its
+    # presence proves the phase ran.
     if [ -f "$receipt_dir/openspec/config.yaml" ]; then
         pass "initialized: openspec/config.yaml is the settings home"
         return 0
@@ -829,9 +787,7 @@ check_initialized() {
     note "  install is on disk, but no SDD cycle can run: there is no artifact_store.mode,"
     note "  execution_mode or tdd setting."
     note "  (#106: setup.sh writes .kurama/skill-registry.md at install time, so that file on"
-    note "  its own is no longer evidence that init ran. If you chose engram persistence AND"
-    note "  already ran /sdd-init, the settings live in Engram, which doctor cannot read —"
-    note "  re-running /sdd-init is harmless either way.)"
+    note "  its own is no longer evidence that init ran.)"
 }
 
 check_tooling() {
@@ -860,7 +816,7 @@ check_tooling() {
             local plist; plist="$(pi list 2>/dev/null || true)"
             local pkg
             # Third-party npm package names, as published on the registry.
-            for pkg in gentle-engram pi-mcp-adapter pi-subagents-j0k3r rpiv-ask-user-question pi-web-access rpiv-todo pi-btw; do
+            for pkg in pi-mcp-adapter pi-subagents-j0k3r rpiv-ask-user-question pi-web-access rpiv-todo pi-btw; do
                 if printf '%s' "$plist" | grep -q "$pkg"; then
                     pass "  pi package: $pkg"
                 else
@@ -872,17 +828,6 @@ check_tooling() {
         fi
     else
         note "pi not installed (Pi harness unavailable)"
-    fi
-
-    # engram (persistence engine)
-    if command -v engram >/dev/null 2>&1; then
-        if engram --version >/dev/null 2>&1; then
-            pass "engram: installed and responding ($(engram --version 2>/dev/null | head -1))"
-        else
-            soft "engram: installed but did not respond to --version"
-        fi
-    else
-        note "engram not installed (markdown persistence fallback in use)"
     fi
 }
 
@@ -934,7 +879,6 @@ TOOLS
     check_version "$manifest"
     check_markers "$tools" "$scope" "$receipt_dir"
     check_hooks "$tools" "$scope" "$receipt_dir"
-    check_engram_mcp "$receipt_dir"
     check_tui_logo "$receipt_dir"
     check_machine_local_files "$receipt_dir" "$scope"
     check_initialized "$receipt_dir" "$scope"
