@@ -9519,6 +9519,324 @@ run_test "session identity resolves without an SDD cycle (#102)" test_l_session_
 run_test "sdd-learn installs by default (optional group)" test_l_sdd_learn_installs_by_default
 run_test "sdd-learn is a well-formed, registered skill" test_l_sdd_learn_is_a_well_formed_registered_skill
 
+echo ""
+
+# ============================================================================
+# UNIT-AA (issue #129): the change name carries the linked issue number
+#
+# #109 put the issue number into BRANCH names and stopped there. The change name
+# — the string that keys `sdd/{change-name}/…` topic keys, `.kurama/sdd/{change-name}/`,
+# `openspec/changes/{change-name}/`, the phase envelopes and `state.md` — had no
+# rule at all, so a cycle run with the kanban module active and a card attached
+# still produced `nodemaven-gateway-provider`: the linkage recorded in `state.md`,
+# in the proposal frontmatter and on the board, and absent from the one string a
+# human reads in a directory listing.
+#
+# The rule is pure documentation — no script derives a change name — so the
+# shipped TEXT is the whole enforcement surface, and it breaks silently: a clause
+# dropped in an edit costs nothing at validate time and everything at cycle time.
+# Nothing else in this file reads these five documents for this property.
+#
+# Each case is scoped to the SECTION where the rule has to be read to be acted on,
+# and pins the FORM plus its worked example. A whole-file grep for "issue" is green
+# on all five documents before this change, which is why no case uses one.
+#
+# Mutation-checked at authoring time against a `git archive origin/main` tree
+# materialized in a temp dir: every case below fails there. Nothing here consults
+# `origin/main` at RUNTIME — a test that did would fail in a shallow clone, in a
+# fork whose main has moved, and in the tarball install.
+# ============================================================================
+
+AA_SDD_NEW_SKILL="$REPO_DIR/skills/sdd-new/SKILL.md"
+AA_BRAINSTORM_SKILL="$REPO_DIR/skills/sdd-brainstorm/SKILL.md"
+AA_KANBAN_SKILL="$REPO_DIR/skills/kanban-github/SKILL.md"
+AA_OPENSPEC_DOC="$REPO_DIR/skills/_shared/openspec-convention.md"
+AA_BRANCH_PR_SKILL="$REPO_DIR/skills/branch-pr/SKILL.md"
+
+# The heading of the definition section added to openspec-convention.md. Held in a
+# variable because the heading itself contains backticks: written inline it would be
+# either a command substitution (double quotes) or an SC2016 finding (single quotes).
+AA_CHANGE_NAME_HEADING="## The \`{change-name}\`"
+
+# Print the body of the markdown section of file $1 whose heading line is exactly
+# $2, up to the next `##`-level heading. Fenced blocks are tracked so a `##` shown
+# INSIDE a fence cannot cut a section short. Empty when the heading is gone, which
+# every caller size-checks.
+#
+# UNIT-R has the same helper under the name `md_section`, and that duplication is
+# deliberate: this file executes top to bottom, UNIT-R's definition lives ~4500
+# lines below this block, and a function is not callable before its definition is
+# reached. Same reason `assert_block_is_substantial` and
+# `assert_section_is_substantial` already coexist here.
+aa_md_section() {
+    local file="$1" heading="$2"
+    [ -f "$file" ] || return 0
+    awk -v h="$heading" '
+        /^```/                                  { fence = !fence }
+        !fence && $0 == h                       { f = 1; next }
+        f && !fence && substr($0, 1, 2) == "##" { exit }
+        f                                       { print }
+    ' "$file"
+}
+
+# Every rule pinned below is a wrapped markdown bullet or paragraph, so a
+# line-oriented match would miss it for a reason that has nothing to do with the
+# rule. Sections are flattened to one line before any assertion runs.
+aa_flat() {
+    tr '\n' ' ' <<<"$1"
+}
+
+# Fail unless $1 is a real section body rather than the empty string a renamed,
+# moved or deleted heading yields — every assertion over an empty haystack passes,
+# so without this floor a case that reads a section into nothing is green. $2 names
+# the section, $3 is the byte floor.
+aa_assert_section_is_substantial() {
+    local body="$1" what="$2" floor="$3"
+    local bytes
+    bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
+    if [ "$bytes" -lt "$floor" ]; then
+        echo "  $what came back ${bytes}B (floor ${floor}B) — the heading is gone or"
+        echo "  renamed, and every assertion below it would pass over an empty string"
+        return 1
+    fi
+    return 0
+}
+
+test_aa_sdd_new_names_the_change_from_the_issue() {
+    # Wrong-reason pass this guards against: step 1.5 already talks about issues —
+    # it reads the body with `gh issue view` before classifying — so a whole-file
+    # grep for "issue", or even for "#N", was green before #129 and proves nothing.
+    # Every assertion here is scoped to a named section and pins the FORM the name
+    # takes, which origin/main states nowhere.
+    local gate rules intro
+    gate="$(aa_flat "$(aa_md_section "$AA_SDD_NEW_SKILL" "### 1.5. Brainstorm gate")")"
+    aa_assert_section_is_substantial "$gate" "sdd-new's brainstorm gate" 2000 || return 1
+
+    assert_matches "$gate" 'change name is .*\{issue\}-\{slug\}' \
+        "the naming rule itself, at the step that already has the issue body in hand" || return 1
+    assert_matches "$gate" '22-nodemaven-gateway-provider' \
+        "a concrete numbered example, not the pattern alone" || return 1
+    assert_matches "$gate" 'sdd/\{change-name\}/.*\.kurama/sdd/\{change-name\}/.*openspec/changes/\{change-name\}/' \
+        "where the name flows: topic keys, the .kurama fallback dir, the openspec dir" || return 1
+    assert_matches "$gate" 'envelope.*state\.md|state\.md.*envelope' \
+        "the two remaining carriers of the name: the phase envelopes and state.md" || return 1
+    assert_matches "$gate" 'announce.{0,80}one line' \
+        "the resolved name is announced in one line before anything is delegated" || return 1
+
+    # The gate is where the name is decided; Rules is what an orchestrator re-reads
+    # mid-cycle, and the intro is where `<change-name>` is introduced as an argument.
+    # A rule present in only one of the three is a rule half the readers never see.
+    rules="$(aa_flat "$(aa_md_section "$AA_SDD_NEW_SKILL" "## Rules")")"
+    aa_assert_section_is_substantial "$rules" "sdd-new's Rules section" 1200 || return 1
+    assert_matches "$rules" '\{issue\}-\{slug\}' \
+        "the Rules list restates the naming rule" || return 1
+
+    intro="$(aa_flat "$(aa_md_section "$AA_SDD_NEW_SKILL" "## What This Skill Is")")"
+    aa_assert_section_is_substantial "$intro" "sdd-new's opening section" 600 || return 1
+    assert_matches "$intro" '\{issue\}-\{slug\}' \
+        "the <change-name> definition at the top carries the issue clause" || return 1
+    return 0
+}
+
+test_aa_sdd_brainstorm_keys_the_ledger_by_the_issue() {
+    # Wrong-reason pass this guards against: this skill's own *When the Request Came
+    # From an Issue* section already discusses issues AND the change name, so a
+    # file-wide grep answers from there while the Persistence clause — the one the
+    # WRITE reads — still says "propose a kebab-case slug" and nothing more. Scoped
+    # to Persistence for that reason.
+    local persistence
+    persistence="$(aa_flat "$(aa_md_section "$AA_BRAINSTORM_SKILL" "## Persistence")")"
+    aa_assert_section_is_substantial "$persistence" "sdd-brainstorm's Persistence section" 1200 || return 1
+
+    assert_matches "$persistence" 'change name' \
+        "the change-name clause is still where the ledger's key is resolved" || return 1
+    assert_matches "$persistence" 'issue-linked|named an issue' \
+        "the issue case that clause gained" || return 1
+    assert_matches "$persistence" '\{issue\}-\{slug\}' \
+        "the numbered form" || return 1
+    assert_matches "$persistence" '22-nodemaven-gateway-provider' \
+        "a worked example in the clause that names the ledger's key" || return 1
+    assert_matches "$persistence" 'first artifact keyed by it' \
+        "why it must resolve here: the ledger is the first artifact keyed by the name" || return 1
+    return 0
+}
+
+test_aa_kanban_hands_the_numbered_name_to_the_cycle() {
+    # Wrong-reason pass this guards against: kanban-github has said
+    # `type/{issue}-{slug}` since #109, so asserting that form passes unchanged on
+    # origin/main. What #129 adds is the card -> CYCLE handoff — the change name and
+    # the artifact keys it feeds — so every assertion names the change, not the
+    # branch, and all of them are scoped to Work Intake, where the card is picked up.
+    local intake
+    intake="$(aa_flat "$(aa_md_section "$AA_KANBAN_SKILL" "## Work Intake (which card to pick, and when it moves to Ready)")")"
+    aa_assert_section_is_substantial "$intake" "kanban-github's Work Intake section" 1200 || return 1
+
+    # The bound stays well under 255: BSD grep rejects a larger repetition count
+    # outright ("invalid repetition count(s)"), and a rejected pattern reads as a
+    # content regression on macOS while Linux passes.
+    assert_matches "$intake" 'change name.{0,120}\{issue\}-\{slug\}' \
+        "the card's number reaches the CHANGE name, not only the branch" || return 1
+    assert_matches "$intake" 'sdd/\{change-name\}' \
+        "the artifact keys that name goes on to key" || return 1
+    assert_matches "$intake" 'sdd-new' \
+        "the handoff itself: the numbered name is what sdd-new is given" || return 1
+    assert_matches "$intake" '\{issue\}-\{issue\}-\{slug\}' \
+        "the no-double-number clause, stated where the card supplies the number" || return 1
+    return 0
+}
+
+test_aa_openspec_convention_defines_the_numbered_form() {
+    # Wrong-reason pass this guards against: `{change-name}` appears in some twenty
+    # table rows and paths of this file, so a file-wide grep for the token is green
+    # on origin/main — where the token is USED everywhere and DEFINED nowhere. This
+    # case reads the definition section only; on origin/main aa_md_section returns
+    # the empty string and the floor check is what fails, rather than an assertion
+    # passing over nothing.
+    local def
+    def="$(aa_flat "$(aa_md_section "$AA_OPENSPEC_DOC" "$AA_CHANGE_NAME_HEADING")")"
+    aa_assert_section_is_substantial "$def" "openspec-convention's {change-name} definition" 700 || return 1
+
+    assert_matches "$def" 'kebab' \
+        "the base form: a kebab-case slug" || return 1
+    assert_matches "$def" 'same string' \
+        "the property the definition exists for: ONE string keys every store" || return 1
+    assert_matches "$def" '\{issue\}-\{slug\}' \
+        "the issue-linked form" || return 1
+    assert_matches "$def" '22-nodemaven-gateway-provider' \
+        "a worked example of that form" || return 1
+    assert_matches "$def" 'topic key' \
+        "the engram topic keys the name keys" || return 1
+    assert_matches "$def" '\.kurama/sdd/\{change-name\}' \
+        "the .kurama fallback directory" || return 1
+    assert_matches "$def" 'state\.md' \
+        "state.md, which records the name the cycle resumes under" || return 1
+    return 0
+}
+
+test_aa_branch_composes_without_a_double_number() {
+    # Wrong-reason pass this guards against: `type/{issue}-{slug}` is #109's form and
+    # has been in this section since PR #114, so asserting it proves nothing about
+    # #129. The clause added here is the COMPOSITION — `type/{change-name}` when the
+    # change name already starts with the number — and it is useless without the
+    # malformed form it forbids, so both are pinned together with the "never" that
+    # tells them apart. A doc that showed only the doubled name would satisfy a bare
+    # grep for `22-22`.
+    local naming
+    naming="$(aa_flat "$(aa_md_section "$AA_BRANCH_PR_SKILL" "## Branch Naming")")"
+    aa_assert_section_is_substantial "$naming" "branch-pr's Branch Naming section" 800 || return 1
+
+    assert_matches "$naming" 'type/\{change-name\}' \
+        "the composed form: the change name already carries the number" || return 1
+    assert_matches "$naming" 'never.{0,60}feat/22-22-nodemaven-gateway-provider' \
+        "the doubled name named as forbidden, not merely shown" || return 1
+    assert_matches "$naming" 'feat/22-nodemaven-gateway-provider' \
+        "the correct branch for that same change, alongside it" || return 1
+    # #109's rule must survive the insertion: this section is the only place the
+    # issue-linked branch form is stated, and #129 must extend it, not displace it.
+    assert_matches "$naming" 'type/\{issue\}-\{slug\}' \
+        "#109's issue-linked branch form, still stated here" || return 1
+    return 0
+}
+
+test_aa_the_not_linked_case_is_stated_wherever_the_rule_is() {
+    # Wrong-reason pass this guards against: a rule stated without its fallback reads
+    # as "every change name needs a number", and an orchestrator acting on that goes
+    # looking for an issue that does not exist — or invents one — on a request that
+    # never named a ticket. The fallback #109 wrote for BRANCHES cannot answer for
+    # the change name, so each document that gained the rule must state the unchanged
+    # case in the same section that states the rule.
+    local gate persistence def
+    gate="$(aa_flat "$(aa_md_section "$AA_SDD_NEW_SKILL" "### 1.5. Brainstorm gate")")"
+    persistence="$(aa_flat "$(aa_md_section "$AA_BRAINSTORM_SKILL" "## Persistence")")"
+    def="$(aa_flat "$(aa_md_section "$AA_OPENSPEC_DOC" "$AA_CHANGE_NAME_HEADING")")"
+    aa_assert_section_is_substantial "$gate" "sdd-new's brainstorm gate" 2000 || return 1
+    aa_assert_section_is_substantial "$persistence" "sdd-brainstorm's Persistence section" 1200 || return 1
+    aa_assert_section_is_substantial "$def" "openspec-convention's {change-name} definition" 700 || return 1
+
+    assert_matches "$gate" 'no issue in play' \
+        "sdd-new: the not-linked case, where the name is unchanged" || return 1
+    assert_matches "$persistence" 'no issue in play' \
+        "sdd-brainstorm: the not-linked case at the ledger's naming moment" || return 1
+    assert_matches "$def" 'no issue in play' \
+        "openspec-convention: the not-linked case in the definition itself" || return 1
+
+    # And the rule binds at CREATION. Without that sentence, an unnumbered change
+    # created before #129 reads as malformed, and the next phase to touch it either
+    # renames it — orphaning every artifact already keyed by the old name — or stalls
+    # looking for an issue number the cycle never had.
+    assert_matches "$gate" 'at creation.{0,200}(never rename|keeps resolving)' \
+        "sdd-new: an existing unnumbered change keeps its name and is never renamed" || return 1
+    assert_matches "$def" 'binds when the change is created' \
+        "openspec-convention: the rule binds at creation, never retroactively" || return 1
+    assert_matches "$def" 'never renamed|keeps resolving' \
+        "openspec-convention: an existing unnumbered change still resolves as it is" || return 1
+    return 0
+}
+
+test_aa_a_slug_the_user_passed_is_prefixed_not_replaced() {
+    # Wrong-reason pass this guards against: the word "prefix" alone does not say
+    # what happens to the slug the user typed. The failure this clause prevents is an
+    # orchestrator that reads "the change name is {issue}-{slug}", re-derives the slug
+    # from the issue TITLE, and renames the user's change out from under them — so
+    # both halves are required: the user's slug named as the thing kept, and the
+    # replacement named as the thing forbidden.
+    local gate persistence
+    gate="$(aa_flat "$(aa_md_section "$AA_SDD_NEW_SKILL" "### 1.5. Brainstorm gate")")"
+    persistence="$(aa_flat "$(aa_md_section "$AA_BRAINSTORM_SKILL" "## Persistence")")"
+    aa_assert_section_is_substantial "$gate" "sdd-new's brainstorm gate" 2000 || return 1
+    aa_assert_section_is_substantial "$persistence" "sdd-brainstorm's Persistence section" 1200 || return 1
+
+    assert_matches "$gate" 'prefix their slug' \
+        "sdd-new: an explicitly passed slug is prefixed" || return 1
+    assert_matches "$gate" 'never replace it' \
+        "sdd-new: and never replaced with one derived from the issue" || return 1
+    assert_matches "$persistence" 'prefix a slug the user gave rather than replacing it' \
+        "sdd-brainstorm: the same rule where the ledger resolves its own name" || return 1
+    return 0
+}
+
+test_aa_all_five_documents_teach_one_shape() {
+    # Wrong-reason pass this guards against: every case above reads ONE document, so
+    # five green cases are compatible with five different shapes — `{issue}-{slug}`
+    # here, a trailing number there, `issue-{n}` somewhere else. The change name is a
+    # join key: one document teaching a different shape produces artifacts the other
+    # four cannot find. This is the only case that reads all five, and it pins the
+    # form AND the single worked example they must share.
+    local f flat missing_form="" missing_example=""
+    for f in "$AA_SDD_NEW_SKILL" "$AA_BRAINSTORM_SKILL" "$AA_KANBAN_SKILL" \
+             "$AA_OPENSPEC_DOC" "$AA_BRANCH_PR_SKILL"; do
+        if [ ! -f "$f" ]; then
+            echo "  missing document: $f"
+            return 1
+        fi
+        flat="$(flatten_file "$f")"
+        grep -Eq '\{issue\}-\{slug\}' <<<"$flat" \
+            || missing_form="$missing_form ${f#"$REPO_DIR/"}"
+        grep -Eq '22-nodemaven-gateway-provider' <<<"$flat" \
+            || missing_example="$missing_example ${f#"$REPO_DIR/"}"
+    done
+    if [ -n "$missing_form" ]; then
+        echo "  documents that never show the {issue}-{slug} form:$missing_form"
+        return 1
+    fi
+    if [ -n "$missing_example" ]; then
+        echo "  documents that state the form with no worked example:$missing_example"
+        return 1
+    fi
+    return 0
+}
+
+echo -e "${BOLD}UNIT-AA (issue #129): change names carry the linked issue number${NC}"
+run_test "sdd-new names an issue-linked change {issue}-{slug}" test_aa_sdd_new_names_the_change_from_the_issue
+run_test "sdd-brainstorm keys the ledger by the issue number" test_aa_sdd_brainstorm_keys_the_ledger_by_the_issue
+run_test "kanban-github hands the numbered name to the cycle" test_aa_kanban_hands_the_numbered_name_to_the_cycle
+run_test "openspec-convention defines the {issue}-{slug} form" test_aa_openspec_convention_defines_the_numbered_form
+run_test "the branch composes as type/{change-name}, never a double number" test_aa_branch_composes_without_a_double_number
+run_test "the not-issue-linked case is stated wherever the rule is" test_aa_the_not_linked_case_is_stated_wherever_the_rule_is
+run_test "a slug the user passed is prefixed, never replaced" test_aa_a_slug_the_user_passed_is_prefixed_not_replaced
+run_test "all five documents teach one shape and one example" test_aa_all_five_documents_teach_one_shape
+
+echo ""
 
 # ============================================================================
 # UNIT-W (issue #65): the deferred backlog

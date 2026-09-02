@@ -21,7 +21,8 @@ delegate the real work to phase sub-agents (or the native `sdd-explore` / `sdd-p
 `examples/claude-code/agents/`) and synthesize their results. Do NOT do phase work inline.
 
 It is user-invocable as `/sdd-new <change-name>`. `<change-name>` names the change and becomes the
-`{change-name}` in every artifact topic key (`sdd/{change-name}/...`).
+`{change-name}` in every artifact topic key (`sdd/{change-name}/...`). When the cycle is
+issue-linked, that name carries the issue number — `{issue}-{slug}`, resolved at step 1.5.
 
 ## Orchestration Flow
 
@@ -49,6 +50,17 @@ written from an ambiguous request is a well-formatted guess.
 issue"), read its body with `gh issue view <N> --comments` before classifying — that is where
 vague requests come from, and classifying the one-line ask instead of the issue is the same as
 not classifying at all. `gh` is Bash for state, so this stays inline.
+
+**Name the change from the issue.** When the cycle is issue-linked — the kanban module attached a
+card, or the request named an issue (`#N`, a GitHub URL, "hagamos este issue") — the change name is
+**`{issue}-{slug}`**: the number first, then the kebab slug (`22-nodemaven-gateway-provider`). That
+name keys everything downstream — `sdd/{change-name}/…` topic keys, `.kurama/sdd/{change-name}/`,
+`openspec/changes/{change-name}/`, the phase envelopes and `state.md` — so a name without the number
+leaves every artifact untraceable to its ticket. If the user passed an unnumbered `<change-name>`
+explicitly, **prefix their slug**; never replace it with one of your own. **No issue in play** →
+unchanged: the plain `{slug}`. Announce the resolved name in ONE line before you delegate anything.
+The rule binds at creation: an existing change created without a number keeps resolving under the
+name it already has — never rename or re-derive one.
 
 **Assess** the request — from the issue body, the natural-language ask, or the args — against
 four questions:
@@ -143,6 +155,9 @@ delegations are skipped.
 - Classify the request at the brainstorm gate BEFORE exploring, and read the issue body first when the
   request names an issue. In `supervised` always ask; in `auto` a **vague** request still stops there
   and a **clear** one passes through.
+- Name an issue-linked change `{issue}-{slug}` at step 1.5 and say so in one line — prefix a slug the
+  user passed rather than replacing it. No issue in play leaves the name unchanged, and an existing
+  unnumbered change is never renamed to satisfy this.
 - Never delegate `sdd-propose` in the same breath as the exploration summary — the approach pick is a
   stop in `supervised`; in `auto` take the recommendation and say so.
 - Never explore twice. If the brainstorm round already produced an `explore` artifact, reuse it or
