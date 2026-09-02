@@ -50,9 +50,8 @@ Resolution rules, binding on every orchestrator and phase:
 
 ## Phase I/O (which artifacts each phase reads and writes)
 
-The read/write contract per phase. The orchestrator passes artifact REFERENCES (topic keys
-or file paths), never content; a phase with required dependencies retrieves them itself from
-the active backend via Section B.
+The read/write contract per phase. The orchestrator passes artifact REFERENCES (file paths),
+never content; a phase with required dependencies reads them itself via Section B.
 
 | Phase | Reads | Writes |
 |-------|-------|--------|

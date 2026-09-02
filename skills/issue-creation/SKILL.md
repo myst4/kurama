@@ -134,8 +134,8 @@ issue title reusable as the commit subject and the PR title.
 
 ## Kanban Integration (conditional)
 
-Only when the project has **`kanban.enabled: true`** (settings from the
-`sdd-init/{project}` bundle or `openspec/config.yaml`; see `skills/kanban-github/SKILL.md`).
+Only when the project has **`kanban.enabled: true`** (settings from
+`openspec/config.yaml`; see `skills/kanban-github/SKILL.md`).
 With Kanban inactive, this section is a **no-op** — issue creation behaves exactly as
 above, zero extra commands, zero behavior change.
 

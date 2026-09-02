@@ -36,8 +36,8 @@ Read `openspec/changes/{change-name}/proposal.md`, `openspec/changes/{change-nam
 `tasks` (completeness cannot be checked without it) are REQUIRED. `proposal` and `design`
 refine the correctness and coherence checks; if absent, note the gap in `risks` and continue.
 
-**Missing required artifact (E2)**: if a REQUIRED artifact cannot be retrieved (search
-returns empty, or the observation/file is missing), STOP — do NOT verify against a partial
+**Missing required artifact (E2)**: if a REQUIRED artifact cannot be retrieved (its file is
+missing or unreadable), STOP — do NOT verify against a partial
 or fabricated baseline. Return the **Section D** envelope with `status: blocked`, name the
 missing artifact in `executive_summary`, and set `next_recommended` to the phase that
 produces it (`sdd-spec` for a missing spec, `sdd-tasks` for missing tasks).

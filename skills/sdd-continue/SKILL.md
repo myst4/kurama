@@ -69,8 +69,8 @@ have; never fail on the missing section.
 
 ### 3. Delegate the next phase
 
-Delegate the phase sub-agent(s). Pass required upstream artifacts by reference (topic key / path); the
-sub-agent reads them from the backend. Inject the resolved mode, settings, and any auto-resolved
+Delegate the phase sub-agent(s). Pass required upstream artifacts by reference (path); the
+sub-agent reads the files itself. Inject the pipeline settings and any auto-resolved
 Project Standards.
 
 ### 4. Present and gate

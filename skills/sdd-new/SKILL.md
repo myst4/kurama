@@ -21,7 +21,7 @@ delegate the real work to phase sub-agents (or the native `sdd-explore` / `sdd-p
 `examples/claude-code/agents/`) and synthesize their results. Do NOT do phase work inline.
 
 It is user-invocable as `/sdd-new <change-name>`. `<change-name>` names the change and becomes the
-`{change-name}` in every artifact topic key (`sdd/{change-name}/...`). When the cycle is
+`{change-name}` in every artifact path (`openspec/changes/{change-name}/...`). When the cycle is
 issue-linked, that name carries the issue number — `{issue}-{slug}`, resolved at step 1.5.
 
 ## Orchestration Flow
@@ -61,8 +61,8 @@ not classifying at all. `gh` is Bash for state, so this stays inline.
 **Name the change from the issue.** When the cycle is issue-linked — the kanban module attached a
 card, or the request named an issue (`#N`, a GitHub URL, "hagamos este issue") — the change name is
 **`{issue}-{slug}`**: the number first, then the kebab slug (`22-nodemaven-gateway-provider`). That
-name keys everything downstream — `sdd/{change-name}/…` topic keys, `.kurama/sdd/{change-name}/`,
-`openspec/changes/{change-name}/`, the phase envelopes and `state.md` — so a name without the number
+name keys everything downstream — `openspec/changes/{change-name}/`, `.kurama/sdd/{change-name}/`,
+the phase envelopes and `state.md` — so a name without the number
 leaves every artifact untraceable to its ticket. If the user passed an unnumbered `<change-name>`
 explicitly, **prefix their slug**; never replace it with one of your own. **No issue in play** →
 unchanged: the plain `{slug}`. Announce the resolved name in ONE line before you delegate anything.
@@ -105,8 +105,8 @@ in one line and continue to Explore — never block the cycle on an optional mod
 
 **First, check whether the exploration already happened.** `sdd-brainstorm` may have delegated a
 full `sdd-explore` mid-round to answer a question the code could answer, and that run produced a
-real artifact. Look for `sdd/{change-name}/explore` (or `openspec/changes/{change-name}/exploration.md`)
-before delegating anything:
+real artifact. Look for `openspec/changes/{change-name}/exploration.md` before delegating
+anything:
 
 - **Artifact present** — do NOT run a second exploration. Either pass it by reference and go
   straight to step 2.5, or delegate ONE refinement pass that receives both the existing exploration
@@ -116,8 +116,9 @@ before delegating anything:
   (1–3 files) produce no artifact and require nothing here.
 
 Delegate `sdd-explore` for `<change-name>` to investigate the codebase and compare approaches. Inject
-the resolved mode and any auto-resolved Project Standards. When step 1.5 produced a ledger, pass it
-by reference (`sdd/{change-name}/brainstorm`) as OPTIONAL upstream context — never inline its body.
+the pipeline settings and any auto-resolved Project Standards. When step 1.5 produced a ledger, pass
+it by reference (`openspec/changes/{change-name}/brainstorm.md`) as OPTIONAL upstream context —
+never inline its body.
 Present the exploration summary to the user.
 
 ### 2.5. Approach gate
@@ -132,9 +133,9 @@ In **`auto`**: take the recommendation and say which one in one line; do not ask
 ### 3. Propose
 
 Delegate `sdd-propose` to turn the exploration into a proposal (intent, scope, approach, rollback).
-Pass the proposal's upstream (`sdd/{change-name}/explore`, and `sdd/{change-name}/brainstorm` when a
-ledger exists) by reference — the sub-agent reads them from the backend; do not inline artifact
-bodies into the prompt. Name the approach chosen at step 2.5 in the prompt.
+Pass the proposal's upstream (`openspec/changes/{change-name}/exploration.md`, and
+`brainstorm.md` when a ledger exists) by reference — the sub-agent reads the files; do not inline
+artifact bodies into the prompt. Name the approach chosen at step 2.5 in the prompt.
 
 ### 4. Proposal gate
 
@@ -169,7 +170,7 @@ delegations are skipped.
 - Never explore twice. If the brainstorm round already produced an `explore` artifact, reuse it or
   delegate a refinement pass — never a second full exploration of the same change.
 - Resolve and propagate pipeline settings once; the propagated value wins on conflict.
-- Pass upstream artifacts by reference (topic key / path), not by inlining their content.
+- Pass upstream artifacts by reference (path), not by inlining their content.
 - Honor `execution_mode` at the proposal gate: in `supervised` (default) stop and wait for explicit
   user go-ahead; in `auto` fast-forward into planning (`spec ‖ design → tasks`), stopping at the
   implementation boundary. The implementation boundary and archive stay gated in both modes, and so
