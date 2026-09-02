@@ -241,39 +241,6 @@ ORIGS
 }
 
 # ============================================================================
-# #106: rebuild the project skill registry
-#
-# .kurama/skill-registry.md is the only surface a delegation resolves
-# `## Project Standards (skills to load)` from; without it every phase runs blind
-# to the repo's conventions (_shared/skill-resolver.md, step 4). The build is a
-# shipped script now, not a sub-agent — one process, well under a second.
-#
-# The builder is read from the CLONE, not from the install: this script already
-# runs from the clone and re-syncs everything else from it, so a stale installed
-# copy can never be what rebuilds the registry. A missing builder is a broken
-# clone and is reported as such — there is no model-scan fallback anywhere.
-# ============================================================================
-refresh_skill_registry() {
-    local root="$1"
-    local builder="$REPO_DIR/skills/_shared/build-skill-registry.sh"
-
-    if [ ! -f "$builder" ]; then
-        warn "skills/_shared/build-skill-registry.sh is missing from $REPO_DIR — the skill registry was NOT rebuilt"
-        return 0
-    fi
-
-    local out status=0
-    out="$(bash "$builder" --root "$root" 2>&1)" || status=$?
-    if [ "$status" -ne 0 ]; then
-        warn "The skill registry could not be rebuilt for $root — the rest of the update stands"
-        printf '%s\n' "$out" | awk 'NF { print "      " $0 }'
-        return 0
-    fi
-    [ -n "$out" ] && info "$out"
-    return 0
-}
-
-# ============================================================================
 # Re-sync one recorded target
 # ============================================================================
 
@@ -518,16 +485,6 @@ EOF
         else
             info "no machine-local .gitignore block recorded — target is not a git repo, or the write was refused (see the run above)"
         fi
-
-        # #106: refresh .kurama/skill-registry.md, the only surface delegations
-        # resolve project standards from. A re-sync is exactly when it goes
-        # stale: skills were just re-installed, and a --without run may have
-        # removed some. The delegated setup.sh above already rebuilt it, but
-        # QUIETLY (its output is captured and only shown on failure), and an
-        # update whose whole job is to keep an install honest should say so.
-        # Re-running is ~100 ms and byte-identical, so the second build costs
-        # nothing and covers a receipt whose delegated run predates this.
-        refresh_skill_registry "$receipt_dir"
     fi
 
     # Report which recorded files changed (restored drift or picked up new content).

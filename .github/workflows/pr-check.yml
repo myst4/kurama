@@ -244,6 +244,9 @@ jobs:
           go-testing docs/changelog.md docs/migration.md
           engram-convention.md docs/changelog.md docs/migration.md
           docs/engram.md docs/changelog.md docs/migration.md
+          skills/skill-registry/SKILL.md docs/changelog.md docs/migration.md
+          skills/_shared/build-skill-registry.sh docs/changelog.md docs/migration.md
+          skills/_shared/skill-resolver.md docs/changelog.md docs/migration.md
           '
 
           # Enumerate the in-scope files ONCE. A pathspec that matches nothing
