@@ -49,7 +49,7 @@ The two shipped Claude Code hooks — `orchestrator-write-guard.sh` and `archive
 
 Binding rules:
 
-- **In addition, never instead.** `verify-report.md` and `archive-report.md` are ALSO written as artifacts under `openspec/changes/{change-name}/`, which stays authoritative. The `.kurama/` copy is a mechanical mirror for the hooks and for offline tooling; if the two ever disagree, the `openspec/` copy wins.
+- **`verify-report.md` is a mirror; `archive-report.md` is not.** The verify report is ALSO an artifact at `openspec/changes/{change-name}/verify-report.md`, which stays authoritative — if the two disagree, the `openspec/` copy wins. The archive report has no `openspec/` home on purpose: by the time `sdd-archive` writes it the change folder has already moved to `openspec/changes/archive/`, and writing back into `openspec/changes/{change-name}/` would both resurrect the directory and break the byte-identical readback the move is verified with. The marker IS the archive report.
 - **Full content, never a stub.** `verify-report.md` MUST be the COMPLETE report markdown: the gate parses the `### Verdict` line and the Content Binding `Tree-Hash:` line straight out of this file.
 - **`archive-report.md` is mandatory on a successful archive.** It is the ONLY marker that tells the write guard the cycle is over; without it the guard keeps blocking the orchestrator long after the change was archived, and the gate keeps auto-detecting a closed change.
 - Writing these markers never disturbs the verify→archive content binding: the receipt pathspec excludes `.kurama/` (see `sdd-verify` Step 6b).
@@ -106,7 +106,7 @@ PERSISTENCE: write the artifact file to the path defined in openspec-convention.
 Do not return without writing it — downstream phases read your output from that file.
 ```
 
-When the artifact is `verify-report` or `archive-report`, append: *"Additionally write the full artifact to `.kurama/sdd/{change-name}/{artifact-type}.md`. This is a cycle marker read by the deterministic hooks — a mirror of the artifact, not a substitute for it."* (see *Hook-visible cycle markers*).
+When the artifact is `verify-report`, append: *"Additionally write the full report to `.kurama/sdd/{change-name}/verify-report.md`. This is a cycle marker read by the deterministic hooks — a mirror of the artifact, not a substitute for it."* The `archive-report` has no `openspec/` path: `.kurama/sdd/{change-name}/archive-report.md` is its only home (see *Hook-visible cycle markers*).
 
 ## Skill Registry
 

@@ -22,7 +22,7 @@ From the orchestrator:
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-Read `openspec/changes/{change-name}/exploration.md` (optional) plus `proposal.md`, `specs/`, `design.md`, `tasks.md` and `verify-report.md` under `openspec/changes/{change-name}/` (all required). Read and follow `skills/_shared/openspec-convention.md`. Perform merge and archive folder moves, then save the report to `openspec/changes/{change-name}/archive-report.md`.
+Read `openspec/changes/{change-name}/exploration.md` (optional) plus `proposal.md`, `specs/`, `design.md`, `tasks.md` and `verify-report.md` under `openspec/changes/{change-name}/` (all required). Read and follow `skills/_shared/openspec-convention.md`. Perform merge and archive folder moves, then save the report to `.kurama/sdd/{change-name}/archive-report.md`.
 
 ### Missing required inputs (failure semantics)
 
@@ -348,9 +348,9 @@ What makes this block correct here, and not merely copied from somewhere:
 - Compare against the PRE-MOVE snapshot only. Never against a post-move source, a staged tree, or
   a model readback of either side.
 - **No `diff -r` exclusions are needed.** In kurama the archive report never lands inside the
-  moved folder: Step 5 writes it to `openspec/changes/{change-name}/archive-report.md` and to
-  `.kurama/sdd/{change-name}/archive-report.md`, both outside `$destination`. The archived tree
-  must therefore be byte-identical to the snapshot, with nothing added and nothing missing.
+  moved folder: Step 5 writes it to `.kurama/sdd/{change-name}/archive-report.md`, outside
+  `$destination`. The archived tree must therefore be byte-identical to the snapshot, with
+  nothing added and nothing missing.
 - `openspec/` is excluded from the Step 0 `Tree-Hash` pathspec, so this move does NOT invalidate
   the content-binding receipt you revalidated before starting.
 - The collision guard is a portable pre-check, not an atomic cross-process no-clobber. The rule
@@ -381,15 +381,17 @@ Those two files are what the hooks read. An archive that leaves them wrong is no
 
 **This step is MANDATORY — do NOT skip it.**
 
-Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
 - artifact: `archive-report`
-- path: `openspec/changes/{change-name}/archive-report.md`
+- path: `.kurama/sdd/{change-name}/archive-report.md` — its ONLY home, and deliberately so.
+  By the time this step runs the change folder has already moved to
+  `openspec/changes/archive/{date}-{change-name}/`; writing back into
+  `openspec/changes/{change-name}/` would resurrect that directory and break the
+  byte-identical readback of Step 4 (`persistence-contract.md` → *Hook-visible cycle markers*).
 
 Per E2, if the write of the archive report or a merged main spec fails, retry once; if it still fails, return `status: blocked` naming the failing path (`persistence-contract.md` → *Write failure*). Do NOT silently drop the merge or the report.
 
-**Then also write the archive report to
-`.kurama/sdd/{change-name}/archive-report.md`.** Unconditional, exactly like the verify report
-(`sdd-verify` Step 7) — and it is the marker that CLOSES the cycle for the deterministic hooks:
+This write is unconditional, exactly like the verify report (`sdd-verify` Step 7) — and it is the
+marker that CLOSES the cycle for the deterministic hooks:
 
 - `orchestrator-write-guard.sh` treats `.kurama/sdd/{change-name}/state.md` **without** an
   `archive-report.md` beside it as an active cycle. Skip this write and the guard keeps blocking
