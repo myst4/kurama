@@ -42,21 +42,17 @@ Every finding carries one severity. Blocking is a property of severity, not of c
 
 ## The protocol, pattern by pattern
 
-### Pattern 0: Skill Resolution (BEFORE launching judges)
+### Pattern 0: Project Standards (BEFORE launching judges)
 
-Follow the **Skill Resolver Protocol** (`_shared/skill-resolver.md`) before launching ANY sub-agent:
+Follow the delegation contract (`_shared/delegation.md`) before launching ANY sub-agent:
 
-1. Obtain the skill registry (`.kurama/skill-registry.md` from the project root → skip if none)
-2. Identify the target files/scope — what code will the judges review?
-3. Match relevant skills from the registry's **Compact Rules** by:
-   - **Code context**: file extensions/paths of the target (e.g., `.tsx` → react-19, typescript)
-   - **Task context**: "review code" → framework/language skills; "create PR" → branch-pr skill
-4. Build a `## Project Standards (auto-resolved)` block with the matching compact rules
-5. Inject this block into BOTH Judge prompts, the Refuter prompt, AND the Fix Agent prompt (identical for all)
+1. Read the `standards:` list from `openspec/config.yaml` — the project's own declaration of what binds every sub-agent.
+2. Build the `## Project Standards (files to read)` block from it: the paths, verbatim and in order, with the instruction to read each file in full.
+3. Inject that block into BOTH Judge prompts, the Refuter prompt, AND the Fix Agent prompt (identical for all).
 
-This ensures every sub-agent works against project-specific standards, not just generic best practices.
+Do not filter the list by what you think the diff touches and do not add files of your own — the project chose the list, and every reviewer works against the same one.
 
-**If no registry exists**: warn the user ("No skill registry found — judges will review without project-specific standards. Run `skill-registry` to fix this.") and proceed with generic review only.
+**If `standards:` is empty or absent**: omit the block entirely and proceed. A project that declares no standards gets a generic review, which is a correct run and not a degraded one.
 
 ### Pattern 1: Parallel Blind Review (distinct lenses)
 
@@ -131,7 +127,7 @@ User asks for "judgment day"
 │   └── NO  → ask user to specify scope before proceeding
 │
 ▼
-Pattern 0: resolve skills → build "Project Standards (auto-resolved)" block
+Pattern 0: read `standards:` → build "Project Standards (files to read)" block
 ▼
 Launch Judge A (Correctness & Security) + Judge B (Regressions & Resilience)
   via the harness's native sub-agent mechanism — blind, parallel preferred,
@@ -227,9 +223,10 @@ You do NOT approve, certify, or bless code — you return findings only.
              and adherence to project conventions."}
 Lead with your primary lens, but do not ignore issues outside it.
 
-{if compact rules were resolved in Pattern 0, inject the following block — otherwise OMIT this entire section}
-## Project Standards (auto-resolved)
-{paste matching compact rules blocks from the skill registry}
+{if Pattern 0 produced a standards list, inject the following block — otherwise OMIT this entire section}
+## Project Standards (files to read)
+Read each file below in full before starting work; follow its rules strictly:
+{one line per path from the project's `standards:` list, verbatim and in order}
 
 ## Review Checklist (all judges cover these; your lens sets priority)
 - Correctness: Does the code do what it claims? Are there logical errors?
@@ -255,7 +252,7 @@ Each finding, to make cross-judge matching deterministic:
 If you find NO issues, return an empty findings list:
 FINDINGS: none
 
-Always include at the end: **Skill Resolution**: {injected|fallback-registry|fallback-path|none} — {details}
+Always include at the end: **Skill Resolution**: {injected|fallback-path|none} — {details}
 
 ## Instructions
 Be thorough and adversarial. Assume the code has bugs until proven otherwise.
@@ -272,9 +269,10 @@ by inspecting the actual code and returning a verdict for each.
 ## Target
 {same target description}
 
-{if compact rules were resolved in Pattern 0, inject the following block — otherwise OMIT this entire section}
-## Project Standards (auto-resolved)
-{paste matching compact rules blocks from the skill registry}
+{if Pattern 0 produced a standards list, inject the following block — otherwise OMIT this entire section}
+## Project Standards (files to read)
+Read each file below in full before starting work; follow its rules strictly:
+{one line per path from the project's `standards:` list, verbatim and in order}
 
 ## Disputed Findings (blocking severity only)
 {paste the Suspect and Contradiction findings from the verdict synthesis, each with its
@@ -291,7 +289,7 @@ by inspecting the actual code and returning a verdict for each.
 
 Do not introduce new findings. Adjudicate only the list above.
 
-**Skill Resolution**: {injected|fallback-registry|fallback-path|none} — {details}
+**Skill Resolution**: {injected|fallback-path|none} — {details}
 ```
 
 ### Fix Agent Prompt (applies the confirmed blocking findings and nothing else)
@@ -303,9 +301,10 @@ You are a surgical fix agent. You apply ONLY the confirmed blocking issues liste
 {paste the Confirmed blocking set — matched-Confirmed plus Refuter-CONFIRMED promotions.
  This list is NEVER empty; if it were empty the orchestrator would not have launched you.}
 
-{if compact rules were resolved in Pattern 0, inject the following block — otherwise OMIT this entire section}
-## Project Standards (auto-resolved)
-{paste matching compact rules blocks from the skill registry}
+{if Pattern 0 produced a standards list, inject the following block — otherwise OMIT this entire section}
+## Project Standards (files to read)
+Read each file below in full before starting work; follow its rules strictly:
+{one line per path from the project's `standards:` list, verbatim and in order}
 
 ## Context
 - Original review criteria: {paste same criteria used for judges}
@@ -322,7 +321,7 @@ Return a summary:
 ## Fixes Applied
 - [file:line] — {what was fixed}
 
-**Skill Resolution**: {injected|fallback-registry|fallback-path|none} — {details}
+**Skill Resolution**: {injected|fallback-path|none} — {details}
 ```
 
 ---

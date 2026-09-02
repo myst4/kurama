@@ -52,11 +52,12 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# All 28 expected default skills (sdd-core + quality + review + optional + tdd) —
+# All 27 expected default skills (sdd-core + quality + review + optional + tdd) —
 # which is also every skill in the tree, since #125 deleted the last per-language
 # pattern skill and the `lang` group that held it. Kurama is stack-agnostic and
-# ships no language knowledge at any flag; a user's own language skills arrive
-# through the skill registry, never through a manifest group.
+# ships no language knowledge at any flag; a project's own language skills arrive
+# through the `standards:` list in openspec/config.yaml (#137), never through a
+# manifest group.
 # The tdd and kanban-github modules ship by default now; installing either does NOT
 # activate it (TDD stays opt-in per project; the kanban board stays opt-in via
 # kanban.enabled and requires a configured gh — never probed here). The `optional`
@@ -78,7 +79,6 @@ EXPECTED_SKILLS=(
     sdd-new
     sdd-continue
     sdd-ff
-    skill-registry
     judgment-day
     review-risk
     review-readability
@@ -340,7 +340,7 @@ test_claude_code_skill_count() {
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills for Claude Code"
+    assert_eq "27" "$count" "Expected exactly 27 skills for Claude Code"
 }
 
 # ============================================================================
@@ -356,7 +356,7 @@ test_opencode_skill_count() {
     bash "$INSTALL_SCRIPT" --agent opencode > /dev/null 2>&1
     local count
     count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills for OpenCode"
+    assert_eq "27" "$count" "Expected exactly 27 skills for OpenCode"
 }
 
 test_opencode_commands() {
@@ -390,7 +390,7 @@ test_codex_skill_count() {
     bash "$INSTALL_SCRIPT" --agent codex > /dev/null 2>&1
     local count
     count=$(find "$HOME/.codex/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills for Codex"
+    assert_eq "27" "$count" "Expected exactly 27 skills for Codex"
 }
 
 # ============================================================================
@@ -413,7 +413,7 @@ test_project_local_skill_count() {
     (cd "$project" && bash "$INSTALL_SCRIPT" --agent project-local > /dev/null 2>&1)
     local count
     count=$(find "$project/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills for project-local"
+    assert_eq "27" "$count" "Expected exactly 27 skills for project-local"
 }
 
 # ============================================================================
@@ -435,7 +435,7 @@ test_custom_path_skill_count() {
     bash "$INSTALL_SCRIPT" --agent custom --path "$custom" > /dev/null 2>&1
     local count
     count=$(find "$custom/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills for custom path"
+    assert_eq "27" "$count" "Expected exactly 27 skills for custom path"
 }
 
 # ============================================================================
@@ -458,7 +458,7 @@ test_all_global() {
 
 test_all_global_total_skill_count() {
     bash "$INSTALL_SCRIPT" --agent all-global > /dev/null 2>&1
-    # 5 targets x 28 skills = 140 SKILL.md files
+    # 5 targets x 27 skills = 135 SKILL.md files
     local total=0
     for dir in \
         "$HOME/.claude/skills" \
@@ -468,10 +468,10 @@ test_all_global_total_skill_count() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "28" "$count" "Expected 28 skills in $dir" || return 1
+        assert_eq "27" "$count" "Expected 27 skills in $dir" || return 1
         total=$((total + count))
     done
-    assert_eq "140" "$total" "Expected 140 total SKILL.md files across all targets"
+    assert_eq "135" "$total" "Expected 135 total SKILL.md files across all targets"
 }
 
 test_all_global_opencode_commands() {
@@ -493,7 +493,7 @@ test_idempotent_claude_code() {
     assert_all_skills_installed "$HOME/.claude/skills"
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills after double install"
+    assert_eq "27" "$count" "Expected exactly 27 skills after double install"
 }
 
 test_idempotent_opencode() {
@@ -502,7 +502,7 @@ test_idempotent_opencode() {
     assert_all_skills_installed "$HOME/.config/opencode/skills" || return 1
     local skill_count
     skill_count=$(find "$HOME/.config/opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$skill_count" "Expected exactly 28 skills after double install" || return 1
+    assert_eq "27" "$skill_count" "Expected exactly 27 skills after double install" || return 1
     local cmd_count
     cmd_count=$(find "$HOME/.config/opencode/commands" -name "sdd-*.md" | wc -l | tr -d ' ')
     assert_eq "9" "$cmd_count" "Expected exactly 9 commands after double install"
@@ -519,7 +519,7 @@ test_idempotent_all_global() {
         "$HOME/.omp/agent/skills"; do
         local count
         count=$(find "$dir" -name "SKILL.md" | wc -l | tr -d ' ')
-        assert_eq "28" "$count" "Expected 28 skills in $dir after double install" || return 1
+        assert_eq "27" "$count" "Expected 27 skills in $dir after double install" || return 1
     done
 }
 
@@ -586,8 +586,8 @@ test_output_shows_done_message() {
 test_output_shows_install_count() {
     local output
     output=$(bash "$INSTALL_SCRIPT" --agent claude-code 2>&1)
-    echo "$output" | grep -q "28 skills installed" || {
-        echo "Output missing '28 skills installed' message"
+    echo "$output" | grep -q "27 skills installed" || {
+        echo "Output missing '27 skills installed' message"
         return 1
     }
 }
@@ -745,7 +745,7 @@ test_setup_installs_default_skill_set() {
     assert_all_skills_installed "$HOME/.claude/skills" || return 1
     local count
     count=$(find "$HOME/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "setup.sh should install the 28 default skills"
+    assert_eq "27" "$count" "setup.sh should install the 27 default skills"
 }
 
 test_setup_includes_tdd() {
@@ -1094,7 +1094,7 @@ test_default_install_includes_optional_groups() {
 
 test_without_optional_excludes_optional_group() {
     # The optional group holds FIVE skills, so --without optional drops those five,
-    # landing 23 out of the 28-skill default set.
+    # landing 22 out of the 27-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --without optional > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/kanban-github" ]; then
@@ -1130,9 +1130,9 @@ test_without_optional_excludes_optional_group() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    # Expressed against EXPECTED_SKILLS, not the literal 23: 26 - 3 and 28 - 5 are both
-    # 23, so a hardcoded 23 would have passed unchanged on the pre-#85/#86 tree and
-    # proved nothing about the two new skills leaving the group.
+    # Expressed against EXPECTED_SKILLS, not the literal 22: 25 - 3 and 27 - 5 are both
+    # 22, so a hardcoded 22 would have passed unchanged on a tree whose optional group
+    # still held three skills, and proved nothing about the two new ones leaving it.
     assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 5 ))" "$count" \
         "Expected the default set minus the optional group's FIVE skills (kanban-github, sdd-learn, sdd-brainstorm, kurama-report, systemic-issue-triage)"
 }
@@ -1147,7 +1147,7 @@ test_without_quality_excludes_judgment_day() {
     assert_dir_exists "$base/kanban-github" || return 1         # optional group still on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "27" "$count" "Expected 27 skills with --without quality (28 default - judgment-day)"
+    assert_eq "26" "$count" "Expected 26 skills with --without quality (27 default - judgment-day)"
 }
 
 test_without_both_groups() {
@@ -1161,7 +1161,7 @@ test_without_both_groups() {
     if [ -d "$base/systemic-issue-triage" ]; then echo "systemic-issue-triage should be excluded"; return 1; fi
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    # Same reason as --without optional above: 26 - 4 and 28 - 6 are both 22, so the
+    # Same reason as --without optional above: 25 - 4 and 27 - 6 are both 21, so the
     # literal would survive the change untouched.
     assert_eq "$(( ${#EXPECTED_SKILLS[@]} - 6 ))" "$count" \
         "Expected the default set minus judgment-day and the optional group's five skills"
@@ -1181,7 +1181,7 @@ test_reject_without_required_group() {
 
 test_default_install_includes_tdd() {
     # The tdd group is now default-on: a plain install ships skills/tdd as part of
-    # the 28-skill default set. Installing the module does NOT activate TDD —
+    # the 27-skill default set. Installing the module does NOT activate TDD —
     # activation stays opt-in per project.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
     local base="$HOME/.claude/skills"
@@ -1190,12 +1190,12 @@ test_default_install_includes_tdd() {
     assert_file_not_empty "$base/tdd/SKILL.md" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Default install must include tdd (28 skills)"
+    assert_eq "27" "$count" "Default install must include tdd (27 skills)"
 }
 
 test_without_tdd_excludes_tdd() {
     # --without tdd opts the module out: skills/tdd is dropped, landing the
-    # remaining 27 default skills. The other default-on groups stay on.
+    # remaining 26 default skills. The other default-on groups stay on.
     bash "$INSTALL_SCRIPT" --agent claude-code --without tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     if [ -d "$base/tdd" ]; then
@@ -1207,7 +1207,7 @@ test_without_tdd_excludes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "27" "$count" "Expected 27 skills with --without tdd"
+    assert_eq "26" "$count" "Expected 26 skills with --without tdd"
 }
 
 test_lang_group_no_longer_exists() {
@@ -1235,7 +1235,7 @@ test_lang_group_no_longer_exists() {
 
 test_with_tdd_includes_tdd() {
     # tdd is default-on, so --with tdd is idempotent: skills/tdd ships and the
-    # count stays at the 28-skill default set.
+    # count stays at the 27-skill default set.
     bash "$INSTALL_SCRIPT" --agent claude-code --with tdd > /dev/null 2>&1
     local base="$HOME/.claude/skills"
     assert_dir_exists "$base/tdd" || return 1
@@ -1247,7 +1247,7 @@ test_with_tdd_includes_tdd() {
     assert_dir_exists "$base/sdd-apply" || return 1
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected 28 skills with --with tdd (default set already includes tdd)"
+    assert_eq "27" "$count" "Expected 27 skills with --with tdd (default set already includes tdd)"
 }
 
 test_with_tdd_uninstall_round_trip() {
@@ -1290,7 +1290,7 @@ test_omp_skill_count() {
     bash "$INSTALL_SCRIPT" --agent omp > /dev/null 2>&1
     local count
     count=$(find "$HOME/.omp/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills for omp"
+    assert_eq "27" "$count" "Expected exactly 27 skills for omp"
 }
 
 test_omp_writes_install_manifest() {
@@ -1422,7 +1422,7 @@ test_pi_skill_count() {
     bash "$INSTALL_SCRIPT" --agent pi > /dev/null 2>&1
     local count
     count=$(find "$HOME/.pi/agent/skills" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "28" "$count" "Expected exactly 28 skills for Pi"
+    assert_eq "27" "$count" "Expected exactly 27 skills for Pi"
 }
 
 test_pi_writes_install_manifest() {
@@ -1712,7 +1712,7 @@ test_without_review_excludes_lenses() {
     assert_dir_exists "$base/sdd-apply" || return 1       # sdd-core always on
     local count
     count=$(find "$base" -name "SKILL.md" | wc -l | tr -d ' ')
-    assert_eq "23" "$count" "Expected 23 skills with --without review (28 default - 5 lenses)"
+    assert_eq "22" "$count" "Expected 22 skills with --without review (27 default - 5 lenses)"
 }
 
 # ============================================================================
@@ -4951,35 +4951,35 @@ run_test "Unknown option exits non-zero" test_invalid_option
 echo ""
 
 echo -e "${BOLD}Claude Code${NC}"
-run_test "Installs all 28 skills to ~/.claude/skills" test_install_claude_code
-run_test "Exactly 28 SKILL.md files" test_claude_code_skill_count
+run_test "Installs all 27 skills to ~/.claude/skills" test_install_claude_code
+run_test "Exactly 27 SKILL.md files" test_claude_code_skill_count
 echo ""
 
 echo -e "${BOLD}OpenCode${NC}"
-run_test "Installs all 28 skills to ~/.config/opencode/skills" test_install_opencode
-run_test "Exactly 28 SKILL.md files" test_opencode_skill_count
+run_test "Installs all 27 skills to ~/.config/opencode/skills" test_install_opencode
+run_test "Exactly 27 SKILL.md files" test_opencode_skill_count
 run_test "Installs 9 command files" test_opencode_commands
 echo ""
 
 echo -e "${BOLD}Codex${NC}"
-run_test "Installs all 28 skills to ~/.codex/skills" test_install_codex
-run_test "Exactly 28 SKILL.md files" test_codex_skill_count
+run_test "Installs all 27 skills to ~/.codex/skills" test_install_codex
+run_test "Exactly 27 SKILL.md files" test_codex_skill_count
 echo ""
 
 echo -e "${BOLD}Project-local${NC}"
-run_test "Installs all 28 skills to ./skills/" test_install_project_local
-run_test "Exactly 28 SKILL.md files" test_project_local_skill_count
+run_test "Installs all 27 skills to ./skills/" test_install_project_local
+run_test "Exactly 27 SKILL.md files" test_project_local_skill_count
 echo ""
 
 echo -e "${BOLD}Custom path${NC}"
 run_test "Installs to arbitrary custom path" test_custom_path
-run_test "Exactly 28 SKILL.md files" test_custom_path_skill_count
+run_test "Exactly 27 SKILL.md files" test_custom_path_skill_count
 run_test "Handles deeply nested custom path" test_nested_custom_path
 echo ""
 
 echo -e "${BOLD}All-global${NC}"
 run_test "Installs to all 5 global targets" test_all_global
-run_test "140 total SKILL.md files (5x28)" test_all_global_total_skill_count
+run_test "135 total SKILL.md files (5x27)" test_all_global_total_skill_count
 run_test "Also installs OpenCode commands" test_all_global_opencode_commands
 echo ""
 
@@ -5017,7 +5017,7 @@ run_test "Balanced marker updates in place + writes backup" test_setup_balanced_
 echo ""
 
 echo -e "${BOLD}setup.sh manifest-driven install + receipt${NC}"
-run_test "setup.sh installs the 28 default skills" test_setup_installs_default_skill_set
+run_test "setup.sh installs the 27 default skills" test_setup_installs_default_skill_set
 run_test "setup.sh includes the default tdd module" test_setup_includes_tdd
 run_test "setup.sh writes an install manifest (receipt)" test_setup_writes_install_manifest
 run_test "uninstall.sh cleans a setup.sh install" test_setup_uninstall_round_trip
@@ -5054,16 +5054,16 @@ run_test "--without sdd-core is rejected" test_reject_without_required_group
 echo ""
 
 echo -e "${BOLD}TDD module (default-on group)${NC}"
-run_test "Default install includes tdd (28 skills)" test_default_install_includes_tdd
+run_test "Default install includes tdd (27 skills)" test_default_install_includes_tdd
 run_test "--without tdd excludes tdd (27 skills)" test_without_tdd_excludes_tdd
 run_test "the lang group no longer exists (--with lang is rejected)" test_lang_group_no_longer_exists
-run_test "--with tdd is idempotent (28 skills)" test_with_tdd_includes_tdd
+run_test "--with tdd is idempotent (27 skills)" test_with_tdd_includes_tdd
 run_test "--with tdd uninstall round-trip is clean" test_with_tdd_uninstall_round_trip
 echo ""
 
 echo -e "${BOLD}Pi agent (P5 installer wiring)${NC}"
-run_test "install.sh --agent omp installs 28 skills" test_install_omp
-run_test "Exactly 28 SKILL.md files for omp" test_omp_skill_count
+run_test "install.sh --agent omp installs 27 skills" test_install_omp
+run_test "Exactly 27 SKILL.md files for omp" test_omp_skill_count
 run_test "omp install writes an install manifest" test_omp_writes_install_manifest
 run_test "omp honors PI_CODING_AGENT_DIR relocation" test_omp_honors_relocated_agent_base
 run_test "setup.sh --agent omp merges the orchestrator prompt" test_setup_omp_writes_orchestrator
@@ -5071,8 +5071,8 @@ run_test "omp installs its 17 native agents" test_omp_installs_native_agents
 run_test "omp agents follow the omp task-agent contract" test_omp_agents_use_the_omp_contract
 run_test "omp installs RULES.md sticky rules" test_omp_installs_sticky_rules
 run_test "omp install/uninstall round-trip is clean" test_omp_uninstall_round_trip
-run_test "install.sh --agent pi installs 28 skills" test_install_pi
-run_test "Exactly 28 SKILL.md files for Pi" test_pi_skill_count
+run_test "install.sh --agent pi installs 27 skills" test_install_pi
+run_test "Exactly 27 SKILL.md files for Pi" test_pi_skill_count
 run_test "Pi install writes an install manifest" test_pi_writes_install_manifest
 run_test "setup.sh --agent pi writes orchestrator to ~/.pi/agent/AGENTS.md" test_setup_pi_writes_orchestrator
 echo ""
@@ -7057,7 +7057,7 @@ test_g_setup_reinstall_without_review_prunes() {
 # --- (b) install.sh wrapper maps each documented flag onto setup.sh --------------
 
 test_g_wrapper_agent_maps_to_full_setup() {
-    # install.sh --agent NAME runs the SAME full setup.sh install (28 skills) and
+    # install.sh --agent NAME runs the SAME full setup.sh install (27 skills) and
     # writes setup.sh's slug-tool receipt with the setup-only keys — proof the full
     # installer ran through the delegate, not install.sh's old skills-only path.
     bash "$INSTALL_SCRIPT" --agent claude-code > /dev/null 2>&1
@@ -7078,7 +7078,7 @@ test_g_wrapper_all_global_installs_five_unconditionally() {
     for d in "$HOME/.claude/skills" "$HOME/.config/opencode/skills" "$HOME/.codex/skills" \
              "$HOME/.pi/agent/skills" "$HOME/.omp/agent/skills"; do
         local c; c=$(find "$d" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-        assert_eq "28" "$c" "all-global must install 28 skills into $d" || return 1
+        assert_eq "27" "$c" "all-global must install 27 skills into $d" || return 1
     done
     return 0
 }
@@ -8022,7 +8022,8 @@ echo ""
 #     this file moved 24 -> 25 for it (120 -> 125 across the five global targets).
 #     #104's `sdd-brainstorm` joins the same group and moved them again, 25 -> 26
 #     (125 -> 130), and #85/#86's `kurama-report` + `systemic-issue-triage` a third
-#     time, 26 -> 28 (130 -> 140). The group now drops FIVE skills under
+#     time, 26 -> 28 (130 -> 140). #137 then deleted `skill-registry`, moving them
+#     a fourth time, 28 -> 27 (140 -> 135). The group now drops FIVE skills under
 #     `--without optional`.
 #
 # NOTE on the control run. A "byte-identical to before the feature" case invites

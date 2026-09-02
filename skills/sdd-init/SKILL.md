@@ -187,6 +187,11 @@ execution_mode: supervised  # supervised | auto; supervised stops at human gates
 
 persona: neutral  # neutral | argentino; conversation tone ONLY — artifacts keep the project's language. Preset registry: skills/_shared/personas.md
 
+# Files every phase sub-agent reads IN FULL at phase start, in this order. Repo-relative
+# or ~-relative. Proposed in Step 4 and confirmed by the user; empty means the project
+# declares no standards. Kurama's own skills never go here.
+standards: []
+
 # #101: how this project's OWN pre-existing workflow and SDD coexist. Written ONLY when the
 # prompt file was found to carry a competing workflow and the user answered the question;
 # empty means "no competing workflow found" — never "we picked the default".
@@ -280,33 +285,39 @@ the `@me` default, or set it to a fixed assignee override; fill the optional
 module is absent, or a `gh` check fails. A configured `gh` never flips `kanban.enabled`
 on its own.
 
-### Step 4: Build Skill Registry
+### Step 4: Pre-fill `standards:`
 
-Run the shipped builder. Do NOT scan the skill directories yourself and do NOT delegate
-this to a sub-agent — the scan is a script, and it finishes in well under a second:
+`standards:` is the ordered list of files every phase sub-agent will read in full at phase
+start (semantics: `skills/_shared/openspec-convention.md` → *Config File Reference*). You
+propose it once, here; from then on it is the project's to edit by hand.
 
-```bash
-bash <this-skill-dir>/../_shared/build-skill-registry.sh --root "{project-root}"
-```
+Build the proposal from the PROJECT'S OWN files only:
 
-`<this-skill-dir>/../_shared/` is the `_shared` directory installed alongside this skill.
-The script prints one line — `skill-registry: N skills (U user, P project) → .kurama/skill-registry.md`
-— and writes the file atomically.
+1. `CLAUDE.md` and `AGENTS.md` at the repo root — include each one that exists.
+2. Every `*/SKILL.md` under the project's own skills directories (`.claude/skills/`,
+   `.opencode/skills/`, `.pi/skills/`, and any other in-repo skills dir this harness uses)
+   whose skill NAME is **not** listed in Kurama's `skills/manifest.json`. Kurama's own
+   skills are reached by direct path and never belong in `standards:`.
 
-1. **Verify it landed**: read back `.kurama/skill-registry.md` and confirm the
-   `## User Skills` table holds the number of rows the script reported. Check with `test -f`
-   or your Read tool, never with `fd`/`rg` — `.kurama/` is hidden AND gitignored, so a finder
-   skips it even with hidden flags.
-2. `.kurama/skill-registry.md` is machine-local harness infrastructure, NOT an SDD project
-   artifact. It is never committed and never written into `openspec/`.
+**Never scan `~` or any user-level skills directory.** The developer's personal skill
+collection is theirs, not this project's, and a file outside the repo reaches `standards:`
+only because the user typed it in the answer to the question below.
 
-**If the script is missing, STOP and report it in `risks`** — do not scan by hand. There is
-no fallback on purpose: one implementation of the scan, or two that drift apart. Tell the
-user to run `./scripts/update.sh` and then `./scripts/doctor.sh`, which reports the same
-finding. Which directories are scanned, what is excluded and how duplicate names resolve are
-the script's business, and the script's alone.
+Then ask ONCE, and only once:
 
-See `skills/skill-registry/SKILL.md` for the surrounding protocol.
+> These files will be read in full by every SDD phase agent:
+> {numbered list of the proposed paths, in order}
+> Confirm, or give me the list you want (add companion skills by path — see
+> `docs/companion-skills.md`; `~`-relative paths are allowed).
+
+Write the confirmed list, in the order given, as the `standards:` block of
+`openspec/config.yaml` in Step 3's shape. An empty answer means an empty `standards:` list —
+a project that declares no standards is a valid project, and you never fill one in on the
+user's behalf. Re-running init upserts this key in place; it never appends a second copy,
+and it never silently drops a path the user added by hand.
+
+Do NOT delegate this step to a sub-agent, and do NOT read the listed files yourself — you
+are recording paths, not loading standards.
 
 ### Step 5: Persist Project Context and Pipeline Settings
 
@@ -337,8 +348,8 @@ settings explicitly in the config so the orchestrator can propagate them.
 Return the standard envelope defined in **Section D** of
 `skills/_shared/sdd-phase-common.md` (`status`, `executive_summary`,
 `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`) —
-it is the ONLY return contract for this phase. sdd-init BUILDS the skill registry
-rather than consuming it, so `skill_resolution` is `none` (no project skills were
+it is the ONLY return contract for this phase. sdd-init WRITES the `standards:` list
+rather than consuming it, so `skill_resolution` is `none` (no project standards were
 loaded to perform init).
 
 Phase-specific fields to surface in `detailed_report`:
@@ -351,13 +362,12 @@ Phase-specific fields to surface in `detailed_report`:
 - **TDD**: {enabled | disabled} — {user's answer to the explicit question; single_test_command if enabled}
 - **Kanban**: {enabled | disabled} — {user's answer; when enabled: project_number + stage mapping + merge_method; when a `gh` prerequisite failed: which check and the fix command}
 - **Settings home**: `openspec/config.yaml`
-- **Skill registry**: `.kurama/skill-registry.md`
+- **Standards**: {the confirmed `standards:` paths, in order — or "none declared"}
 
 Populate the envelope fields:
 
-- `artifacts`: what was written — `openspec/config.yaml` plus the created directories, and
-  `.kurama/skill-registry.md`, which is machine-local harness infrastructure rather than a
-  committed project artifact.
+- `artifacts`: what was written — `openspec/config.yaml` (including the confirmed
+  `standards:` list) plus the created directories.
 - `next_recommended`: `sdd-explore` (or `sdd-new` when the user already has a change name).
 - `risks`: when the user asked for Kanban but the module was absent or a `gh` prerequisite
   check failed, note that `kanban.enabled` was recorded `false` and the exact command to fix

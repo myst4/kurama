@@ -21,8 +21,8 @@ carrying their own copies, so the cycle never drifts across phases.
 This module is opt-in and OFF by default. It only governs a change when TDD is
 resolved active (see **Activation** below). Project commands live in
 `skills/_shared/test-runners.md` and are CONFIGURED at `sdd-init`, never detected;
-per-language test *patterns* reach sub-agents as compact rules through the skill
-registry — this core never depends on a specific language.
+per-language test *patterns* reach sub-agents through the project's own
+`standards:` files — this core never depends on a specific language.
 
 ## Activation (single switch — zero silent heuristics)
 
@@ -167,5 +167,5 @@ mandatory RED evidence on the primary rows above.
 - Reference the spec scenario ID (`S-{requirement-slug}-{n}`, e.g. `S-auth-1`, the
   canonical form `sdd-spec` assigns) in every RED subtask and every evidence row —
   this is the scenario → test traceability `sdd-verify` audits.
-- Per-language patterns come from the skill registry (compact rules), not from
+- Per-language patterns come from the project's `standards:` files, not from
   this core — keep this module language-agnostic.

@@ -79,10 +79,6 @@
       "group": "sdd-core"
     },
     {
-      "name": "skill-registry",
-      "group": "sdd-core"
-    },
-    {
       "name": "skill-creator",
       "group": "sdd-core"
     },
