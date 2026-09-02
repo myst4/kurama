@@ -1,6 +1,6 @@
 ---
 name: sdd-init
-description: SDD initialization executor. Launch to detect a project's stack and conventions and bootstrap the active persistence backend (engram context artifact or openspec/config.yaml) plus the skill registry. Use at the start of adopting SDD in a repo.
+description: SDD initialization executor. Launch to detect a project's stack and conventions and bootstrap the persistence config (openspec/config.yaml) plus the skill registry. Use at the start of adopting SDD in a repo.
 tools:
   - read
   - grep
@@ -29,7 +29,7 @@ Fallback roots for the `_shared` files: `.omp/skills/_shared/...` (project) or `
 
 ## Settings you produce
 
-You WRITE the pipeline settings the rest of the cycle depends on: `artifact_store.mode`, `compliance_mode`, verify commands, and `tdd.enabled` / `tdd.single_test_command`. Record them in the settings home for the resolved mode (the `sdd-init/{project}` context artifact for `engram`, or `openspec/config.yaml` for `openspec`/`hybrid`) exactly as your SKILL.md specifies. `tdd.enabled` comes ONLY from the explicit user question — existing test files never flip it on.
+You WRITE the pipeline settings the rest of the cycle depends on: `compliance_mode`, verify commands, and `tdd.enabled` / `tdd.single_test_command`. Record them in `openspec/config.yaml` exactly as your SKILL.md specifies. `tdd.enabled` comes ONLY from the explicit user question — existing test files never flip it on.
 
 ## Return contract
 
@@ -37,9 +37,6 @@ Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_
 
 ## Persistence backend tools
 
-omp has no built-in `mem_*` tools: its own memory is an autonomous pipeline you read through `memory://` with the `read` tool, and Engram — when the project uses it — arrives as MCP tools whose names depend on the registered server. So your allowlist carries the file tools only.
-
-- **`openspec` mode** (and the degraded-`engram` filesystem fallback): use the file tools. This is the fully supported path and needs nothing extra.
-- **`engram` mode**: the orchestrator passes artifact references, and the Engram MCP tools reach you only if that server is registered for omp (`~/.omp/agent/mcp.json`). If a required artifact cannot be retrieved, follow Section B and return `blocked` naming it — never invent artifact content.
+omp has no built-in memory tools: its own memory is an autonomous pipeline you read through `memory://` with the `read` tool. So your allowlist carries the file tools only — artifacts are files under `openspec/`, and the file tools are all that path needs. If a required artifact cannot be retrieved, follow Section B and return `blocked` naming it — never invent artifact content.
 
 `model` and `thinkingLevel` above are defaults. Override per agent with `task.agentModelOverrides` in omp's config, or per invocation from `/agents`.

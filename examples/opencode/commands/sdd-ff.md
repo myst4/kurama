@@ -18,9 +18,8 @@ CONTEXT:
 - Working directory: before doing anything else, run `git rev-parse --show-toplevel 2>/dev/null || pwd` with your bash tool and use the returned path as the authoritative workspace. In OpenCode Desktop (Electron) the parse-time interpolation resolves to the app data directory, not the project.
 - Current project: the `basename` of the detected workspace above.
 - Change name: $ARGUMENTS
-- Artifact store mode: resolve it from the persisted settings (`artifact_store.mode` in `openspec/config.yaml` or the `sdd-init/{project}` settings bundle) and propagate the resolved value to every sub-agent you launch. Never assume `engram`.
 
 PERSISTENCE NOTE:
-Sub-agents handle persistence automatically for the mode you propagate — each phase saves its artifact under "sdd/$ARGUMENTS/{type}" (engram topic_key, or the equivalent openspec path per skills/_shared/openspec-convention.md), where type is: proposal, spec, design, tasks.
+Sub-agents handle persistence automatically — each phase saves its artifact under "sdd/$ARGUMENTS/{type}" (the openspec path per skills/_shared/openspec-convention.md), where type is: proposal, spec, design, tasks.
 
 Read the orchestrator instructions to coordinate this workflow. Do NOT execute phase work inline — delegate to sub-agents.

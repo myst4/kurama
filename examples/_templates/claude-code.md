@@ -28,4 +28,4 @@ By default, pass NO `model` parameter when delegating: every sub-agent inherits 
 <!-- /kurama:sdd-model-assignments -->
 
 <!-- @@STATE_CONVENTIONS@@ -->
-Convention files under `~/.claude/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project) — both hidden dirs; finders need `fd -H` / `rg --hidden` to see them. Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.
+Convention files under `~/.claude/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project) — both hidden dirs; finders need `fd -H` / `rg --hidden` to see them. Key files: `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.

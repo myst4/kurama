@@ -8,10 +8,6 @@ tools:
   - bash
   - write
   - edit
-  - memory_search
-  - memory_get
-  - memory_add
-  - memory_update
 effort: low
 ---
 
@@ -34,14 +30,10 @@ This markdown body is your complete system prompt; in Pi's lean subagent mode no
 
 Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/...`, or `.claude/skills/...`. If the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt, follow it and do NOT read other SKILL.md files (Section A, path 1). Read the skills; do not reconstruct them from memory.
 
-## Settings propagation
-
-Honor the pipeline settings the orchestrator propagated in your launch prompt (`artifact_store.mode`). A value the orchestrator propagates ALWAYS wins over any value read from `openspec/config.yaml` or the `sdd-init/{project}` context artifact.
-
 ## Return contract
 
 Return the Section D envelope EXACTLY (`status`, `executive_summary`, `detailed_report`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`). It is the only return contract.
 
 ## Persistence backend tools
 
-The memory tools above (`memory_search`, `memory_get`, `memory_add`, `memory_update`) are Pi's Engram-backed memory tools — the `engram` artifact store. `openspec` and degraded-`engram` (filesystem fallback) modes use only the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).
+Artifacts are files under `openspec/`: use the built-in file tools (`read`, `write`, `edit`). `model`/`effort` above are defaults; override per-agent via `model_profiles` in `.pi/subagents.json` (project) or `~/.pi/agent/subagents.json` (global).

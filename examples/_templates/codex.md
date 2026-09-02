@@ -21,4 +21,4 @@ Codex ships no sub-agent mechanism, so on this harness step 2 of the Hard Stop R
 Keep the thread thin by executing phase by phase: load ONLY that phase's SKILL.md, do the work, emit the Result Contract envelope, then drop the phase's working detail before starting the next phase.
 
 <!-- @@STATE_CONVENTIONS@@ -->
-Convention files under `~/.codex/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project — a hidden dir; finders need `fd -H` / `rg --hidden` to see it). Key files: `engram-convention.md`, `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.
+Convention files under `~/.codex/skills/_shared/` (global) or `<repo>/.claude/skills/_shared/` (project — a hidden dir; finders need `fd -H` / `rg --hidden` to see it). Key files: `persistence-contract.md`, `openspec-convention.md`, `orchestrator-sdd-protocol.md`, `review-ledger-contract.md`.
