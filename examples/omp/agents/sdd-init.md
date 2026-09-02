@@ -23,7 +23,7 @@ You are an EXECUTOR, not the orchestrator. Do the initialization work yourself a
 This markdown body is your complete system prompt. omp exposes skills as name+description metadata and loads a body only on demand, so nothing is auto-loaded for you. Load your phase contract with the `read` tool. omp resolves skills by name, so prefer the `skill://` URL — it works regardless of where the skill set was installed:
 
 1. `skill://sdd-init` — (equivalently `skills/sdd-init/SKILL.md`) — your phase contract: detect the stack, ask the explicit TDD question (never inferred), choose `compliance_mode`, build the skill registry, and persist project context + pipeline settings.
-2. `skills/_shared/sdd-phase-common.md` (the `_shared` contracts are plain files, not skills, so read them by path) — the common protocol, in particular **Section A** (skill loading), **Section D** (return envelope).
+2. `skills/_shared/sdd-phase-common.md` (the `_shared` contracts are plain files, not skills, so read them by path) — the common protocol, in particular **Section A** (project standards), **Section D** (return envelope).
 
 Fallback roots for the `_shared` files: `.omp/skills/_shared/...` (project) or `~/.omp/agent/skills/_shared/...` (global); `$PI_CODING_AGENT_DIR/skills/_shared/...` when that variable is set.
 

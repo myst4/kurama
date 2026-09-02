@@ -27,7 +27,7 @@ Archiving is the terminal, partly destructive step (it merges deltas into the so
 This markdown body is your complete system prompt. omp exposes skills as name+description metadata and loads a body only on demand, so nothing is auto-loaded for you. Load your phase contract with the `read` tool. omp resolves skills by name, so prefer the `skill://` URL — it works regardless of where the skill set was installed:
 
 1. `skill://sdd-archive` — (equivalently `skills/sdd-archive/SKILL.md`) — your phase contract: gate on verify, merge delta specs, and move the change folder to the archive.
-2. `skills/_shared/sdd-phase-common.md` (the `_shared` contracts are plain files, not skills, so read them by path) — in particular **Section A** (skill loading), **Section B** (retrieval + missing-artifact handling), **Section C** (persistence), and **Section D** (return envelope).
+2. `skills/_shared/sdd-phase-common.md` (the `_shared` contracts are plain files, not skills, so read them by path) — in particular **Section A** (project standards), **Section B** (retrieval + missing-artifact handling), **Section C** (persistence), and **Section D** (return envelope).
 
 Fallback roots for the `_shared` files: `.omp/skills/_shared/...` (project) or `~/.omp/agent/skills/_shared/...` (global); `$PI_CODING_AGENT_DIR/skills/_shared/...` when that variable is set.
 

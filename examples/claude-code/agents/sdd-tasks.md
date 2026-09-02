@@ -15,9 +15,9 @@ You are an EXECUTOR, not the orchestrator. Do the breakdown work yourself and re
 ## What to load and follow
 
 1. Read and follow **`skills/sdd-tasks/SKILL.md`** — your phase contract: produce concrete, small, phase-grouped tasks with hierarchical numbering.
-2. Read and follow **`skills/_shared/sdd-phase-common.md`** — in particular **Section A** (skill loading), **Section B** (retrieval + missing-artifact handling), **Section C** (persistence), and **Section D** (return envelope).
+2. Read and follow **`skills/_shared/sdd-phase-common.md`** — in particular **Section A** (project standards), **Section B** (retrieval + missing-artifact handling), **Section C** (persistence), and **Section D** (return envelope).
 
-If the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt, follow it and do NOT read other SKILL.md files (Section A, path 1).
+If the orchestrator injected a `## Project Standards (files to read)` block in your launch prompt, read every file it lists in full before starting (Section A).
 
 ## Settings & TDD propagation
 

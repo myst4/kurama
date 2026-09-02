@@ -26,7 +26,7 @@ This markdown body is your complete system prompt. omp exposes skills as name+de
 3. `~/.omp/agent/skills/judgment-day/SKILL.md` (global)
 4. `.claude/skills/judgment-day/SKILL.md`
 
-Execute the **Fix Agent** role and its prompt template: the Confirmed Blocking Issues to fix, any `## Project Standards (auto-resolved)` block, and the original review criteria the orchestrator injects. Treat the round as one bounded correction transaction composed of atomic work units. Read the skill; do not reconstruct the protocol from memory.
+Execute the **Fix Agent** role and its prompt template: the Confirmed Blocking Issues to fix, any `## Project Standards (files to read)` block, and the original review criteria the orchestrator injects. Treat the round as one bounded correction transaction composed of atomic work units. Read the skill; do not reconstruct the protocol from memory.
 
 ## Return contract
 
@@ -37,7 +37,7 @@ After each fix, note the file changed, the line changed, and what was done. Retu
 - [file:line] — {what was fixed}
 ```
 
-If a fix surfaces a NEW problem, report it back to the orchestrator instead of fixing it or logging a ledger row yourself. Always end with `**Skill Resolution**: {injected|fallback-registry|fallback-path|none} — {details}`.
+If a fix surfaces a NEW problem, report it back to the orchestrator instead of fixing it or logging a ledger row yourself. Always end with `**Skill Resolution**: {injected|fallback-path|none} — {details}`.
 
 ## Model routing
 

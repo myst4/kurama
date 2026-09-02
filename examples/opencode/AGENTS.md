@@ -193,15 +193,15 @@ Delegated agents are phase workers, not permanent residents. When a delegated ag
 
 ### Sub-Agent Launch Pattern
 
-Before the FIRST delegation of a session, read `_shared/skill-resolver.md` (see *State and Conventions*) and follow it. It is the canonical home for the whole protocol: obtaining the skill registry, matching skills by code context AND task context, the `## Project Standards` block, and the token budget. Resolve ONCE per session and cache the result.
+Before the FIRST delegation of a session, read `_shared/delegation.md` (see *State and Conventions*) and follow it. It is the canonical home for the whole cycle: the `## Project Standards (files to read)` block, the launch rules, and the reap step that closes a delegation. Read `standards:` ONCE per session and cache it.
 
 Three rules that constrain YOU, so they hold before you load it:
 
-- **Every launch that reads, writes, or reviews code carries resolved skills.** Purely mechanical delegations ("run this test command") are the only exemption.
-- **Pass PATHS, not pasted rule text.** Sub-agents read the full SKILL.md themselves; the registry's pre-digested compact rules are a lossy opt-in for when the context budget is tight, never the default.
-- **A `skill_resolution` other than `injected` means YOU dropped context** (usually compaction). On `fallback-registry`, `fallback-path`, or `none`: re-read the registry immediately, inject in every subsequent delegation, and say so. Never ignore it.
+- **Every launch that reads, writes, or reviews code carries the standards block.** Purely mechanical delegations ("run this test command") are the only exemption.
+- **Pass the PATHS as written.** Sub-agents read each file in full; do not filter the list by what you think the task touches, do not reorder it, and never paste rule text in its place.
+- **A `skill_resolution` other than `injected` means YOU dropped the list** (usually compaction). On `fallback-path` or `none` while `standards:` is non-empty: re-read it immediately, inject in every subsequent delegation, and say so. Never ignore it.
 
-The registry is `.kurama/skill-registry.md`. Check that file with `test -f` or Read, never a finder — `.kurama/` is gitignored, so `fd`/`rg` skip it even with hidden flags. No registry: warn and proceed without project standards.
+The list is the `standards:` key of `openspec/config.yaml` — committed, ordered, and the project's alone. Empty or absent: omit the block and proceed, saying nothing.
 
 ### Sub-Agent Context Protocol
 
