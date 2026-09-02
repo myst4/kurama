@@ -4,7 +4,7 @@
 
 **A lightweight, multi-harness Spec-Driven Development framework for AI coding agents.**
 
-28 pure-Markdown skills · 5 supported harnesses · no build step, no runtime
+27 pure-Markdown skills · 5 supported harnesses · no build step, no runtime
 
 </div>
 
@@ -13,7 +13,7 @@
 ## What it is
 
 Kurama turns any capable AI coding assistant into a disciplined
-**Spec-Driven Development (SDD)** team. It ships as **28 portable Markdown skills**
+**Spec-Driven Development (SDD)** team. It ships as **27 portable Markdown skills**
 (all installed by default — the `tdd` module and the five-skill `optional` group are
 included but removable with `setup.sh --without tdd` / `setup.sh --without optional`;
 module selection is a `setup.sh` flag, and with no `--with`/`--without` it installs the
@@ -129,7 +129,7 @@ skills, agents, hooks, and MCP registrations included.
 
 ## The skills
 
-All 28 default skills, grouped by role. Every one is a single `SKILL.md` that any
+All 27 default skills, grouped by role. Every one is a single `SKILL.md` that any
 file-reading agent can load. The optional `tdd` and `kanban-github` modules ship
 installed and can be excluded with `setup.sh --without tdd` /
 `setup.sh --without optional`; installing either never activates it — both stay
@@ -144,7 +144,7 @@ separate per-project switches.
 **No language knowledge is installed, at all.** Kurama is stack-agnostic: it knows
 the shape of the workflow, never the values of a specific ecosystem. It ships zero
 per-language pattern skills; your own language skills reach sub-agents through the
-[skill registry](#the-skills) without touching the harness. The project's test and
+`standards:` list in `openspec/config.yaml` without touching the harness. The project's test and
 build commands are **asked at `/sdd-init`** and recorded in config — never guessed from
 a list of supported stacks, so any ecosystem works, including one Kurama has never
 heard of.
@@ -177,7 +177,6 @@ heard of.
 
 | Skill | Role |
 |-------|------|
-| `skill-registry` | Rebuild the project skill index by running `_shared/build-skill-registry.sh`. |
 | `skill-creator` | Author a new Kurama skill and wire it into the registry, the manifest and the suite. |
 
 ### Quality & delivery
@@ -221,7 +220,7 @@ by the diff can block, and only `BLOCKER`/`CRITICAL` gate. See
 
 Shared behavior the SDD skills rely on lives in
 [`skills/_shared/`](skills/_shared/) — the persistence contract, the OpenSpec
-convention, the phase-common return envelope, and the skill resolver.
+convention, the phase-common return envelope, and the delegation contract.
 
 ## Artifact store
 

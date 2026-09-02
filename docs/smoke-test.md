@@ -42,10 +42,9 @@ your harness and inspect the artifacts, envelopes, and gates yourself.
 
 SDD artifacts are files under `openspec/` in the toy repo — that is the only
 artifact store, and persistence is never skipped (see
-[persistence.md](persistence.md)). Step 1 also writes `.kurama/skill-registry.md`:
-harness infrastructure, not an SDD artifact.
+[persistence.md](persistence.md)).
 
-Three **cycle markers** live alongside it under `.kurama/`:
+Three **cycle markers** live under `.kurama/`, which holds nothing else:
 `.kurama/sdd/<change>/state.md` (orchestrator, after every phase transition),
 `verify-report.md` (Step 6) and `archive-report.md` (Step 7). They are what the two
 deterministic hooks read — the hooks run outside the model and read only the
@@ -123,17 +122,17 @@ default and the cycle must complete normally — an unfamiliar stack is a normal
 a degraded one.
 
 ✅ **Verify**:
-- Return envelope: `status: success`, `skill_resolution: none` (init *builds* the
-  registry, it loads no project skills).
-- `.kurama/skill-registry.md` exists in the toy repo:
+- Return envelope: `status: success`, `skill_resolution: none` (init *writes* the
+  `standards:` list, it loads no project standards to do so).
+- Step 4 proposed a `standards:` list and ASKED before writing it. Confirm the config
+  carries what you answered:
   ```bash
-  cat .kurama/skill-registry.md | head
+  grep -A5 '^standards:' openspec/config.yaml
   ```
-  Its mere presence proves nothing about `sdd-init`: `setup.sh` already built it at
-  install time (both run `skills/_shared/build-skill-registry.sh`). To see Step 4 do the
-  work, delete the file before running `/sdd-init` and confirm it comes back with the
-  `## User Skills` table and **no** summary or compact-rules section — the registry is an
-  index by construction.
+  The proposal must contain only the project's own files — `CLAUDE.md`/`AGENTS.md` and
+  in-repo `*/SKILL.md` that are not Kurama's. Nothing from `~` may appear unless you
+  typed it: a proposal listing your personal skills collection is the bug this step
+  exists to catch.
 - Settings home: `openspec/config.yaml` exists with a `rules.verify`
   block; `compliance_mode: behavioral` (test infra was detected).
   ```bash
@@ -377,7 +376,7 @@ preconditions (explicit per-PR OK, rebased+re-verified branch, fresh
 
 | Phase | Artifact produced | Envelope check | Extra gate |
 |-------|-------------------|----------------|-----------|
-| `sdd-init` | `.kurama/skill-registry.md` (+ settings home) | `success`, `skill_resolution: none` | — |
+| `sdd-init` | `openspec/config.yaml` (settings home + `standards:`) | `success`, `skill_resolution: none` | Step 4 asked before writing `standards:`; nothing from `~` unless typed |
 | `sdd-new` | `explore`, `proposal` | Section D per phase; `next_recommended` | Stops at proposal gate (supervised) |
 | `sdd-ff` | `spec`, `design`, `tasks` | one combined summary | Stops at implementation boundary |
 | `sdd-apply` | code + `apply-progress`, tasks `[x]` | `success` | Write-guard blocks direct orchestrator edits (needs an on-disk cycle marker) |

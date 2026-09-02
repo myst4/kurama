@@ -24,7 +24,7 @@ the scoped re-judgment, within the native two-round Judgment Day budget.
 
 Read and follow **`skills/judgment-day/SKILL.md`** — execute the **Fix Agent** role and its
 prompt template: the Confirmed Blocking Issues to fix, any `## Project Standards
-(auto-resolved)` block, and the original review criteria the orchestrator injects. Treat the
+(files to read)` block, and the original review criteria the orchestrator injects. Treat the
 round as one bounded correction transaction composed of atomic work units, each tied to a
 confirmed finding with its own rollback boundary. Read the skill; do not reconstruct the
 protocol from memory.
@@ -40,4 +40,4 @@ After each fix, note the file changed, the line changed, and what was done. Retu
 
 If a fix surfaces a NEW problem, report it back to the orchestrator instead of fixing it or
 logging a ledger row yourself. Always end with
-`**Skill Resolution**: {injected|fallback-registry|fallback-path|none} — {details}`.
+`**Skill Resolution**: {injected|fallback-path|none} — {details}`.

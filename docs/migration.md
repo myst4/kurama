@@ -57,7 +57,9 @@ the code you rolled back to.
   `setup.sh --agent opencode --opencode-mode …` command that makes the receipt
   re-syncable.
 
-## 6.3.0 — the artifact store collapses to files
+## 6.3.0 — the artifact store collapses to files, and the skill registry becomes an explicit list
+
+### The artifact store
 
 Engram was an **optional** third-party persistence engine. It is gone from Kurama
 entirely. Artifacts are files under `openspec/`, always — that is the only store,
@@ -97,7 +99,6 @@ or leave it.
 - `.kurama/sdd/{change}/state.md`, `verify-report.md` and `archive-report.md` —
   the three machine-local, gitignored cycle markers the two Claude Code hooks read.
   They are not artifacts and were never gated by the mode.
-- `.kurama/skill-registry.md`.
 - `MEMORY.md` and the `sdd-learn` skill that curates it — the committed team
   knowledge file is unrelated to Engram and behaves exactly as before.
 - The `## Key Learnings` section that closes every phase's return envelope.
@@ -110,6 +111,59 @@ or `<repo>/.mcp.json`, `~/.config/opencode/opencode.json` or
 `<repo>/opencode.json`, `[mcp_servers.engram]` in `~/.codex/config.toml`). That is
 the one manual step. Leaving it registered is harmless — Kurama never calls it —
 but nothing will clean it up for you.
+
+### The skill registry
+
+The skill registry is gone: `skills/skill-registry/`,
+`skills/_shared/build-skill-registry.sh`, `skills/_shared/skill-resolver.md` and
+the generated `.kurama/skill-registry.md`. Nothing scans your skills directories any
+more, and nothing matches triggers at delegation time.
+
+**What replaces it: `standards:`.** `openspec/config.yaml` gains an ordered list of
+file paths. Every SDD phase sub-agent reads each of them in full at phase start; the
+orchestrator forwards the list verbatim as its `## Project Standards (files to read)`
+block. What binds a sub-agent is what you wrote in that list, and nothing else.
+
+```yaml
+# openspec/config.yaml
+standards:
+  - CLAUDE.md
+  - .claude/skills/api-conventions/SKILL.md
+  - ~/.claude/skills/superpowers/skills/systematic-debugging/SKILL.md
+```
+
+**What to put there.** Your project's own conventions: `CLAUDE.md` / `AGENTS.md`, the
+convention skills committed in the repo, and any companion skill you deliberately want
+applied to every phase (paths in [docs/companion-skills.md](companion-skills.md)).
+Paths are repo-relative, or `~`-relative for a file outside the repo. **Do not list
+Kurama's own skills** — the orchestrator and the phase skills reach those by direct
+path, exactly as before.
+
+**What NOT to put there.** Everything the registry used to sweep up on your behalf. In
+a real repo the registry held ~112 rows: 13 were Kurama's own, ~99 were the developer's
+personal skills collection (marketing, design, browser QA) and **zero** were the
+project's conventions. `standards:` is deliberately the opposite default — empty until
+you fill it, and read in full when you do.
+
+**The move for an existing project.** Nothing is migrated for you and nothing breaks:
+a config with no `standards:` key means the project declares no standards, and the
+`## Project Standards` block is simply omitted from delegations. To adopt it, either
+add the key by hand or re-run `/sdd-init`, whose Step 4 proposes a list from the
+project's own files — `CLAUDE.md`/`AGENTS.md` plus in-repo `*/SKILL.md` that are not
+Kurama's — shows it, and asks once before writing. **It never scans `~`**: a file
+outside the repo gets in only because you typed it.
+
+**A path that cannot be read is loud, not fatal.** The phase notes
+`standards: {path} not found` in its return envelope's `risks` and carries on. A typo
+never blocks a cycle, and a standard nobody read never disappears silently.
+
+**Also gone with it.** `setup.sh` and `update.sh` no longer build a registry after
+installing or re-syncing; `doctor.sh` no longer checks for the builder, and its
+`initialized:` grade is now `openspec/config.yaml` alone — `.kurama/` is no longer
+accepted as evidence that `/sdd-init` ran. The `/skill-registry` command no longer
+exists; the default skill set is **27**. In the phase return envelope,
+`skill_resolution` drops the `fallback-registry` value (`injected`, `fallback-path`
+and `none` remain).
 
 ## Breaking change: Windows is no longer supported
 

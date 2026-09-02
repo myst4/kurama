@@ -67,32 +67,29 @@ never content; a phase with required dependencies reads them itself via Section 
 For a `small` change the spec and design arrive as inline sections of the proposal (see
 *Change size and the collapsed path* above); the dependency is satisfied, not skipped.
 
-## A. Skill Loading
+## A. Project Standards
 
-1. Check whether the orchestrator injected a `## Project Standards` block in your launch
-   prompt. Its heading names the resolution mode the orchestrator chose
-   (`skill-resolver.md` → *Step 3*); follow the mode you were sent, do not pick one:
-   - **`## Project Standards (skills to load)`** — the DEFAULT shape: skill names plus exact
-     `SKILL.md` paths. **READ each listed file in full** before starting work and follow it
-     strictly. A full read is authoritative and complete.
-   - **`## Project Standards (auto-resolved)`** — the OPT-IN low-token shape: pre-digested
-     compact rules pasted inline. Apply them as given, and do NOT go read the SKILL.md files
-     the orchestrator deliberately did not send. Compact rules are a lossy summary
-     (`skill-resolver.md` → *Why Not Compact Rules?*), which is why they are the exception
-     and not the default.
-2. If no Project Standards block was provided, check for `SKILL: Load` instructions. If present, read those exact skill files in full.
-3. If neither was provided, look for the skill registry as a fallback:
-   a. Read `.kurama/skill-registry.md` from the project root. Check with `test -f` or
-      your harness's Read tool — never with a finder: `.kurama/` is both hidden AND gitignored,
-      so `fd`/`rg` skip it even with hidden flags. A read that ERRORED is a broken check, not a
-      missing registry (`skill-resolver.md` → *Step 1*).
-   b. From the registry's **skills index** (`Trigger | Skill | Path`), match triggers to your
-      current task and **read the exact listed `SKILL.md` paths**. The registry's *Compact
-      Rules* section is the delegator's opt-in budget surface, not your default; fall back to a
-      skill's compact rules only if its listed path cannot be read, and note that in `risks`.
-4. If no registry exists, proceed with your phase skill only.
+The project declares what binds you in the `standards:` list of `openspec/config.yaml` — an
+ordered list of file paths, repo-relative or `~`-relative (schema and semantics:
+`openspec-convention.md` → *Config File Reference*). Nothing is discovered at runtime and
+nothing is matched by trigger: a file binds you because the project wrote it in that list.
 
-NOTE: the preferred path is (1) — standards resolved by the orchestrator, which by default sends SKILL.md paths for you to read in full. Paths (2) and (3) are fallbacks for backwards compatibility. Searching the registry is SKILL LOADING, not delegation. If `## Project Standards` is present, IGNORE any `SKILL: Load` instructions — they are redundant.
+1. **Read the list.** The orchestrator normally forwards it verbatim in your launch prompt as
+   a `## Project Standards (files to read)` block; when it did, that block IS the list — use
+   it as sent and do not re-derive it. When no such block arrived, read `standards:` from
+   `openspec/config.yaml` yourself.
+2. **Read every listed path IN FULL, in the listed order, before starting phase work**, and
+   follow what each file says strictly. The file itself is the standard — there is no digest,
+   no summary, and no second surface to prefer over it.
+3. **A path you cannot read is LOUD, never a silent skip and never a block.** Add one line to
+   `risks` — `standards: {path} not found` — and continue the phase. A standard the project
+   declared and nobody read must be visible in the return.
+4. **An absent or empty `standards:` list means the project declares no standards.** Proceed
+   with your phase skill only; that is a correct run, not a degraded one.
+
+An explicit `SKILL: Load` instruction in your launch prompt is honored the same way — read
+those exact files in full. When both arrive, the `## Project Standards` block is authoritative
+and a `SKILL: Load` repeating it is redundant.
 
 ## B. Artifact Retrieval
 
@@ -124,7 +121,7 @@ Every phase MUST return a structured envelope to the orchestrator:
 - `artifacts`: list of artifact keys/paths written (include any `.kurama/sdd/` fallback path used)
 - `next_recommended`: the next SDD phase to run, or "none"
 - `risks`: risks discovered or fallbacks used; "None" if there are none
-- `skill_resolution`: how skills were loaded — `injected` (received Project Standards from orchestrator), `fallback-registry` (self-loaded from registry), `fallback-path` (loaded via SKILL: Load path), or `none` (no skills loaded). This field is REQUIRED in every envelope.
+- `skill_resolution`: how the project's standards were loaded — `injected` (received the `## Project Standards (files to read)` block from the orchestrator), `fallback-path` (no block arrived; read `standards:` from `openspec/config.yaml`, or an explicit `SKILL: Load` path, directly), or `none` (the project declares no standards). This field is REQUIRED in every envelope.
 - `key_learnings`: the envelope's CLOSING section — 1-5 gotchas, edge cases, or non-obvious decisions this phase discovered. Omitted entirely when the phase found nothing non-obvious. Shape and rules below.
 
 Example:
@@ -135,8 +132,8 @@ Example:
 **Artifacts**: `openspec/changes/{change-name}/proposal.md`
 **Next**: sdd-spec or sdd-design
 **Risks**: None
-**Skill Resolution**: injected — 3 skills (react-19, typescript, tailwind-4)
-(other values: `fallback-registry`, `fallback-path`, or `none — no registry found`)
+**Skill Resolution**: injected — 3 standards read (CLAUDE.md, .claude/skills/api-conventions/SKILL.md, docs/testing.md)
+(other values: `fallback-path`, or `none — no standards declared`)
 ```
 
 ### Key Learnings — the envelope's closing section

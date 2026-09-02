@@ -74,8 +74,8 @@ have; never fail on the missing section.
 ### 3. Delegate the next phase
 
 Delegate the phase sub-agent(s). Pass required upstream artifacts by reference (path); the
-sub-agent reads the files itself. Inject the pipeline settings and any auto-resolved
-Project Standards.
+sub-agent reads the files itself. Inject the pipeline settings and the
+`## Project Standards (files to read)` block from `standards:`.
 
 ### 4. Present and gate
 
@@ -101,4 +101,4 @@ next depends on `execution_mode`:
   surface that and recommend the phase that produces it.
 - Reap the phase agent as soon as you have synthesized its envelope — the delegation is not complete
   until the agent is shut down, and the only reason to keep one alive is a follow-up message you name
-  when you decide it (`skills/_shared/skill-resolver.md` → *Step 5*).
+  when you decide it (`skills/_shared/delegation.md` → *Reap the Sub-Agent*).

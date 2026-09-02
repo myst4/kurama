@@ -13,9 +13,9 @@ You are an EXECUTOR, not the orchestrator. Do the initialization work yourself a
 ## What to load and follow
 
 1. Read and follow **`skills/sdd-init/SKILL.md`** — your phase contract: detect the stack, ask the explicit TDD question (never inferred), choose `compliance_mode`, build the skill registry, and persist project context + pipeline settings.
-2. Read and follow **`skills/_shared/sdd-phase-common.md`** — the common protocol, in particular **Section D** (the return envelope) and **Section A** (skill loading).
+2. Read and follow **`skills/_shared/sdd-phase-common.md`** — the common protocol, in particular **Section D** (the return envelope) and **Section A** (project standards).
 
-If the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt, follow it and do NOT read other SKILL.md files (Section A, path 1).
+If the orchestrator injected a `## Project Standards (files to read)` block in your launch prompt, read every file it lists in full before starting (Section A).
 
 ## Settings you produce
 

@@ -1,14 +1,14 @@
-Reference documentation for the SDD phase sub-agents and skill system. For quick start, see the [main README](../README.md).
+Reference documentation for the SDD phase sub-agents and the standards they load. For quick start, see the [main README](../README.md).
 
-# Sub-Agents & Skill Registry
+# Sub-Agents & Project Standards
 
 ## SDD Phase Sub-Agents
 
-Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI assistant can follow. The preferred path is for the orchestrator to pre-resolve relevant skills from the registry and inject their `SKILL.md` paths into each sub-agent prompt. Sub-agents still support registry/path fallback for backward compatibility.
+Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI assistant can follow. The preferred path is for the orchestrator to forward the project's `standards:` list into each sub-agent prompt; a sub-agent that receives no such block reads `standards:` from `openspec/config.yaml` itself.
 
 | Sub-Agent | Skill File | What It Does |
 |-----------|-----------|-------------|
-| **Init** | `sdd-init/SKILL.md` | Detects project stack, bootstraps persistence, builds skill registry |
+| **Init** | `sdd-init/SKILL.md` | Detects project stack, bootstraps persistence, proposes the `standards:` list |
 | **Explorer** | `sdd-explore/SKILL.md` | Reads codebase, compares approaches, identifies risks |
 | **Proposer** | `sdd-propose/SKILL.md` | Creates `proposal.md` with intent, scope, rollback plan |
 | **Spec Writer** | `sdd-spec/SKILL.md` | Writes delta specs (ADDED/MODIFIED/REMOVED) with Given/When/Then |
@@ -18,7 +18,6 @@ Each sub-agent is a SKILL.md file — pure Markdown instructions that any AI ass
 | **Verifier** | `sdd-verify/SKILL.md` | Validates implementation against specs with real test execution. v2.0: spec compliance matrix |
 | **Archiver** | `sdd-archive/SKILL.md` | Merges delta specs into main specs, moves to archive |
 | **TDD Module** | `tdd/SKILL.md` | Optional RED-GREEN-REFACTOR cycle contract; loaded by `sdd-apply` when TDD resolves active, referenced by `sdd-tasks` and `sdd-verify`. Installed by default (`tdd` manifest group, `default: true`); activation stays opt-in per project — opt out of the module with `install.sh --without tdd` |
-| **Skill Registry** | `skill-registry/SKILL.md` | Runs `_shared/build-skill-registry.sh`, which writes `.kurama/skill-registry.md` (index only) |
 | **Judgment Day** | `judgment-day/SKILL.md` | Runs dual adversarial review with two blind judges and a fix loop |
 | **Skill Creator** | `skill-creator/SKILL.md` | Authors a new skill: indexable frontmatter, manifest group, AGENTS.md row, mutation-checked test |
 | **Branch + PR** | `branch-pr/SKILL.md` | Branches changes and opens pull requests with repo conventions |
@@ -48,11 +47,11 @@ Every sub-agent returns a structured envelope (`status`, `executive_summary`, `d
 
 ### Sub-Agent Context Protocol
 
-Sub-agents start with a **fresh context**. The canonical injection and fallback protocol — how the orchestrator resolves the registry, matches skills, injects their paths as `## Project Standards (skills to load)`, and how sub-agents report `skill_resolution` back — lives in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md); this section only summarizes it: if no `## Project Standards` block arrives, sub-agents fall back to registry lookup or explicit `SKILL: Load` paths.
+Sub-agents start with a **fresh context**. The delegator's half — reading `standards:` once per session and forwarding it as `## Project Standards (files to read)` — lives in [`skills/_shared/delegation.md`](../skills/_shared/delegation.md); the sub-agent's half, including how it reports `skill_resolution` back, is [`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md) → Section A. This section only summarizes them: if no `## Project Standards` block arrives, the sub-agent reads `standards:` from `openspec/config.yaml` itself, or an explicit `SKILL: Load` path.
 
 SDD phase sub-agents are also instructed to persist their discoveries, decisions, and bug fixes via the mandatory persist step.
 
-The same contract closes the cycle it opens: once the envelope has been read, validated and synthesized, the orchestrator **reaps the sub-agent** — a delegation is not complete while a finished agent is still holding its context in the agent list. On Claude Code that is the shutdown request to the named teammate; on a harness with no termination primitive it is holding no reference to the agent and saying so. The single exception, and the way to declare it, is in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) → *Step 5*: keep an agent alive only while you still intend to send it a follow-up message, and name that intent when you decide it.
+The same contract closes the cycle it opens: once the envelope has been read, validated and synthesized, the orchestrator **reaps the sub-agent** — a delegation is not complete while a finished agent is still holding its context in the agent list. On Claude Code that is the shutdown request to the named teammate; on a harness with no termination primitive it is holding no reference to the agent and saying so. The single exception, and the way to declare it, is in [`skills/_shared/delegation.md`](../skills/_shared/delegation.md) → *Reap the Sub-Agent*: keep an agent alive only while you still intend to send it a follow-up message, and name that intent when you decide it.
 
 ---
 
@@ -62,11 +61,11 @@ The same contract closes the cycle it opens: once the envelope has been read, va
 
 | File | Purpose |
 |------|---------|
-| `sdd-phase-common.md` | Sections A-D: skill loading, artifact retrieval, persistence, and the return envelope. Loaded directly by every SDD phase skill. |
+| `sdd-phase-common.md` | Sections A-D: project standards, artifact retrieval, persistence, and the return envelope. Loaded directly by every SDD phase skill. |
 | `orchestrator-sdd-protocol.md` | The orchestrator's session-level SDD procedure: the four-value session preflight, routing a natural-language request into the pipeline, and the `auto`-mode phase gate. Loaded when a cycle starts, not before — the orchestrator prompt carries the trigger, this file carries the procedure. |
-| `persistence-contract.md` | Store resolution rules, sub-agent context protocol, skill registry loading protocol |
+| `persistence-contract.md` | Store resolution rules, sub-agent context protocol, where the `standards:` list is read from |
 | `openspec-convention.md` | Filesystem paths for each artifact, directory structure, config.yaml reference, and archive layout. **Not** the upstream OpenSpec CLI format — see the note at the top of that file. |
-| `skill-resolver.md` | **Canonical** protocol for delegators to resolve skills from the registry and inject their paths |
+| `delegation.md` | **Canonical** contract for delegators: the `## Project Standards (files to read)` block, the launch rules, and the reap step that closes a delegation |
 | `review-ledger-contract.md` | **Canonical** shared contract for the 4R review lenses + refuter: sweep budget, precision gate, candidate-causal admission, findings-ledger schema, adversarial verification, severity floor, and ledger persistence. |
 | `test-runners.md` | Per-runner detect → full-suite + single-test command table, used by the optional TDD module (`skills/tdd/SKILL.md`) |
 
@@ -116,28 +115,26 @@ findings ledger persists to `openspec/changes/{change-name}/review-ledger.md`.
 
 ---
 
-## Skill Registry
+## Project Standards
 
-Sub-agents start with a **fresh context** — they do not know what user skills exist (React, TDD, Playwright, etc.). The skill registry solves this: the orchestrator looks a skill up in it and passes that skill's `SKILL.md` path into the delegation.
+Sub-agents start with a **fresh context** — they do not know which of the project's own conventions apply. The `standards:` list solves this: `openspec/config.yaml` carries an ordered list of file paths, and the orchestrator forwards it verbatim into every delegation as a `## Project Standards (files to read)` block. Nothing is discovered at runtime; a file reaches a sub-agent because the project wrote it in that list.
 
-**How the registry gets built:** by a script, [`skills/_shared/build-skill-registry.sh`](../skills/_shared/build-skill-registry.sh). It reads two frontmatter fields per `SKILL.md` and writes the file atomically in well under a second. It runs at four points, and nothing else ever writes the file:
+```yaml
+standards:
+  - CLAUDE.md
+  - .claude/skills/api-conventions/SKILL.md
+  - ~/.claude/skills/superpowers/skills/systematic-debugging/SKILL.md
+```
 
-1. `setup.sh`, at the end of a project-scope install — the set of installed skills just changed by definition
-2. `update.sh`, on every project re-sync
-3. `/sdd-init` Step 4
-4. `/skill-registry`, on demand
+Paths are repo-relative, or `~`-relative for a file outside the repo (a companion skill — see [companion-skills.md](companion-skills.md)). Kurama's own skills are **not** listed here: the orchestrator and the phase skills reach those by direct path.
 
-The skill and `sdd-init` **run that script** — neither scans the directories itself, and there is no fallback scan. One implementation, or two that drift apart. A missing script is a broken install: both stop and say so, and `doctor.sh` reports it.
+**How the list gets written:** `/sdd-init` Step 4 proposes it once — `CLAUDE.md`/`AGENTS.md` when present, plus every `*/SKILL.md` under the project's own in-repo skills directories that is not one of Kurama's — shows the list and asks you to confirm or edit it. It never scans `~`; a file outside the repo gets in because you typed it. From then on the list is yours: edit `openspec/config.yaml` by hand.
 
-Once the registry exists, resolving it and injecting skills into each delegation follows the canonical protocol in [`skills/_shared/skill-resolver.md`](../skills/_shared/skill-resolver.md) — see that file for the full resolution order, injection format, fallback chain, and the `skill_resolution` feedback loop.
+**What a sub-agent does with it:** reads every listed path in full, in order, before starting phase work. A path it cannot read is a one-line note in the envelope's `risks` (`standards: {path} not found`) and never a block — a standard the project declared and nobody read has to be visible. An empty or absent list means the project declares no standards, which is a correct run and not a degraded one.
 
-**What it contains — an index, not a summary:**
-- User skills table: trigger → skill name → path (e.g., "React components" → `react-19` → `~/.claude/skills/react-19/SKILL.md`)
-- Project conventions found: `agents.md`, `AGENTS.md`, `CLAUDE.md`, plus every `.md` path an index file references that actually exists
+There are deliberately **no pre-digested summaries**. The delegator passes the path and the sub-agent reads the full file: a full read is authoritative, a digest is lossy and goes stale silently.
 
-There are deliberately **no pre-digested summaries**. A delegator passes the path and the sub-agent reads the full skill: a full read is authoritative, a digest is lossy and goes stale silently. Producing those digests was 63% of a build that used to take twelve minutes.
-
-**When to update:** installs and re-syncs already do it. Run `/skill-registry` after installing or removing skills by hand.
+The full rules are in [`skills/_shared/delegation.md`](../skills/_shared/delegation.md) (delegator side) and [`skills/_shared/sdd-phase-common.md`](../skills/_shared/sdd-phase-common.md) → Section A (sub-agent side).
 
 ---
 

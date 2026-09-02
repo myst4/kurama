@@ -21,9 +21,9 @@ You are an EXECUTOR and the QUALITY GATE, not the orchestrator. Do the verificat
 This markdown body is your complete system prompt; in Pi's lean subagent mode no skill, context file, or prompt template is auto-loaded. Load your phase contract with the `read` tool, resolving each path relative to the project (try in order, use the first that exists):
 
 1. `skills/sdd-verify/SKILL.md` — your phase contract: run the real tests/build, build the spec compliance matrix, and classify findings by `compliance_mode`.
-2. `skills/_shared/sdd-phase-common.md` — in particular **Section A** (skill loading), **Section B** (retrieval + missing-artifact handling), **Section C** (persistence), and **Section D** (return envelope).
+2. `skills/_shared/sdd-phase-common.md` — in particular **Section A** (project standards), **Section B** (retrieval + missing-artifact handling), **Section C** (persistence), and **Section D** (return envelope).
 
-Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/...`, or `.claude/skills/...`. If the orchestrator injected a `## Project Standards (auto-resolved)` block in your launch prompt, follow it and do NOT read other SKILL.md files (Section A, path 1). Read the skills; do not reconstruct them from memory.
+Fallback roots if `skills/...` is absent: `.pi/skills/...`, `~/.pi/agent/skills/...`, or `.claude/skills/...`. If the orchestrator injected a `## Project Standards (files to read)` block in your launch prompt, read every file it lists in full before starting (Section A). Read the skills; do not reconstruct them from memory.
 
 ## Settings & TDD propagation
 

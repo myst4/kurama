@@ -142,7 +142,7 @@ WARNING — see [persistence.md](persistence.md)).
 ## Per-language plugins
 
 The TDD core never depends on a language. Language-specific test *patterns* ship
-as separate skills and reach sub-agents as compact rules through the skill
+as separate skills and reach sub-agents through the project's own
 registry — the orchestrator injects the relevant rules into the phase prompt, so a
 sub-agent gets, say, Go idioms without loading a whole skill file.
 
@@ -163,7 +163,7 @@ Two independent things, easy to conflate:
   default set. Remove it with `setup.sh --without tdd` if you never want the module
   on disk — `setup.sh` owns `--with`/`--without` module selection, and `install.sh`
   forwards those flags to it. (No language-pattern plugin ships with Kurama; yours
-  arrives through the skill registry instead of through a group flag.)
+  arrives through the project's `standards:` list instead of through a group flag.)
 - **Activating TDD** turns the RED → GREEN → REFACTOR cycle on for a *specific
   project* via the explicit `tdd.enabled` flag above. Installing the module never
   activates it; the flag starts `false` everywhere, and existing test files never

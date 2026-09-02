@@ -59,7 +59,7 @@ Two flags control **where** it installs:
 | `--scope project` | install **everything into one git repo** to trial Kurama there — skills, native agents, hooks, and the orchestrator merge all land under the repo (see [Install scope](#install-scope-global-vs-project-trial-a-repo)). |
 | `--path <repo>` | the target repo for `--scope project` (default: current directory). |
 
-`setup.sh` installs the **default skill set — 28 skills**, including two optional
+`setup.sh` installs the **default skill set — 27 skills**, including two optional
 modules that ship on disk but stay inert until you opt in per project: the TDD module
 (`skills/tdd`) and the GitHub Projects Kanban module (`skills/kanban-github`).
 Installing a module never activates it — activation is a separate explicit
@@ -171,7 +171,7 @@ repository, `setup.sh` ensures a **managed block** in the repo root's
 
 | Pattern | Why it is machine-local |
 |---------|-------------------------|
-| `.kurama/` | Harness state: the skill registry and the fallback SDD artifacts. |
+| `.kurama/` | Harness state: the machine-local SDD cycle markers. |
 | `.kurama-install-manifest.json` | The install receipt — it records absolute paths. |
 | `*.bak.[0-9]*` | Timestamped backups left beside any file setup/uninstall merges into. |
 | `.claude/settings.local.json` | Per-machine agent config (permissions, local paths). |
@@ -329,14 +329,14 @@ by construction and keeps it out of every committed file.
 ```bash
 cp -r skills/_shared \
       skills/sdd-* skills/review-* \
-      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
       skills/kurama-report skills/systemic-issue-triage \
       ~/.claude/skills/
 ```
 
-> That is the full **28-skill default set** (14 `sdd-*`, the 5 `review-*` lenses,
-> `skill-registry`, `skill-creator`, `branch-pr`, `issue-creation`, `judgment-day`,
+> That is the full **27-skill default set** (14 `sdd-*`, the 5 `review-*` lenses,
+> `skill-creator`, `branch-pr`, `issue-creation`, `judgment-day`,
 > `tdd`, `kanban-github`, `kurama-report`, `systemic-issue-triage`). Copy all of them
 > unless you deliberately want a reduced set:
 > omitting the `review-*` lenses leaves the orchestrator's review triage with nothing to
@@ -505,7 +505,7 @@ The setup script preserves your model choices across updates — re-running `set
 ```bash
 cp -r skills/_shared \
       skills/sdd-* skills/review-* \
-      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
       skills/kurama-report skills/systemic-issue-triage \
       ~/.config/opencode/skills/
@@ -513,7 +513,7 @@ cp examples/opencode/commands/sdd-*.md ~/.config/opencode/commands/
 cp examples/opencode/AGENTS.md ~/.config/opencode/AGENTS.md
 ```
 
-> Same **28-skill default set** as above (see the note in the Claude Code section).
+> Same **27-skill default set** as above (see the note in the Claude Code section).
 >
 > **The `AGENTS.md` copy is the one step `setup.sh` does differently.** `setup.sh`
 > **marker-merges** that file: it backs up any existing `~/.config/opencode/AGENTS.md`,
@@ -599,13 +599,13 @@ refuses the archive (matching its fail-closed one) — neither degrades silently
 ```bash
 cp -r skills/_shared \
       skills/sdd-* skills/review-* \
-      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
       skills/kurama-report skills/systemic-issue-triage \
       ~/.codex/skills/
 ```
 
-> Same **28-skill default set** as above (see the note in the Claude Code section).
+> Same **27-skill default set** as above (see the note in the Claude Code section).
 
 **2. Add orchestrator instructions:**
 
@@ -637,7 +637,7 @@ that project's `.agents/skills/` yourself:
 mkdir -p .agents/skills
 cp -r skills/_shared \
       skills/sdd-* skills/review-* \
-      skills/skill-registry skills/skill-creator skills/branch-pr skills/issue-creation \
+      skills/skill-creator skills/branch-pr skills/issue-creation \
       skills/judgment-day skills/tdd skills/kanban-github \
       skills/kurama-report skills/systemic-issue-triage \
       .agents/skills/

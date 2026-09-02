@@ -32,7 +32,6 @@ An upstream artifact "cannot be retrieved" when its file is absent or unreadable
 
 `.kurama/` is the **harness state directory** — gitignored infrastructure, never repo-tracked. It holds:
 
-- `.kurama/skill-registry.md` — the compact skill registry
 - `.kurama/sdd/{change-name}/` — the cycle markers below
 
 Nothing under `.kurama/` is an artifact. It is machine-local: wiping it loses the current cycle's position, never a decision.
@@ -108,13 +107,13 @@ Do not return without writing it — downstream phases read your output from tha
 
 When the artifact is `verify-report`, append: *"Additionally write the full report to `.kurama/sdd/{change-name}/verify-report.md`. This is a cycle marker read by the deterministic hooks — a mirror of the artifact, not a substitute for it."* The `archive-report` has no `openspec/` path: `.kurama/sdd/{change-name}/archive-report.md` is its only home (see *Hook-visible cycle markers*).
 
-## Skill Registry
+## Project Standards
 
-The orchestrator resolves skills from the registry and injects a `## Project Standards` block in your launch prompt — by default the exact SKILL.md path(s) for you to read, or the pre-digested compact rules in the opt-in low-token mode. Sub-agents do NOT read the *registry* itself; the delegator resolves it for you. `skill-resolver.md` is authoritative for exactly what arrives and how (paths-by-default, compact-rules opt-in).
+The project declares its standards as the `standards:` list in `openspec/config.yaml` — a committed, ordered list of file paths, and the ONLY thing a delegation resolves. The orchestrator forwards it verbatim as a `## Project Standards (files to read)` block in your launch prompt; you read each listed path in full.
 
-To generate/update: run the `skill-registry` skill, or run `sdd-init`.
+To change what sub-agents load: edit `standards:` in `openspec/config.yaml` (`sdd-init` pre-fills it once, then it is yours).
 
-Sub-agent skill loading: follow the canonical protocol in `skills/_shared/skill-resolver.md` (Project Standards block first, `SKILL: Load` as fallback, and its no-registry behavior). That file is the single source of truth for skill loading — do not duplicate its rules here.
+Sub-agent side: `skills/_shared/sdd-phase-common.md` → *Section A*. Delegator side: `skills/_shared/delegation.md`. Those two files are the single source of truth — do not duplicate their rules here.
 
 ## Detail Level
 

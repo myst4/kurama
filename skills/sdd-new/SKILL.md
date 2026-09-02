@@ -115,7 +115,7 @@ anything:
   (1–3 files) produce no artifact and require nothing here.
 
 Delegate `sdd-explore` for `<change-name>` to investigate the codebase and compare approaches. Inject
-the pipeline settings and any auto-resolved Project Standards. When step 1.5 produced a ledger, pass
+the pipeline settings and the `## Project Standards (files to read)` block. When step 1.5 produced a ledger, pass
 it by reference (`openspec/changes/{change-name}/brainstorm.md`) as OPTIONAL upstream context —
 never inline its body.
 Present the exploration summary to the user.
@@ -180,4 +180,4 @@ delegations are skipped.
   never blocks a phase.
 - Reap each phase agent as soon as you have synthesized its envelope — the delegation is not
   complete until the agent is shut down, and the only reason to keep one alive is a follow-up
-  message you name when you decide it (`skills/_shared/skill-resolver.md` → *Step 5*).
+  message you name when you decide it (`skills/_shared/delegation.md` → *Reap the Sub-Agent*).
